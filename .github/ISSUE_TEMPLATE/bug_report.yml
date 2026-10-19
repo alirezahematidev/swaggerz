@@ -1,0 +1,46 @@
+name: Bug report
+description: Something is generated incorrectly, a command fails, or the generated client misbehaves.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not include secrets or private API specifications; reduce the specification to the smallest part that reproduces the problem. Report security vulnerabilities privately (see SECURITY.md).
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead. Include error messages and diagnostic codes.
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: Minimal specification
+      description: The smallest Swagger/OpenAPI document (or excerpt) that reproduces the problem.
+      render: yaml
+    validations:
+      required: false
+  - type: textarea
+    id: config
+    attributes:
+      label: Config
+      description: Your swaggerz config (remove anything sensitive).
+      render: ts
+    validations:
+      required: false
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant generated code or command output
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Output of `npx swaggerz doctor --json`, or the versions of swaggerz, Node.js, TypeScript and your OS.
+      render: text
+    validations:
+      required: true

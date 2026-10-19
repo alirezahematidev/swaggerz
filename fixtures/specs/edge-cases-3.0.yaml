@@ -1,0 +1,96 @@
+openapi: 3.0.3
+info:
+  title: Edge cases
+  version: 1.0.0
+paths:
+  /items:
+    get:
+      operationId: list
+      tags: [Items & Things]
+      description: |
+        Lists items. This description contains */ which must not end the comment.
+        @internal must not become a tag.
+      parameters:
+        - name: default
+          in: query
+          schema:
+            type: string
+        - name: page[size]
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Item'
+    post:
+      operationId: list
+      tags: [Items & Things]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Item'
+      responses:
+        '201':
+          description: Created
+  /items/{id}:
+    delete:
+      tags: [models]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+components:
+  schemas:
+    Item:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+        "quote'd":
+          type: string
+        status:
+          $ref: '#/components/schemas/Status'
+        blob:
+          $ref: '#/components/schemas/Blob'
+    item:
+      description: Differs from Item only by case.
+      type: object
+      properties:
+        name:
+          type: string
+    Status:
+      type: string
+      enum: [active, in-progress, '']
+      x-enum-varnames: [Active, InProgress, Empty]
+    Blob:
+      type: object
+      description: A model named like a global type.
+      properties:
+        size:
+          type: integer
+    Priority:
+      type: integer
+      enum: [1, 2, 3]
+    HTTPError:
+      type: object
+      properties:
+        code:
+          type: integer
+    HttpError:
+      type: object
+      properties:
+        message:
+          type: string

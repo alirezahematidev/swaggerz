@@ -1,0 +1,206 @@
+import { applyCase, isPropertyIdentifier, NameRegistry, toIdentifier } from '../analysis/naming.ts';
+import type { ModelSymbol } from '../analysis/types.ts';
+import type { DiscriminatorIR, JsonValue, SchemaIR } from '../ir/types.ts';
+import { applyJsDocHook, renderAll, type EmitContext, type ModuleOutput } from './context.ts';
+import type { ImportManager, Lang } from './imports.ts';
+import { schemaDoc } from './jsdoc.ts';
+import { literal, propertyKey, quote, renderJsDoc } from './printer.ts';
+import { printType, wrapType, type TypeContext } from './type-printer.ts';
+import type { GeneratedExport, JsDocBlock, JsDocTag } from './types.ts';
+
+function discriminatorOf(schema: SchemaIR | undefined): DiscriminatorIR | undefined {
+  if (schema?.kind === 'object') return schema.discriminator;
+  if (schema?.kind === 'intersection') {
+    for (const member of schema.members)
+      if (member.kind === 'object' && member.discriminator !== undefined)
+        return member.discriminator;
+  }
+  return undefined;
+}
+
+/** Discriminator values a child model must carry because it `allOf`-extends a polymorphic base. */
+export function inheritedDiscriminators(
+  model: ModelSymbol,
+  ctx: EmitContext,
+): { property: string; values: string[] }[] {
+  const schema = model.definition.schema;
+  if (schema.kind !== 'intersection') return [];
+  const result: { property: string; values: string[] }[] = [];
+  for (const member of schema.members) {
+    if (member.kind !== 'ref') continue;
+    const discriminator = discriminatorOf(
+      ctx.project.modelById.get(member.target)?.definition.schema,
+    );
+    if (discriminator === undefined) continue;
+    const values = discriminator.mapping.filter((m) => m.target === model.id).map((m) => m.value);
+    if (values.length > 0) result.push({ property: discriminator.propertyName, values });
+  }
+  return result;
+}
+
+/** Member names for `const` enum objects. */
+function enumMemberNames(schema: Extract<SchemaIR, { kind: 'enum' }>): string[] {
+  const extension = schema.extensions?.['x-enum-varnames'] ?? schema.extensions?.['x-enumNames'];
+  const fromExtension =
+    Array.isArray(extension) &&
+    extension.length === schema.values.length &&
+    extension.every((v) => typeof v === 'string')
+      ? extension
+      : undefined;
+  const registry = new NameRegistry();
+  return schema.values.map((value, index) => {
+    const preferred = fromExtension?.[index] ?? defaultMemberName(value);
+    return registry.claim(toIdentifier(preferred, 'PascalCase'));
+  });
+}
+
+function defaultMemberName(value: JsonValue): string {
+  if (typeof value === 'string')
+    return value === '' ? 'Empty' : applyCase(value, 'PascalCase') || `Value ${value}`;
+  if (typeof value === 'number')
+    return `Value ${value < 0 ? `Minus ${-value}` : String(value)}`.replace('.', ' ');
+  return JSON.stringify(value);
+}
+
+function isConstEnum(
+  schema: SchemaIR,
+  ctx: EmitContext,
+): schema is Extract<SchemaIR, { kind: 'enum' }> {
+  return (
+    ctx.config.types.enums === 'const' &&
+    schema.kind === 'enum' &&
+    schema.values.every((v) => typeof v === 'string' || typeof v === 'number')
+  );
+}
+
+function modelDoc(model: ModelSymbol, ctx: EmitContext): JsDocBlock {
+  return applyJsDocHook(ctx, schemaDoc(model.definition.schema), {
+    kind: 'model',
+    definition: model.definition,
+  });
+}
+
+/** Renders a JSDoc typedef for JavaScript output. */
+export function jsTypedef(
+  name: string,
+  schema: SchemaIR,
+  doc: JsDocBlock,
+  typeCtx: TypeContext,
+  extraType?: string,
+): string {
+  const tags: JsDocTag[] = doc.tags.filter((t) => t.tag === 'deprecated');
+  const canUseProperties =
+    extraType === undefined &&
+    schema.kind === 'object' &&
+    schema.nullable !== true &&
+    schema.additionalProperties === undefined &&
+    schema.properties.length > 0 &&
+    schema.properties.every((p) => isPropertyIdentifier(p.name));
+  if (canUseProperties) {
+    tags.push({ tag: 'typedef', text: `{object} ${name}` });
+    for (const property of schema.properties) {
+      const description = (property.schema.description ?? '').split('\n')[0] ?? '';
+      const label = property.required ? property.name : `[${property.name}]`;
+      tags.push({
+        tag: 'property',
+        text: `{${printType(property.schema, typeCtx)}} ${label}${description === '' ? '' : ` - ${description}`}`,
+      });
+    }
+  } else {
+    const type = printType(schema, typeCtx);
+    tags.push({
+      tag: 'typedef',
+      text: `{${extraType === undefined ? type : `${wrapType(type, 'intersection')} & ${extraType}`}} ${name}`,
+    });
+  }
+  return renderJsDoc({ ...doc, tags });
+}
+
+export function generateModel(model: ModelSymbol, ctx: EmitContext): ModuleOutput {
+  const { definition } = model;
+  const schema = definition.schema;
+  const doc = modelDoc(model, ctx);
+  const constEnum = isConstEnum(schema, ctx);
+  const exports: GeneratedExport[] = [
+    { name: model.name, kind: 'model', typeOnly: !constEnum },
+    ...model.aliases.map((alias) => ({ name: alias, kind: 'model' as const, typeOnly: true })),
+  ];
+
+  const body = (imports: ImportManager, lang: Lang): string => {
+    imports.declare(model.name);
+    model.aliases.forEach((alias) => {
+      imports.declare(alias);
+    });
+    const typeCtx: TypeContext = {
+      imports,
+      project: ctx.project,
+      config: ctx.config,
+      local: new Map([[model.id, model.name]]),
+      direction: 'output',
+    };
+    const tags = inheritedDiscriminators(model, ctx).map(
+      ({ property, values }) => `{ ${propertyKey(property)}: ${values.map(quote).join(' | ')} }`,
+    );
+    const extra = tags.length === 0 ? undefined : tags.join(' & ');
+    const parts: string[] = [];
+
+    if (constEnum) {
+      const names = enumMemberNames(schema);
+      const entries = schema.values.map(
+        (value, index) => `${names[index] ?? 'Value'}: ${literal(value)}`,
+      );
+      const typeExpression = `(typeof ${model.name})[keyof typeof ${model.name}]`;
+      if (lang === 'ts') {
+        parts.push(
+          `${renderJsDoc(doc)}export const ${model.name} = {\n${entries.map((e) => `  ${e},`).join('\n')}\n} as const;\n`,
+        );
+        parts.push(`${renderJsDoc(doc)}export type ${model.name} = ${typeExpression};\n`);
+      } else if (lang === 'dts') {
+        const members = schema.values.map(
+          (value, index) => `  readonly ${names[index] ?? 'Value'}: ${literal(value)};`,
+        );
+        parts.push(
+          `${renderJsDoc(doc)}export declare const ${model.name}: {\n${members.join('\n')}\n};\n`,
+        );
+        parts.push(`${renderJsDoc(doc)}export type ${model.name} = ${typeExpression};\n`);
+      } else {
+        parts.push(
+          `${renderJsDoc(doc)}export const ${model.name} = /* @__PURE__ */ Object.freeze({\n${entries.map((e) => `  ${e},`).join('\n')}\n});\n`,
+        );
+        parts.push(
+          renderJsDoc({
+            ...doc,
+            tags: [{ tag: 'typedef', text: `{${typeExpression}} ${model.name}` }],
+          }),
+        );
+      }
+    } else if (lang === 'js') {
+      parts.push(jsTypedef(model.name, schema, doc, typeCtx, extra));
+    } else {
+      const type = printType(schema, typeCtx);
+      const full = extra === undefined ? type : `${wrapType(type, 'intersection')} & ${extra}`;
+      parts.push(`${renderJsDoc(doc)}export type ${model.name} = ${full};\n`);
+    }
+
+    for (const alias of model.aliases) {
+      const aliasDoc: JsDocBlock = { summary: `Alias of {@link ${model.name}}.`, tags: [] };
+      parts.push(
+        lang === 'js'
+          ? renderJsDoc({
+              ...aliasDoc,
+              tags: [{ tag: 'typedef', text: `{${model.name}} ${alias}` }],
+            })
+          : `${renderJsDoc(aliasDoc)}export type ${alias} = ${model.name};\n`,
+      );
+    }
+    return parts.join('\n');
+  };
+
+  return {
+    module: model.module,
+    origin: 'core:model',
+    ...renderAll(model.module, ctx, body),
+    exports,
+    sources: { schemas: [model.id] },
+  };
+}

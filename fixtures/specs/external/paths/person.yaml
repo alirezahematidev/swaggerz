@@ -1,0 +1,18 @@
+get:
+  operationId: getPerson
+  tags: [people]
+  parameters:
+    - name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  responses:
+    '200':
+      description: The person.
+      content:
+        application/json:
+          schema:
+            $ref: '../schemas/person.yaml'
+    default:
+      $ref: '../common.yaml#/components/responses/Error'

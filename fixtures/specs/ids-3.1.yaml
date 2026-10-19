@@ -1,0 +1,63 @@
+openapi: 3.1.0
+info:
+  title: Schema resources
+  version: 1.0.0
+  description: References resolved against `$id` base URIs (JSON Schema 2020-12), including nested relative ids.
+paths:
+  /orders:
+    get:
+      operationId: listOrders
+      responses:
+        '200':
+          description: Orders.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+components:
+  schemas:
+    Order:
+      $id: https://schemas.example.com/shop/order.json
+      type: object
+      properties:
+        item:
+          # Relative to the Order resource: https://schemas.example.com/shop/item.json
+          $ref: item.json
+        customer:
+          # Resolves to the nested resource below.
+          $ref: people/customer.json
+      $defs:
+        Customer:
+          # Relative to its parent: https://schemas.example.com/shop/people/customer.json
+          $id: people/customer.json
+          type: object
+          properties:
+            name:
+              type: string
+            address:
+              # A fragment within the Customer resource, not the document.
+              $ref: '#/$defs/Address'
+          $defs:
+            Address:
+              type: object
+              properties:
+                city:
+                  type: string
+    Item:
+      $id: https://schemas.example.com/shop/item.json
+      type: object
+      properties:
+        sku:
+          type: string
+        variants:
+          type: array
+          items:
+            $ref: '#/$defs/Variant'
+      $defs:
+        Variant:
+          type: object
+          properties:
+            color:
+              type: string

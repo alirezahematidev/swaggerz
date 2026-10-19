@@ -1,0 +1,25 @@
+{
+  "name": "swaggerz-example-react-query",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "swaggerz generate",
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && vite build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.100.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "swaggerz": "file:../..",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.0"
+  }
+}

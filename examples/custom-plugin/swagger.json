@@ -1,0 +1,101 @@
+{
+  "swagger": "2.0",
+  "info": { "title": "Directory API", "version": "2.1.0" },
+  "host": "api.example.com",
+  "basePath": "/v2",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/users": {
+      "get": {
+        "operationId": "Users_List",
+        "x-sdk-name": "listUsers",
+        "tags": ["Users"],
+        "summary": "Lists users.",
+        "parameters": [
+          { "name": "role", "in": "query", "type": "string", "enum": ["admin", "member"] },
+          { "name": "top", "in": "query", "type": "integer", "minimum": 1, "maximum": 100 }
+        ],
+        "responses": {
+          "200": {
+            "description": "The users.",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/User" } }
+          },
+          "default": { "description": "Error.", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      },
+      "post": {
+        "operationId": "Users_Create",
+        "x-sdk-name": "createUser",
+        "tags": ["Users"],
+        "summary": "Creates a user.",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/NewUser" }
+          }
+        ],
+        "responses": {
+          "201": { "description": "The created user.", "schema": { "$ref": "#/definitions/User" } },
+          "default": { "description": "Error.", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      }
+    },
+    "/users/{userId}": {
+      "get": {
+        "operationId": "Users_Get",
+        "x-sdk-name": "getUser",
+        "tags": ["Users"],
+        "summary": "Returns a user.",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "type": "string" }],
+        "responses": {
+          "200": { "description": "The user.", "schema": { "$ref": "#/definitions/User" } },
+          "default": { "description": "Error.", "schema": { "$ref": "#/definitions/Error" } }
+        }
+      }
+    },
+    "/teams/{teamId}/members": {
+      "get": {
+        "operationId": "Teams_ListMembers",
+        "tags": ["Teams"],
+        "summary": "Lists the members of a team.",
+        "parameters": [{ "name": "teamId", "in": "path", "required": true, "type": "string" }],
+        "responses": {
+          "200": {
+            "description": "The members.",
+            "schema": { "type": "array", "items": { "$ref": "#/definitions/User" } }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "User": {
+      "type": "object",
+      "required": ["id", "name", "role"],
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email", "x-nullable": true },
+        "role": { "type": "string", "enum": ["admin", "member"] }
+      }
+    },
+    "NewUser": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["admin", "member"], "default": "member" }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+    }
+  }
+}

@@ -1,0 +1,39 @@
+openapi: 3.0.3
+info:
+  title: Broken refs
+  version: 1.0.0
+paths:
+  /things:
+    get:
+      operationId: listThings
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Missing'
+  /others:
+    get:
+      operationId: listOthers
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: './does-not-exist.yaml#/Thing'
+components:
+  schemas:
+    Loop:
+      $ref: '#/components/schemas/Loop2'
+    Loop2:
+      $ref: '#/components/schemas/Loop'
+    Example:
+      type: object
+      properties:
+        payload:
+          type: object
+      example:
+        payload:
+          $ref: 'this is example data, not a reference'

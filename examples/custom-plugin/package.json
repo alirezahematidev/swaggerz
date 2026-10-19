@@ -1,0 +1,14 @@
+{
+  "name": "swaggerz-example-custom-plugin",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "swaggerz generate",
+    "check": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "swaggerz": "file:../..",
+    "typescript": "~6.0.3"
+  }
+}

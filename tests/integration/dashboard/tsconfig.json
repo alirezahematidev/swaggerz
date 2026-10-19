@@ -1,0 +1,5 @@
+{
+  "//": "The UI test renders dashboard client components, so it uses the client (DOM + Preact) settings.",
+  "extends": "../../../src/dashboard/client/tsconfig.json",
+  "include": ["ui.test.ts", "../../../src/dashboard/client", "../../../src/dashboard/api-types.ts"]
+}

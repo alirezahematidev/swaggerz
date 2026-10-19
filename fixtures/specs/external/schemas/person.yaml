@@ -1,0 +1,12 @@
+title: Person
+type: object
+required: [id, name]
+properties:
+  id:
+    type: string
+  name:
+    type: string
+  team:
+    $ref: './team.yaml'
+  manager:
+    $ref: '#'

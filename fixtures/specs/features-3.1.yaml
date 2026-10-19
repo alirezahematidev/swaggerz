@@ -1,0 +1,390 @@
+openapi: 3.1.0
+info:
+  title: Feature Coverage API
+  version: 2.0.0
+  description: Exercises composition, polymorphism, recursion and serialization styles.
+servers:
+  - url: https://{region}.api.example.com/v1
+    variables:
+      region:
+        default: eu
+        enum: [eu, us]
+security:
+  - bearerAuth: []
+paths:
+  /shapes:
+    get:
+      operationId: listShapes
+      tags: [Shapes]
+      summary: List shapes.
+      parameters:
+        - name: filter
+          in: query
+          style: deepObject
+          explode: true
+          schema:
+            type: object
+            properties:
+              color:
+                type: string
+              minArea:
+                type: number
+        - name: ids
+          in: query
+          style: pipeDelimited
+          explode: false
+          schema:
+            type: array
+            items:
+              type: integer
+        - name: cursor
+          in: query
+          schema:
+            type: [string, 'null']
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: X-Request-ID
+          in: header
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: session
+          in: cookie
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A page of shapes.
+          headers:
+            X-Total-Count:
+              required: true
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShapePage'
+        4XX:
+          $ref: '#/components/responses/Problem'
+    post:
+      operationId: createShape
+      tags: [Shapes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Shape'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shape'
+        '400':
+          $ref: '#/components/responses/Problem'
+  /shapes/{shapeId}:
+    parameters:
+      - $ref: '#/components/parameters/ShapeId'
+    get:
+      operationId: getShape
+      tags: [Shapes]
+      x-codegen-cache: 60
+      responses:
+        '200':
+          description: The shape.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shape'
+            application/xml:
+              schema:
+                $ref: '#/components/schemas/Shape'
+        '304':
+          description: Not modified.
+        '404':
+          $ref: '#/components/responses/Problem'
+    patch:
+      operationId: patchShape
+      tags: [Shapes]
+      deprecated: true
+      requestBody:
+        content:
+          application/merge-patch+json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: [string, 'null']
+      responses:
+        '204':
+          description: Updated.
+    delete:
+      operationId: deleteShape
+      tags: [Shapes]
+      security: []
+      responses:
+        '204':
+          description: Deleted.
+  /tree:
+    get:
+      operationId: getTree
+      tags: [Trees]
+      responses:
+        '200':
+          description: A recursive tree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TreeNode'
+  /documents:
+    post:
+      operationId: uploadDocument
+      tags: [Documents]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream: {}
+      responses:
+        '200':
+          description: Stored.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+  /documents/{id}/content:
+    get:
+      operationId: downloadDocument
+      tags: [Documents]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: query
+          description: Same name in another location.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Raw bytes.
+          content:
+            application/pdf:
+              schema:
+                type: string
+                contentMediaType: application/pdf
+  /events:
+    post:
+      operationId: postEvent
+      tags: [Events]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Event'
+      responses:
+        '202':
+          description: Accepted.
+webhooks:
+  shapeCreated:
+    post:
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Shape'
+      responses:
+        '200':
+          description: OK
+components:
+  parameters:
+    ShapeId:
+      name: shapeId
+      in: path
+      required: true
+      description: Shape identifier.
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: Problem details.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Shape:
+      description: A polymorphic shape.
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Rectangle'
+      discriminator:
+        propertyName: kind
+        mapping:
+          circle: '#/components/schemas/Circle'
+          rect: '#/components/schemas/Rectangle'
+    ShapeBase:
+      type: object
+      required: [kind, id]
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          type: string
+        name:
+          type: string
+          description: Optional label.
+        color:
+          $ref: '#/components/schemas/Color'
+          description: Ref with a sibling description (allowed in 3.1).
+    Circle:
+      allOf:
+        - $ref: '#/components/schemas/ShapeBase'
+        - type: object
+          required: [radius]
+          properties:
+            radius:
+              type: number
+              exclusiveMinimum: 0
+    Rectangle:
+      allOf:
+        - $ref: '#/components/schemas/ShapeBase'
+        - type: object
+          required: [width, height]
+          properties:
+            width:
+              type: number
+            height:
+              type: number
+    Color:
+      type: string
+      enum: [red, green, blue]
+    ShapePage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Shape'
+        nextCursor:
+          type: [string, 'null']
+        total:
+          type: integer
+    TreeNode:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: string
+        children:
+          type: array
+          items:
+            $ref: '#/components/schemas/TreeNode'
+        parent:
+          oneOf:
+            - $ref: '#/components/schemas/TreeNode'
+            - type: 'null'
+    Problem:
+      type: object
+      required: [title, status]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+      additionalProperties: true
+    Event:
+      anyOf:
+        - $ref: '#/components/schemas/ClickEvent'
+        - $ref: '#/components/schemas/ViewEvent'
+    ClickEvent:
+      type: object
+      required: [type, x, y]
+      properties:
+        type:
+          const: click
+        x:
+          type: integer
+        y:
+          type: integer
+    ViewEvent:
+      type: object
+      required: [type, page]
+      properties:
+        type:
+          const: view
+        page:
+          type: string
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        coordinates:
+          type: array
+          prefixItems:
+            - type: number
+            - type: number
+          items: false
+    Pet:
+      type: object
+      required: [petType, name]
+      properties:
+        petType:
+          type: string
+        name:
+          type: string
+      discriminator:
+        propertyName: petType
+    Cat:
+      allOf:
+        - $ref: '#/components/schemas/Pet'
+        - type: object
+          properties:
+            huntingSkill:
+              type: string
+              enum: [clueless, lazy, adventurous, aggressive]
+    Dog:
+      allOf:
+        - $ref: '#/components/schemas/Pet'
+        - type: object
+          properties:
+            packSize:
+              type: integer
+              format: int32
+              minimum: 0
+    LegacyName:
+      $ref: '#/components/schemas/Pet'
+    Unused:
+      type: object
+      properties:
+        deprecatedField:
+          type: string
+          deprecated: true
+        Promise:
+          type: boolean
+          description: Property named like a global.
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

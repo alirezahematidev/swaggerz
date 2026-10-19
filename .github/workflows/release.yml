@@ -1,0 +1,46 @@
+# Publishing happens only here, never from a developer machine. See CONTRIBUTING.md#releases.
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Replace with the real repository; this also keeps forks from attempting releases.
+    if: github.repository == 'your-org/swaggerz'
+    runs-on: ubuntu-latest
+    # Configure required reviewers for this environment to approve each publish.
+    environment: npm
+    permissions:
+      contents: write # version commits and tags
+      pull-requests: write # the "Version Packages" pull request
+      id-token: write # npm trusted publishing (OIDC) and provenance
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install --global npm@^11.5.1
+      - run: corepack enable
+      - run: yarn install --immutable
+      - run: yarn check
+      - run: yarn build
+      - name: Open the version pull request or publish
+        uses: changesets/action@v1
+        with:
+          version: yarn version-packages
+          publish: yarn release
+          commit: 'chore: release'
+          title: 'chore: release'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

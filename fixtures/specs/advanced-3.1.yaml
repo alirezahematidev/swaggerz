@@ -1,0 +1,292 @@
+openapi: 3.1.0
+info:
+  title: Advanced features
+  version: 1.0.0
+  description: Read/write models, dates, several request media types, 304, operation servers, callbacks and webhooks.
+servers:
+  - url: https://api.example.com
+tags:
+  - name: Accounts
+paths:
+  /accounts:
+    post:
+      operationId: createAccount
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Account'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/AccountForm'
+          application/xml:
+            schema:
+              $ref: '#/components/schemas/Account'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+      callbacks:
+        accountEvent:
+          '{$request.body#/callbackUrl}':
+            post:
+              summary: Account events are posted to the callback URL.
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/AccountEvent'
+              responses:
+                '204':
+                  description: Received.
+  /accounts/{accountId}:
+    get:
+      operationId: getAccount
+      tags: [Accounts]
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+        '304':
+          description: Not modified.
+        '404':
+          description: Unknown account.
+  /accounts/{accountId}/statements:
+    get:
+      operationId: listStatements
+      tags: [Accounts]
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Statements.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Statement'
+  /uploads/avatar:
+    servers:
+      - url: https://{region}.uploads.example.com/v2
+        variables:
+          region:
+            default: eu
+    put:
+      operationId: uploadAvatar
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema:
+              type: string
+              contentMediaType: image/png
+      responses:
+        '204':
+          description: Stored.
+  /discounts:
+    post:
+      operationId: createDiscount
+      tags: [Accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Discount'
+      responses:
+        '204':
+          description: Created.
+webhooks:
+  accountClosed:
+    post:
+      summary: Sent when an account is closed.
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Account'
+      responses:
+        '200':
+          description: Acknowledged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+components:
+  schemas:
+    Account:
+      type: object
+      required: [id, name, password, createdAt]
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+        createdAt:
+          type: string
+          format: date-time
+          readOnly: true
+        birthday:
+          type: string
+          format: date
+        callbackUrl:
+          type: string
+          format: uri
+        owner:
+          $ref: '#/components/schemas/Person'
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/Statement'
+        reminders:
+          type: object
+          additionalProperties:
+            type: string
+            format: date-time
+        lastEvent:
+          $ref: '#/components/schemas/AccountEvent'
+    AccountForm:
+      type: object
+      required: [name, password]
+      properties:
+        name:
+          type: string
+        password:
+          type: string
+          writeOnly: true
+    Person:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        born:
+          type: string
+          format: date
+        parent:
+          $ref: '#/components/schemas/Person'
+    Statement:
+      type: object
+      required: [id, issuedOn, amount]
+      properties:
+        id:
+          type: string
+          readOnly: true
+        issuedOn:
+          type: string
+          format: date
+        amount:
+          type: number
+    AccountEvent:
+      oneOf:
+        - $ref: '#/components/schemas/OpenedEvent'
+        - $ref: '#/components/schemas/ClosedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          opened: '#/components/schemas/OpenedEvent'
+          closed: '#/components/schemas/ClosedEvent'
+    OpenedEvent:
+      type: object
+      required: [type, at]
+      properties:
+        type:
+          const: opened
+        at:
+          type: string
+          format: date-time
+    ClosedEvent:
+      type: object
+      required: [type, closedOn]
+      properties:
+        type:
+          const: closed
+        closedOn:
+          type: string
+          format: date
+    Discount:
+      description: Assertions that types cannot express; generated Zod schemas enforce them.
+      type: object
+      required: [kind, value]
+      properties:
+        kind:
+          type: string
+          enum: [percent, amount]
+        value:
+          type: number
+        currency:
+          type: string
+        code:
+          type: string
+          not:
+            const: TEST
+      if:
+        properties:
+          kind:
+            const: percent
+      then:
+        properties:
+          value:
+            maximum: 100
+      else:
+        properties:
+          currency:
+            type: string
+        required: [currency]
+      dependentRequired:
+        code: [currency]
+      dependentSchemas:
+        currency:
+          properties:
+            currency:
+              minLength: 3
+              maxLength: 3

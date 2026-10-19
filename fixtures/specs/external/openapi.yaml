@@ -1,0 +1,32 @@
+openapi: 3.0.3
+info:
+  title: Multi-file API
+  version: 1.0.0
+paths:
+  /people/{id}:
+    $ref: './paths/person.yaml'
+  /teams:
+    get:
+      operationId: listTeams
+      tags: [teams]
+      responses:
+        '200':
+          description: Teams.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: './schemas/team.yaml'
+        default:
+          $ref: './common.yaml#/components/responses/Error'
+components:
+  schemas:
+    Person:
+      $ref: './schemas/person.yaml'
+    Error:
+      type: object
+      description: A root-level Error that collides with the external one.
+      properties:
+        reason:
+          type: string

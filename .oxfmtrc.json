@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 100,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "dist",
+    "assets",
+    "coverage",
+    ".yarn",
+    "yarn.lock",
+    "fixtures",
+    "tests/.output",
+    "tests/**/__snapshots__",
+    "examples/**/src/generated",
+    "examples/**/dist",
+    "CHANGELOG.md",
+    ".changeset/*.md",
+    ".tmp",
+    ".bench",
+    ".compat",
+    "config.schema.json"
+  ]
+}

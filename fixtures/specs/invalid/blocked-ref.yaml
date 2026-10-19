@@ -1,0 +1,21 @@
+openapi: 3.1.0
+info:
+  title: Blocked
+  version: 1.0.0
+paths:
+  /x:
+    get:
+      operationId: getX
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: 'https://evil.example.com/schema.json'
+        '201':
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: '../../../../../../../etc/passwd'

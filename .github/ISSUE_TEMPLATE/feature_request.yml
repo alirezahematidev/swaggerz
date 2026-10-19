@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest support for a specification feature, an option or an integration.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should swaggerz generate or do? Show the specification input and the code you would expect, if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Could a plugin solve this? Workarounds you have tried.
+    validations:
+      required: false

@@ -1,0 +1,9 @@
+type: object
+required: [name]
+properties:
+  name:
+    type: string
+  members:
+    type: array
+    items:
+      $ref: './person.yaml'
