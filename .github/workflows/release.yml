@@ -36,7 +36,7 @@ jobs:
       - run: yarn check
       - run: yarn build
       - name: Open the version pull request or publish
-        uses: changesets/action@v1
+        uses: changesets/action@v2
         with:
           version: yarn version-packages
           publish: yarn release
