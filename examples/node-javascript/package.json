@@ -9,8 +9,8 @@
     "dashboard": "swaggerz dashboard"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.6.5",
     "swaggerz": "workspace:*",
-    "typescript": "~6.0.3"
+    "typescript": "~7.0.2"
   }
 }
