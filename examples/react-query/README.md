@@ -3,9 +3,16 @@
 A task list built with React, TanStack Query and a client generated from an OpenAPI 3.1 document ([openapi.yaml](openapi.yaml)).
 
 ```sh
-npm install
-npm run generate   # src/generated/api
-npm run dev        # http://localhost:5173, served by an in-memory mock API (mock-api.ts)
+pnpm example:react-query   # from the repository root: build swaggerz, generate, start Vite
+```
+
+Or, inside this directory once swaggerz is built:
+
+```sh
+pnpm generate     # src/generated/api
+pnpm dev          # http://localhost:5173, served by an in-memory mock API (mock-api.ts)
+pnpm check        # type-checks the app and builds it
+pnpm dashboard    # explore the API and the generated code
 ```
 
 What to look at:

@@ -53,7 +53,7 @@ const reactQueryCheck = t.object({
   queryMethods: t.doc(
     t.array(t.literal(...HTTP_METHODS)),
     'HTTP methods that produce query hooks; all others produce mutation hooks.',
-    { default: ['get'] },
+    { default: ['get', 'query'] },
   ),
   infinite: t.doc(
     t.record(
@@ -82,8 +82,8 @@ const configCheck: Check = t.object(
       t.object(
         {
           version: t.doc(
-            t.literal('2.0', '3.0', '3.1', 'auto'),
-            "Specification version the input must declare: '2.0' (Swagger), '3.0', '3.1', or 'auto' for any supported version.",
+            t.literal('2.0', '3.0', '3.1', '3.2', 'auto'),
+            "Specification version the input must declare: '2.0' (Swagger), '3.0', '3.1', '3.2', or 'auto' for any supported version.",
           ),
           input: t.doc(
             t.string({ nonEmpty: true }),
@@ -104,6 +104,11 @@ const configCheck: Check = t.object(
                 t.array(t.string({ nonEmpty: true })),
                 "Hosts remote references may be fetched from, e.g. 'schemas.example.com' or '*.example.com'.",
               ),
+              maxDocuments: t.doc(
+                t.number({ min: 1, integer: true }),
+                'Maximum number of documents a description may consist of.',
+                { default: 5000 },
+              ),
             }),
             'External reference policy.',
           ),
@@ -120,6 +125,13 @@ const configCheck: Check = t.object(
                 t.number({ min: 1, integer: true }),
                 'Maximum document size in bytes.',
                 { default: 52_428_800 },
+              ),
+              poll: t.doc(
+                t.union(
+                  [t.boolean(), t.number({ min: 500, integer: true })],
+                  'a boolean or an interval in milliseconds (at least 500)',
+                ),
+                'Poll remote documents for changes in `generate --watch` and the dashboard: true (every 2000 ms), an interval in milliseconds, or false. By default only documents on loopback hosts (localhost, 127.0.0.1, [::1]) are polled.',
               ),
             }),
             'Options for fetching remote documents.',

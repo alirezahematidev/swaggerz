@@ -20,6 +20,11 @@ export interface GenerationResult extends Omit<CompileResult, 'ok' | 'diagnostic
   readonly diagnostics: readonly Diagnostic[];
   readonly plan?: WritePlan;
   readonly write?: WriteResult;
+  /**
+   * How the output manifest's file list changes (or would change in a dry run). The generator
+   * version recorded in the manifest is not compared.
+   */
+  readonly manifestChange?: 'create' | 'update' | 'unchanged';
 }
 
 function isInside(child: string, parent: string): boolean {
@@ -74,6 +79,7 @@ export async function runGeneration(options: RunGenerationOptions): Promise<Gene
       ...compiled,
       diagnostics,
       plan: planned.plan,
+      manifestChange: planned.manifestChange,
       write: {
         directory: planned.plan.directory,
         created: by('create'),
@@ -98,5 +104,11 @@ export async function runGeneration(options: RunGenerationOptions): Promise<Gene
     return { ...compiled, ok: false, diagnostics: [...diagnostics, failure], plan: planned.plan };
   }
   await compiled.runner.afterWrite(write, base);
-  return { ...compiled, diagnostics, plan: planned.plan, write };
+  return {
+    ...compiled,
+    diagnostics,
+    plan: planned.plan,
+    manifestChange: planned.manifestChange,
+    write,
+  };
 }

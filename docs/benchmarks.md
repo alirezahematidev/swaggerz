@@ -24,16 +24,19 @@ Regeneration only rewrites files whose content changed, so a typical incremental
 
 ## Bundle size
 
-`tests/integration/treeshake/bundle.test.ts` generates a client for 1,000 operations and 602 models and bundles small applications with esbuild, Rollup and Vite. Sizes are minified (except Rollup) and not gzipped:
+`tests/integration/treeshake/bundle.test.ts` generates a client for 1,000 operations and 602 models and bundles small applications with esbuild, Rollup, Vite and webpack. Sizes are minified (except Rollup) and not gzipped:
 
 | Bundle                                                    |     Size |
 | --------------------------------------------------------- | -------: |
-| 1 operation, direct module import (esbuild)               |  11.4 KB |
-| 3 operations through the barrel (esbuild)                 |  11.8 KB |
-| 3 operations through the barrel (Rollup, unminified)      |  33.9 KB |
-| 3 operations through the barrel (Vite production build)   |  15.5 KB |
-| 1 React Query hook, minus TanStack Query itself (esbuild) |  11.9 KB |
-| The whole client (esbuild)                                | 214.8 KB |
+| 1 operation, direct module import (esbuild)               |  13.3 KB |
+| 3 operations through the barrel (esbuild)                 |  13.7 KB |
+| 3 operations through the barrel (Rollup, unminified)      |  41.4 KB |
+| 3 operations through the barrel (Vite production build)   |  17.9 KB |
+| 3 operations through the barrel (webpack production)      |  13.8 KB |
+| 1 React Query hook, minus TanStack Query itself (esbuild) |  13.8 KB |
+| The whole client (esbuild)                                | 326.4 KB |
+
+The whole client includes every operation's error guard (`isGetPetByIdApiError`); applications that import some operations only get the guards they import.
 
 The tests assert which operations remain in each bundle (only the imported ones) rather than exact byte counts, so they do not break when a minifier changes.
 

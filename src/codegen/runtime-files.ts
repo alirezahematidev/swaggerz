@@ -6,7 +6,14 @@ import { header, importExtension } from './context.ts';
 import type { GeneratedFile } from './types.ts';
 
 /** Runtime modules emitted into every client, in dependency order. */
-const COMMON_RUNTIME = ['types', 'errors', 'serialization', 'signal', 'client'] as const;
+const COMMON_RUNTIME = [
+  'types',
+  'errors',
+  'serialization',
+  'signal',
+  'client',
+  'middleware',
+] as const;
 
 /** `src/codegen` and `dist/codegen` both sit two levels below the package root. */
 const ASSETS = path.join(

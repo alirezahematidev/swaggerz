@@ -1,5 +1,5 @@
 import type { WebhookSymbol } from '../analysis/types.ts';
-import type { ParameterLocation } from '../ir/types.ts';
+import { wireMethod, type ParameterLocation } from '../ir/types.ts';
 import { renderAll, type EmitContext, type ModuleOutput } from './context.ts';
 import type { Lang } from './imports.ts';
 import { splitSummary } from './jsdoc.ts';
@@ -64,7 +64,7 @@ function renderWebhook(
   ctx: EmitContext,
 ): string {
   const { operation, typeNames: names } = symbol;
-  const method = operation.method.toUpperCase();
+  const method = wireMethod(operation.method);
   const what =
     symbol.kind === 'webhook'
       ? `the \`${symbol.webhook.name}\` webhook`
@@ -111,6 +111,20 @@ function renderWebhook(
         location === 'header'
           ? 'Declared headers (names in lowercase).'
           : `Declared ${location} parameters.`,
+        lang,
+        docs,
+      ),
+    );
+  }
+  // OpenAPI 3.2: the whole query string, parsed according to its media type.
+  const querystring = operation.parameters.find((p) => p.in === 'querystring');
+  if (querystring !== undefined) {
+    members.push(
+      member(
+        'querystring',
+        printType(querystring.schema, incoming),
+        !querystring.required,
+        `The whole query string (\`${querystring.contentType ?? 'application/x-www-form-urlencoded'}\`), parsed.`,
         lang,
         docs,
       ),

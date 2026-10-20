@@ -8,10 +8,17 @@ export interface FetchTextOptions {
   readonly credentialOrigin?: string | undefined;
 }
 
+/** HTTP cache validators of a fetched document, for conditional requests. */
+export interface Validators {
+  readonly etag?: string;
+  readonly lastModified?: string;
+}
+
 export interface FetchedText {
   readonly text: string;
   readonly contentType: string;
   readonly url: URL;
+  readonly validators: Validators;
 }
 
 const MAX_REDIRECTS = 5;
@@ -21,10 +28,28 @@ const MAX_REDIRECTS = 5;
  * headers (which may carry credentials) are never forwarded to a different origin.
  */
 export async function fetchText(url: URL, options: FetchTextOptions): Promise<FetchedText> {
+  const result = await fetchTextIfModified(url, options, {});
+  if (result === undefined) throw new Error('Unexpected 304 Not Modified response.');
+  return result;
+}
+
+/**
+ * Like {@link fetchText}, but sends `If-None-Match`/`If-Modified-Since` from `validators` and
+ * resolves with `undefined` when the server answers `304 Not Modified`.
+ */
+export async function fetchTextIfModified(
+  url: URL,
+  options: FetchTextOptions,
+  validators: Validators,
+): Promise<FetchedText | undefined> {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     const headers: Record<string, string> = {
       accept: 'application/json, application/yaml, text/yaml, */*;q=0.5',
+      ...(validators.etag === undefined ? {} : { 'if-none-match': validators.etag }),
+      ...(validators.lastModified === undefined
+        ? {}
+        : { 'if-modified-since': validators.lastModified }),
     };
     // Configured headers may carry credentials: only the configured input's origin receives them.
     if (options.credentialOrigin !== undefined && options.credentialOrigin === current.origin) {
@@ -35,6 +60,10 @@ export async function fetchText(url: URL, options: FetchTextOptions): Promise<Fe
       redirect: 'manual',
       signal: AbortSignal.timeout(options.timeout),
     });
+    if (response.status === 304) {
+      await response.body?.cancel();
+      return undefined;
+    }
     if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
       await response.body?.cancel();
       const next = new URL(response.headers.get('location') ?? '', current);
@@ -53,7 +82,17 @@ export async function fetchText(url: URL, options: FetchTextOptions): Promise<Fe
       throw new Error(`Document exceeds the ${options.maxBytes} byte limit (${declared} bytes).`);
     }
     const text = await readLimited(response, options.maxBytes);
-    return { text, contentType: response.headers.get('content-type') ?? '', url: current };
+    const etag = response.headers.get('etag');
+    const lastModified = response.headers.get('last-modified');
+    return {
+      text,
+      contentType: response.headers.get('content-type') ?? '',
+      url: current,
+      validators: {
+        ...(etag === null ? {} : { etag }),
+        ...(lastModified === null ? {} : { lastModified }),
+      },
+    };
   }
   throw new Error(`Too many redirects (more than ${MAX_REDIRECTS}).`);
 }

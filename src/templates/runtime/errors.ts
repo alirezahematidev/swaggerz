@@ -17,10 +17,14 @@ function setCause(error: Error, cause: unknown): void {
   }
 }
 
-/** Thrown when the server responds with a non-2xx status. */
-export class ApiError<TBody = unknown> extends Error {
+/**
+ * Thrown when the server responds with a status the operation does not resolve with (non-2xx).
+ * Generated operations reject with a union of `ApiError`s, one per documented status, so checking
+ * `status` also narrows `body`.
+ */
+export class ApiError<TBody = unknown, TStatus extends number = number> extends Error {
   /** HTTP status code. */
-  readonly status: number;
+  readonly status: TStatus;
   readonly statusText: string;
   /** Parsed response body (JSON when possible, otherwise text or binary). */
   readonly body: TBody;
@@ -33,7 +37,7 @@ export class ApiError<TBody = unknown> extends Error {
 
   constructor(
     init: ErrorContext & {
-      readonly status: number;
+      readonly status: TStatus;
       readonly statusText: string;
       readonly body: TBody;
       readonly headers: Headers;
@@ -81,9 +85,13 @@ export class RequestError extends Error {
   }
 }
 
-/** Errors a generated operation can reject with. */
+/** Errors an operation can reject with, when only the union of its error bodies is known. */
 export type OperationError<TBody = unknown> = ApiError<TBody> | RequestError;
 
+/**
+ * Whether `error` is an {@link ApiError} of any operation. Each generated operation also exports
+ * a guard (`isGetPetByIdApiError`) that narrows to that operation's errors by status.
+ */
 export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }

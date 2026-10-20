@@ -2,6 +2,7 @@ import { dateFormat } from '../analysis/dates.ts';
 import type { ProjectModel } from '../analysis/types.ts';
 import type { ResolvedConfig } from '../config/resolved.ts';
 import type { DiscriminatorIR, JsonValue, SchemaIR } from '../ir/types.ts';
+import { someSchema } from '../ir/utils.ts';
 import type { ImportManager } from './imports.ts';
 import { schemaDoc } from './jsdoc.ts';
 import { propertyKey, quote, renderJsDoc } from './printer.ts';
@@ -114,6 +115,8 @@ function printBase(schema: SchemaIR, ctx: TypeContext, indent: string): string {
     case 'object':
       return printObject(schema, ctx, indent);
     case 'union': {
+      // `unknown` absorbs the other members; returning early also avoids importing them.
+      if (schema.variants.some((variant) => variant.kind === 'unknown')) return 'unknown';
       const variants = schema.variants.map((variant) => {
         const printed = printType(variant, ctx, indent);
         const values = discriminatorValues(schema.discriminator, variant);
@@ -155,6 +158,14 @@ function printObject(
       : printType(additionalProperties, ctx, indent);
   if (properties.length === 0) {
     if (additionalProperties === false) return 'Record<string, never>';
+    // TypeScript defers recursive references inside object types but not through the `Record`
+    // alias: `type T = Record<string, T> | U` is a circularity error, `{ [key: string]: T }` is not.
+    const recursive = ctx.project.graph.recursiveSchemas();
+    if (
+      additionalProperties !== undefined &&
+      someSchema(additionalProperties, (node) => node.kind === 'ref' && recursive.has(node.target))
+    )
+      return `{ [key: string]: ${additional ?? 'unknown'} }`;
     return `Record<string, ${additional ?? 'unknown'}>`;
   }
   const jsdoc = ctx.imports.lang === 'js';

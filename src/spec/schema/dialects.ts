@@ -15,6 +15,7 @@ export interface TypeInfo {
  * lives behind this interface.
  */
 export interface SchemaDialect {
+  /** `oas31` is JSON Schema 2020-12 with the OpenAPI vocabulary, shared by OpenAPI 3.1 and 3.2. */
   readonly name: 'swagger2' | 'oas30' | 'oas31';
   readonly label: string;
   /** Whether keywords next to `$ref` take effect (3.1) or are ignored (2.0, 3.0). */
@@ -44,6 +45,8 @@ export interface RawDiscriminator {
     readonly target: string;
     readonly at: Cursor;
   }[];
+  /** OpenAPI 3.2: the schema for absent or unmapped values (a name or a reference). */
+  readonly defaultMapping?: { readonly target: string; readonly at: Cursor };
   readonly at: Cursor;
 }
 
@@ -92,7 +95,11 @@ function singleExample(cursor: Cursor): JsonValue[] | undefined {
   return value === undefined ? undefined : [value];
 }
 
-function objectDiscriminator(cursor: Cursor, ctx: ParseContext): RawDiscriminator | undefined {
+function objectDiscriminator(
+  cursor: Cursor,
+  ctx: ParseContext,
+  defaults = false,
+): RawDiscriminator | undefined {
   if (!isRecord(cursor.value) || !has(cursor, 'discriminator')) return undefined;
   const at: Cursor = {
     ...cursor,
@@ -117,7 +124,24 @@ function objectDiscriminator(cursor: Cursor, ctx: ParseContext): RawDiscriminato
       }
     }
   }
-  return { propertyName, mapping, at };
+  const defaultMapping = defaults ? str(at, 'defaultMapping') : undefined;
+  return {
+    propertyName,
+    mapping,
+    ...(defaultMapping === undefined
+      ? {}
+      : {
+          defaultMapping: {
+            target: defaultMapping,
+            at: {
+              doc: at.doc,
+              pointer: appendPointer(at.pointer, 'defaultMapping'),
+              value: defaultMapping,
+            },
+          },
+        }),
+    at,
+  };
 }
 
 const isTextMediaType = (mediaType: string): boolean =>
@@ -190,69 +214,77 @@ export const oas30Dialect: SchemaDialect = {
   foreignKeywords: new Set(['const', 'prefixItems']),
 };
 
-export const oas31Dialect: SchemaDialect = {
-  name: 'oas31',
-  label: 'OpenAPI 3.1',
-  refSiblings: 'apply',
-  booleanSchemas: true,
-  componentsPointer: '/components/schemas',
-  readTypes(cursor, ctx) {
-    const types = readTypeKeyword(cursor, ctx, 'OpenAPI 3.1', true);
-    if (has(cursor, 'nullable')) {
-      ctx.warning(
-        'schema/nullable-31',
-        '`nullable` is not part of OpenAPI 3.1 and is ignored.',
-        cursor,
-        { hint: 'Use `type: [<type>, "null"]` or `oneOf` with `{ type: "null" }`.' },
+/** JSON Schema 2020-12 with the OpenAPI vocabulary (OpenAPI 3.1 and 3.2). */
+function jsonSchemaDialect(label: string, discriminatorDefaults: boolean): SchemaDialect {
+  return {
+    name: 'oas31',
+    label,
+    refSiblings: 'apply',
+    booleanSchemas: true,
+    componentsPointer: '/components/schemas',
+    readTypes(cursor, ctx) {
+      const types = readTypeKeyword(cursor, ctx, label, true);
+      if (has(cursor, 'nullable')) {
+        ctx.warning(
+          'schema/nullable-31',
+          `\`nullable\` is not part of ${label} and is ignored.`,
+          cursor,
+          { hint: 'Use `type: [<type>, "null"]` or `oneOf` with `{ type: "null" }`.' },
+        );
+      }
+      if (types === undefined) return { types, nullable: false };
+      const nonNull = types.filter((t) => t !== 'null');
+      if (nonNull.length === 0) return { types: ['null'], nullable: false };
+      return { types: nonNull, nullable: nonNull.length !== types.length };
+    },
+    readNumberConstraints(cursor, ctx) {
+      const raw = isRecord(cursor.value) ? cursor.value : {};
+      if (typeof raw.exclusiveMinimum === 'boolean' || typeof raw.exclusiveMaximum === 'boolean') {
+        ctx.warning(
+          'schema/exclusive-boolean',
+          `Boolean exclusiveMinimum/exclusiveMaximum are OpenAPI 3.0 syntax; in ${label} they are numbers.`,
+          cursor,
+        );
+        return legacyNumberConstraints(cursor);
+      }
+      const result: Record<string, number> = {};
+      for (const key of [
+        'minimum',
+        'maximum',
+        'exclusiveMinimum',
+        'exclusiveMaximum',
+        'multipleOf',
+      ] as const) {
+        const value = num(cursor, key);
+        if (value !== undefined) result[key] = value;
+      }
+      return Object.keys(result).length === 0 ? undefined : result;
+    },
+    readExamples(cursor) {
+      const raw = isRecord(cursor.value) ? cursor.value.examples : undefined;
+      const list = Array.isArray(raw) ? raw.map((value) => toJsonValue(value) ?? null) : [];
+      const single = singleExample(cursor) ?? [];
+      const all = [...list, ...single];
+      return all.length === 0 ? undefined : all;
+    },
+    isBinaryString(cursor) {
+      if (str(cursor, 'format') === 'binary') return true;
+      const mediaType = str(cursor, 'contentMediaType');
+      return (
+        mediaType !== undefined &&
+        str(cursor, 'contentEncoding') === undefined &&
+        !isTextMediaType(mediaType)
       );
-    }
-    if (types === undefined) return { types, nullable: false };
-    const nonNull = types.filter((t) => t !== 'null');
-    if (nonNull.length === 0) return { types: ['null'], nullable: false };
-    return { types: nonNull, nullable: nonNull.length !== types.length };
-  },
-  readNumberConstraints(cursor, ctx) {
-    const raw = isRecord(cursor.value) ? cursor.value : {};
-    if (typeof raw.exclusiveMinimum === 'boolean' || typeof raw.exclusiveMaximum === 'boolean') {
-      ctx.warning(
-        'schema/exclusive-boolean',
-        'Boolean exclusiveMinimum/exclusiveMaximum are OpenAPI 3.0 syntax; in 3.1 they are numbers.',
-        cursor,
-      );
-      return legacyNumberConstraints(cursor);
-    }
-    const result: Record<string, number> = {};
-    for (const key of [
-      'minimum',
-      'maximum',
-      'exclusiveMinimum',
-      'exclusiveMaximum',
-      'multipleOf',
-    ] as const) {
-      const value = num(cursor, key);
-      if (value !== undefined) result[key] = value;
-    }
-    return Object.keys(result).length === 0 ? undefined : result;
-  },
-  readExamples(cursor) {
-    const raw = isRecord(cursor.value) ? cursor.value.examples : undefined;
-    const list = Array.isArray(raw) ? raw.map((value) => toJsonValue(value) ?? null) : [];
-    const single = singleExample(cursor) ?? [];
-    const all = [...list, ...single];
-    return all.length === 0 ? undefined : all;
-  },
-  isBinaryString(cursor) {
-    if (str(cursor, 'format') === 'binary') return true;
-    const mediaType = str(cursor, 'contentMediaType');
-    return (
-      mediaType !== undefined &&
-      str(cursor, 'contentEncoding') === undefined &&
-      !isTextMediaType(mediaType)
-    );
-  },
-  readDiscriminator: objectDiscriminator,
-  foreignKeywords: new Set(),
-};
+    },
+    readDiscriminator: (cursor, ctx) => objectDiscriminator(cursor, ctx, discriminatorDefaults),
+    foreignKeywords: new Set(),
+  };
+}
+
+export const oas31Dialect: SchemaDialect = jsonSchemaDialect('OpenAPI 3.1', false);
+
+/** OpenAPI 3.2 adds `discriminator.defaultMapping`. */
+export const oas32Dialect: SchemaDialect = jsonSchemaDialect('OpenAPI 3.2', true);
 
 export function isKnownType(type: string): boolean {
   return SIMPLE_TYPES.has(type);

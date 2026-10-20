@@ -10,21 +10,22 @@ The dashboard compiles the specification with the same pipeline as `generate` an
 
 ## Live reload
 
-While the dashboard runs, it watches the config file, every local document of the specification (including files reached through external `$ref`s) and the output manifest. Open pages update without a restart:
+While the dashboard runs, it watches the config file, every local document of the specification (including files reached through external `$ref`s), remote documents served from your machine, and the output manifest. Open pages update without a restart:
 
 - **Editing the specification or the config** recompiles it and refreshes whatever is on screen, keeping the selection, the open tab and the scroll position. A notification says what changed ("1 new operation, 2 updated models").
 - **Generating** (from the CLI, an editor task or the Generate page) refreshes the generation status.
 - **New** and **Updated** badges mark operations and models that appeared or changed since the dashboard started, in the lists, the details, the command palette and the sidebar. The overview lists them, including removed ones. Restarting the dashboard clears them. A change counts as an update when the operation or model differs in the specification or in its generated code (a config change that alters generated code counts too).
 - **A change that does not load** (a YAML syntax error halfway through an edit, an invalid config) does not replace what you are looking at: the last version that loaded stays on screen with a banner and the diagnostics, until the files are fixed.
+- **A remote document that cannot be fetched** (the backend serving the specification is restarting, or the network is down) is shown in a banner with the error. Polling goes on and the last version that loaded stays on screen; the banner disappears when the document can be fetched again.
 - **If the server stops**, the sidebar shows _Disconnected_ and a banner explains that the page no longer updates. A restarted dashboard has a new session token, so open the new link it prints.
 
-Remote specifications (`http(s)` inputs) are not watched; use **Reload**. `--no-watch` turns live reload off. Updates are pushed over a server-sent event stream that requires the session token like every other API call.
+Remote documents (an `http(s)` input or remote `$ref`s) are polled with conditional requests: those on loopback hosts by default, others when [`spec.fetch.poll`](configuration.md#spec) is set; use **Reload** for the rest. `--no-watch` turns live reload off. Updates are pushed over a server-sent event stream that requires the session token like every other API call.
 
 The interface has light, dark and system themes, works down to phone widths (the sidebar becomes a drawer), and is fully keyboard accessible. Press <kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd> for the command palette, which jumps to any page, operation or model.
 
 ## Pages
 
-- **Overview**: specification and API versions, servers, counts, HTTP method distribution, tags, generation status (up to date, out of date, never generated, failed), last run, timings, unresolved references, unsupported constructs and all diagnostics with severity filters.
+- **Overview**: specification and API versions, servers, counts, HTTP method distribution, tags (nested OpenAPI 3.2 tags are indented under their parent, with their `kind`), generation status (up to date, out of date, never generated, failed), last run, timings, unresolved references, unsupported constructs and all diagnostics with severity filters.
 - **Operations**: search across names, operation ids, paths, summaries, descriptions, tags and the names of every model an operation depends on (`/` focuses the search). Filters for HTTP method, tag and deprecation. Details show parameters by location, request bodies per media type, responses with headers and examples, authentication, the exported types and hooks, model dependencies with the reference chain that explains each, the generated code (and JavaScript/declaration previews) and the source location.
 - **Models**: search and filters (used, unused, recursive). Details show the schema (properties, constraints, enums, unions, discriminators), references, referencing models, operations that use the model and why, structural duplicates, generated TypeScript, JavaScript and declarations, and the source location.
 - **Dependencies**: a diagram of an operation's transitive models, a table explaining why each one is included, the most referenced models, unused models, recursive models and possible duplicates.

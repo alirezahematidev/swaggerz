@@ -12,6 +12,11 @@ tests/.output/
 examples/*/src/generated/
 examples/*/dist/
 .compat
+.runtimes
+.corpus
 
 # Claude Code session state
 .claude/scheduled_tasks.lock
+
+# Marketing assets and their Remotion project (kept out of the repository)
+marketing/

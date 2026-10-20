@@ -2,25 +2,26 @@
 
 ## Layout
 
-| Path                                                            | Content                                                                                     |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `client.ts`                                                     | `client` (the default instance) and `RequestOptions`                                        |
-| `runtime/types.ts`                                              | Transport contract, client and option types                                                 |
-| `runtime/client.ts`                                             | `createClient()` — URL building, auth, middleware, error mapping                            |
-| `runtime/serialization.ts`                                      | Parameter and body serialization                                                            |
-| `runtime/errors.ts`                                             | `ApiError`, `RequestError`, type guards                                                     |
-| `runtime/signal.ts`                                             | Timeout and signal composition                                                              |
-| `runtime/fetch.ts` or `runtime/axios.ts`                        | The selected transport                                                                      |
-| `runtime/dates.ts`                                              | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                               |
-| `models/<model>.ts`                                             | One type per schema (plus `const` enum objects when enabled)                                |
-| `models/<model>-input.ts`                                       | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`)  |
-| `dates/<model>.ts`                                              | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                        |
-| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`  | Payload, request, response and handler types (`output.webhooks`)                            |
-| `<tag>/<operation>.ts`                                          | One function per operation with `Params`, `Body`, `Response`, `ErrorBody` and `Error` types |
-| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts` | Hooks, option factories, key factories                                                      |
-| `zod/<model>.ts`                                                | Zod schemas                                                                                 |
-| `index.ts`, `react-query/index.ts`, `zod/index.ts`              | Barrels                                                                                     |
-| `.swaggerz-manifest.json`                                       | Generator ownership manifest                                                                |
+| Path                                                            | Content                                                                                    |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `client.ts`                                                     | `client` (the default instance) and `RequestOptions`                                       |
+| `runtime/types.ts`                                              | Transport contract, client and option types                                                |
+| `runtime/client.ts`                                             | `createClient()` — URL building, auth, middleware, retries, error mapping                  |
+| `runtime/middleware.ts`                                         | `retry()` and `refreshAuth()` middleware (tree-shaken when unused)                         |
+| `runtime/serialization.ts`                                      | Parameter and body serialization                                                           |
+| `runtime/errors.ts`                                             | `ApiError`, `RequestError`, type guards                                                    |
+| `runtime/signal.ts`                                             | Timeout and signal composition                                                             |
+| `runtime/fetch.ts` or `runtime/axios.ts`                        | The selected transport                                                                     |
+| `runtime/dates.ts`                                              | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                              |
+| `models/<model>.ts`                                             | One type per schema (plus `const` enum objects when enabled)                               |
+| `models/<model>-input.ts`                                       | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`) |
+| `dates/<model>.ts`                                              | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                       |
+| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`  | Payload, request, response and handler types (`output.webhooks`)                           |
+| `<tag>/<operation>.ts`                                          | One function per operation with its types and an error guard (`isGetPetByIdApiError`)      |
+| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts` | Hooks, option factories, key factories                                                     |
+| `zod/<model>.ts`                                                | Zod schemas                                                                                |
+| `index.ts`, `react-query/index.ts`, `zod/index.ts`              | Barrels                                                                                    |
+| `.swaggerz-manifest.json`                                       | Generator ownership manifest                                                               |
 
 Every file starts with `/* eslint-disable */` and `// @generated by swaggerz. Do not edit…`. Output is deterministic: no timestamps or versions in files; the generator version is only recorded in the manifest.
 
@@ -79,7 +80,22 @@ export function addPet(params: AddPetParams, options?: RequestOptions): Promise<
 
 - Operations or paths with their own `servers` send requests to their first server (`client.operationServers`, on by default). The base URL passed per request still takes precedence; `client.setConfig({ operationServers: false })` turns it off at runtime.
 - Response data is the union of 2xx and declared 3xx response bodies (JSON is parsed; text responses are strings; binary responses are `Blob`s; bodiless responses such as `204` or `304` are `undefined`). If no 2xx response is declared, `default` is the success response. Undeclared 3xx statuses reject with `ApiError`.
-- The error body type is the union of the other declared responses' bodies (`undefined` for bodiless ones, `unknown` when none are documented).
+- Errors are typed by status: see [Errors](#errors). `<Name>ErrorBody` is the union of the other declared responses' bodies (`undefined` for bodiless ones, `unknown` when none are documented).
+
+### OpenAPI 3.2
+
+- **`QUERY` and other methods.** `query` operations send `QUERY` with their body; React Query treats them as queries (`features.reactQuery.queryMethods`). Methods from `additionalOperations` are sent exactly as their key is spelled (`COPY`), and named like any other operation (`copyDocument`). The runtime's `HttpMethod` type accepts these methods.
+- **`in: querystring`.** The parameter describes the whole query string and is one typed member of `params`. Form content (`application/x-www-form-urlencoded`, with its `encoding`) is serialized with form rules (`name=a+b&tags=x%2Cy`); JSON content as JSON text and other media types as text, percent-encoded. API keys declared `in: query` are appended after a form query string. A JSON or text query string has no room for them, so security requirements that need them are skipped and the next alternative is used (or none, when there is no other); the generator warns about it (`operation/querystring-credentials`).
+
+  ```ts
+  await listPets({ filter: { name: 'Tom', tags: ['a', 'b'] } }); // GET /pets?name=Tom&tags=a%2Cb
+  await searchDocuments({ query: { text: 'q', limit: 5 } }); // GET /search?%7B%22text%22…
+  ```
+
+- **`style: cookie`** sends one cookie per array item or object property, separated by `; `, without percent-encoding (values must already be valid cookie values).
+- **Sequential media types** described only by `itemSchema` (`application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`) are typed and read as text; the item models are generated so you can parse items yourself (`operation/item-schema`). Pass `parseAs: 'stream'` to read the body as it arrives.
+- **Nested tags.** With `output.groupBy: 'tag'`, an operation tagged `cats` whose tag has `parent: pets` lives in `pets/cats/`, and its React Query keys start with `['pets', 'cats']`, so invalidating `petsKeys.all` also invalidates the nested tag's queries.
+- **`discriminator.defaultMapping`**: the default schema is a union member without a discriminator value, for payloads without the property or with an unmapped value; Zod validation accepts them.
 
 ## Dates
 
@@ -136,7 +152,7 @@ interface TransportResponse {
 }
 ```
 
-A transport sends the already serialized request and reads the body according to `parseAs`; it must not throw for HTTP error statuses. The client applies, in order: default headers, `Accept`, header and cookie parameters, the first satisfiable security requirement, request body encoding (dates), request body validation, body serialization, URL building, per-call headers, timeout/signal composition, `onRequest` middleware, the transport (`onError` middleware may recover), `onResponse` middleware, the status check (2xx and declared 3xx), response validation and response transformation (dates).
+A transport sends the already serialized request and reads the body according to `parseAs`; it must not throw for HTTP error statuses. The client applies, in order: request body encoding (dates), request body validation, body serialization and timeout/signal composition once per call; then for every attempt default headers, `Accept`, header and cookie parameters, the first satisfiable security requirement, URL building, per-call headers, `onRequest` middleware, the transport (`onError` middleware may recover or retry) and `onResponse` middleware (may retry); then the status check (2xx and declared 3xx), response validation and response transformation (dates).
 
 | Client API                                  |                                                                                                                                                     |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -144,17 +160,101 @@ A transport sends the already serialized request and reads the body according to
 | `client.use(middleware)`                    | Returns a function that removes it                                                                                                                  |
 | `createClient(config)`                      | Additional instances; pass `{ client }` to an operation                                                                                             |
 
+### Middleware
+
+```ts
+interface Middleware {
+  onRequest?(context: MiddlewareContext): void | TransportRequest; // replace the request
+  onResponse?(context: RetryableContext & { response }): void | TransportResponse | RetryDirective;
+  onError?(context: RetryableContext & { error }): void | TransportResponse | RetryDirective; // recover
+}
+interface MiddlewareContext {
+  request: TransportRequest;
+  operation: OperationInfo; // operationId, method, path, security; one object per call
+  attempt: number; // 1, then 2, 3… for retries
+  client: Client; // e.g. to store a refreshed token with setConfig
+}
+interface RetryableContext extends MiddlewareContext {
+  retry(): RetryDirective; // return it to send the request again
+}
+```
+
+Middleware runs in registration order. Returning `context.retry()` from `onResponse` or `onError` discards the attempt and starts the next one: the request is built again from the current config (default headers and `auth`, so a refreshed token is used), every `onRequest` runs again with the next `attempt` number, and the response goes through every `onResponse` again. Middleware registered before the one that asked for the retry has already seen the discarded response. The call's `timeout` and `signal` cover all attempts and the waits between them. `operation` is the same object for every attempt of a call, so middleware can keep per-call state in a `WeakMap` keyed by it.
+
+Two middleware are built in:
+
+**`retry(options)`** sends failed requests again with jittered exponential backoff: the n-th retry waits between half and all of `min(maxDelay, delay × 2^(n−1))`.
+
+| Option              | Default                                                     |                                                                             |
+| ------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `attempts`          | `3`                                                         | Attempts per call, including the first                                      |
+| `methods`           | `GET`, `HEAD`, `OPTIONS`, `PUT`, `DELETE`, `TRACE`, `QUERY` | Requests with an `Idempotency-Key` header are retried whatever their method |
+| `statuses`          | `408`, `429`, `500`, `502`, `503`, `504`                    | Response statuses that are retried                                          |
+| `networkErrors`     | `true`                                                      | Retry when no response arrived (not for unreadable or invalid responses)    |
+| `delay`, `maxDelay` | `300`, `10000`                                              | Backoff in milliseconds                                                     |
+| `respectRetryAfter` | `true`                                                      | Wait as long as a `Retry-After` header (seconds or HTTP date) asks          |
+| `maxRetryAfter`     | `60000`                                                     | Do not wait longer than this; the response is returned instead              |
+| `shouldRetry`       | —                                                           | `(context) => boolean`, consulted last                                      |
+
+Request bodies that are streams are never sent twice. Aborting the call (or its timeout) ends a wait immediately: the call rejects with the abort error, or a `RequestError` of kind `timeout`.
+
+**`refreshAuth(options)`** handles expired credentials: when a request of an operation with security requirements gets a `401` (`statuses`), it calls `refresh()` once, sends the request again and returns that response. Concurrent requests that fail while a refresh runs wait for it instead of refreshing again, and a request that was sent before a refresh finished is replayed with the new credentials without another refresh. Each call is replayed at most once, so a rejected new token does not loop.
+
+```ts
+// The token is stored in the client config as auth.bearerAuth.
+client.use(refreshAuth({ scheme: 'bearerAuth', refresh: () => api.renewToken() }));
+
+// Or keep credentials in your own store and let `auth` functions read it.
+client.setConfig({ auth: { bearerAuth: () => session.token } });
+client.use(
+  refreshAuth({
+    refresh: async () => {
+      session.token = await api.renewToken();
+    },
+  }),
+);
+```
+
+With `scheme`, only operations that use that scheme are refreshed; without it, every operation with a security requirement. Operations without security requirements, such as a login endpoint, never trigger a refresh. When `refresh()` throws, `onFailure(error)` is called and the call rejects with the original `401` `ApiError`.
+
 `auth` values are strings or (async) functions per security scheme name: `apiKey` values are sent as declared (header, query or cookie); HTTP bearer, OAuth 2 and OpenID Connect values are sent as `Authorization: Bearer <token>`; HTTP basic values are `username:password` and are base64-encoded.
 
 ## Errors
 
-| Error                | When                                                                         | Properties                                                                                                                     |
-| -------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `ApiError<Body>`     | status that is neither 2xx nor a declared 3xx                                | `status`, `statusText`, `body`, `headers`, `response` (raw), `operationId`, `method`, `url`, `cause` (axios: the `AxiosError`) |
-| `RequestError`       | `kind: 'network' \| 'timeout' \| 'parse' \| 'serialization' \| 'validation'` | `operationId`, `method`, `url`, `cause`                                                                                        |
-| original abort error | the caller's `AbortSignal` aborted                                           | —                                                                                                                              |
+| Error                    | When                                                                         | Properties                                                                                                                     |
+| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `ApiError<Body, Status>` | status that is neither 2xx nor a declared 3xx                                | `status`, `statusText`, `body`, `headers`, `response` (raw), `operationId`, `method`, `url`, `cause` (axios: the `AxiosError`) |
+| `RequestError`           | `kind: 'network' \| 'timeout' \| 'parse' \| 'serialization' \| 'validation'` | `operationId`, `method`, `url`, `cause`                                                                                        |
+| original abort error     | the caller's `AbortSignal` aborted                                           | —                                                                                                                              |
 
-Each operation exports `<Name>Error = ApiError<<Name>ErrorBody> | RequestError`. Use `isApiError()`/`isRequestError()` or `instanceof`.
+Each operation exports its errors typed by status:
+
+```ts
+export type GetPetByIdApiError =
+  | ApiError<undefined, 400> // one member per documented status…
+  | ApiError<ErrorModel, 404>
+  | ApiError<unknown, Exclude<HttpStatus<1 | 3 | 4 | 5>, 400 | 404>>; // …and one for the rest
+export type GetPetByIdError = GetPetByIdApiError | RequestError;
+export function isGetPetByIdApiError(error: unknown): error is GetPetByIdApiError;
+```
+
+`HttpStatus<4>` is the literal union of 400–499 (`HttpStatus` alone: 100–599), so a range response such as `4XX` covers exactly the codes no explicit response claims, and `default` (or the last member, when there is no `default`) covers every status nothing else documents and that does not resolve. Because every member has a distinct status type, checking the status narrows the body:
+
+```ts
+try {
+  await getPetById({ petId });
+} catch (error) {
+  if (isGetPetByIdApiError(error)) {
+    if (error.status === 404) error.body.message; // ErrorModel
+    else if (error.status === 400) error.body; // undefined
+    else error.body; // unknown: a status the specification does not document
+  }
+}
+```
+
+The guard checks `instanceof ApiError` and the operation (`operationId` and method), so errors of other operations are rejected. `isApiError()`/`isRequestError()` and `instanceof` work for any operation; an operation's `<Name>Error` type (also the `error` of its React Query hooks) narrows the same way after `instanceof ApiError`. With `responseStyle: 'full'`, success responses are discriminated the same way: `ApiResponse<Pet, 200> | ApiResponse<undefined, 304>`, and ranges such as `2XX` become `HttpStatus<2>`.
+
+`<Name>ErrorBody` remains the union of the documented error bodies, for code that does not check the status.
 
 ## JavaScript output
 
@@ -177,3 +277,29 @@ Each operation exports `<Name>Error = ApiError<<Name>ErrorBody> | RequestError`.
 | Non-generated file in the way | Error `output/user-file` (unless `--force`)                                      |
 
 All new content is written to temporary files first; they are renamed into place only after every write succeeded, so a failure leaves the previous output intact.
+
+### Checking committed output in CI
+
+Projects that commit the generated client can fail a pull request when someone changes the specification or the config and forgets to regenerate:
+
+```sh
+swaggerz generate --check   # writes nothing; exit 1 when the output differs from what would be generated
+```
+
+It reports missing files, generated files that changed or were edited by hand, files that are no longer generated, and a manifest whose file list is out of date, then exits with `1` (`0` when everything matches, `2` for invalid usage or configuration). `--json` puts the lists in the output (`check.created`, `check.updated`, `check.deleted`, `check.manifest`). The generator version recorded in the manifest is not compared, so upgrading swaggerz only fails the check when the generated code changes. Commit `.swaggerz-manifest.json` together with the generated files.
+
+```yaml
+# .github/workflows/api-client.yml
+name: API client
+on: [pull_request]
+jobs:
+  generated-client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npx swaggerz generate --check
+```

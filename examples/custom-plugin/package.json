@@ -4,11 +4,13 @@
   "type": "module",
   "scripts": {
     "generate": "swaggerz generate",
-    "check": "tsc -p tsconfig.json"
+    "start": "node src/catalog-report.ts",
+    "check": "tsc -p tsconfig.json",
+    "dashboard": "swaggerz dashboard"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "swaggerz": "file:../..",
+    "swaggerz": "workspace:*",
     "typescript": "~6.0.3"
   }
 }

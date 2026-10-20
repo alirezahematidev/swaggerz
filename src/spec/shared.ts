@@ -3,8 +3,8 @@ import {
   type ApiInfo,
   type ExampleIR,
   type ExternalDocsIR,
-  type HttpMethod,
   type OperationIR,
+  type StandardHttpMethod,
   type ResponseIR,
   type SecurityRequirementIR,
   type TagIR,
@@ -75,7 +75,8 @@ export function readExternalDocs(cursor: Cursor): ExternalDocsIR | undefined {
   return description === undefined ? { url } : { url, description };
 }
 
-export function readTags(cursor: Cursor): TagIR[] {
+/** Tag Objects; `v32` also reads OpenAPI 3.2's `summary`, `parent` and `kind`. */
+export function readTags(cursor: Cursor, v32 = false): TagIR[] {
   return items(cursor)
     .map((tag): TagIR | undefined => {
       const name = str(tag, 'name');
@@ -83,11 +84,65 @@ export function readTags(cursor: Cursor): TagIR[] {
       const externalDocs = readExternalDocs(child(tag, 'externalDocs'));
       return {
         name,
-        ...stripUndefined({ description: str(tag, 'description') }),
+        ...stripUndefined({
+          summary: v32 ? str(tag, 'summary') : undefined,
+          description: str(tag, 'description'),
+        }),
         ...(externalDocs === undefined ? {} : { externalDocs }),
+        ...stripUndefined({
+          parent: v32 ? str(tag, 'parent') : undefined,
+          kind: v32 ? str(tag, 'kind') : undefined,
+        }),
       };
     })
     .filter((tag): tag is TagIR => tag !== undefined);
+}
+
+/**
+ * Drops `parent` references to undeclared tags and breaks cycles (OpenAPI 3.2), reporting
+ * `spec/invalid-tag-parent` for each.
+ */
+export function checkTagParents(ctx: ParseContext, cursor: Cursor, tags: TagIR[]): TagIR[] {
+  const parents = new Map<string, string>();
+  for (const tag of tags) if (tag.parent !== undefined) parents.set(tag.name, tag.parent);
+  const declared = new Set(tags.map((tag) => tag.name));
+  const at = (name: string): Cursor =>
+    items(cursor).find((item) => str(item, 'name') === name) ?? cursor;
+  for (const tag of tags) {
+    const parent = parents.get(tag.name);
+    if (parent === undefined) continue;
+    if (!declared.has(parent)) {
+      ctx.warning(
+        'spec/invalid-tag-parent',
+        `Tag "${tag.name}" names parent "${parent}", which is not declared; it is treated as a top-level tag.`,
+        at(tag.name),
+      );
+      parents.delete(tag.name);
+      continue;
+    }
+    const chain = new Set([tag.name]);
+    for (
+      let current = parents.get(tag.name);
+      current !== undefined;
+      current = parents.get(current)
+    ) {
+      if (chain.has(current)) {
+        ctx.warning(
+          'spec/invalid-tag-parent',
+          `Tag "${tag.name}" is its own ancestor (${[...chain, current].join(' → ')}); its parent is ignored.`,
+          at(tag.name),
+        );
+        parents.delete(tag.name);
+        break;
+      }
+      chain.add(current);
+    }
+  }
+  return tags.map((tag) => {
+    if (tag.parent === undefined || parents.has(tag.name)) return tag;
+    const { parent: _ignored, ...rest } = tag;
+    return rest;
+  });
 }
 
 export function readStringArray(cursor: Cursor): string[] {
@@ -100,6 +155,8 @@ export function readSecurity(
   ctx: ParseContext,
   cursor: Cursor,
   knownSchemes: ReadonlySet<string>,
+  /** OpenAPI 3.2: maps a requirement key that is a URI of a security scheme to its name. */
+  resolveUri?: (key: string, at: Cursor) => string | undefined,
 ): SecurityRequirementIR[] | undefined {
   if (cursor.value === undefined) return undefined;
   if (!Array.isArray(cursor.value)) {
@@ -114,7 +171,9 @@ export function readSecurity(
   for (const requirement of items(cursor)) {
     if (!isRecord(requirement.value)) continue;
     const entry: Record<string, string[]> = {};
-    for (const [name, scopes] of entries(requirement)) {
+    for (const [key, scopes] of entries(requirement)) {
+      // Component names take precedence over URIs (OpenAPI 3.2).
+      const name = knownSchemes.has(key) ? key : (resolveUri?.(key, scopes) ?? key);
       if (!knownSchemes.has(name)) {
         ctx.warning(
           'security/unknown-scheme',
@@ -137,12 +196,20 @@ export function readExamplesMap(ctx: ParseContext, cursor: Cursor): ExampleIR[] 
   for (const [name, raw] of entries(cursor)) {
     const example = ctx.deref(raw);
     if (example === undefined || !isRecord(example.value)) continue;
-    const value = 'value' in example.value ? toJsonValue(example.value.value) : undefined;
+    // OpenAPI 3.2 `dataValue` is the data form of `value`.
+    const data =
+      'dataValue' in example.value
+        ? example.value.dataValue
+        : 'value' in example.value
+          ? example.value.value
+          : undefined;
+    const value = toJsonValue(data);
     result.push({
       name,
       ...stripUndefined({
         summary: str(example, 'summary'),
         description: str(example, 'description'),
+        serializedValue: str(example, 'serializedValue'),
         externalValue: str(example, 'externalValue'),
       }),
       ...(value === undefined ? {} : { value }),
@@ -157,17 +224,21 @@ export function singleExample(cursor: Cursor, key = 'example'): ExampleIR[] {
   return value === undefined ? [] : [{ value }];
 }
 
-const METHOD_ORDER = new Map(HTTP_METHODS.map((method, index) => [method, index]));
+const METHOD_ORDER = new Map<string, number>(HTTP_METHODS.map((method, index) => [method, index]));
 
-export function isHttpMethod(value: string): value is HttpMethod {
-  return METHOD_ORDER.has(value as HttpMethod);
+/** Whether a Path Item key is a standard method field (`query` only counts from OpenAPI 3.2). */
+export function isHttpMethod(value: string): value is StandardHttpMethod {
+  return METHOD_ORDER.has(value);
 }
 
+/** By path, then standard methods in spec order, then additional methods alphabetically. */
 export function sortOperations(operations: OperationIR[]): OperationIR[] {
+  const rank = (method: string): number => METHOD_ORDER.get(method) ?? HTTP_METHODS.length;
   return operations.sort(
     (a, b) =>
       compareStrings(a.path, b.path) ||
-      (METHOD_ORDER.get(a.method) ?? 0) - (METHOD_ORDER.get(b.method) ?? 0),
+      rank(a.method) - rank(b.method) ||
+      compareStrings(a.method, b.method),
   );
 }
 

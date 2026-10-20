@@ -47,6 +47,7 @@ describe('Zod schema generation', () => {
     async (name, output, options, pick) => {
       for (const [spec, version] of [
         ['features-3.1.yaml', '3.1'],
+        ['features-3.2.yaml', '3.2'],
         ['external/openapi.yaml', '3.0'],
       ] as const) {
         const caseName = `zod-${name}-${spec.split('/')[0]?.replace('.yaml', '') ?? spec}`;
@@ -56,7 +57,7 @@ describe('Zod schema generation', () => {
           features: VALIDATION,
         });
         const roots = pick(await listFiles(directory));
-        if (spec.startsWith('features') && name !== 'jsdoc') {
+        if (spec === 'features-3.1.yaml' && name !== 'jsdoc') {
           const consumer = path.join(OUTPUT_ROOT, `${caseName}.consumer.ts`);
           await writeFile(consumer, CONSUMER.replaceAll('__API__', `./${caseName}`));
           roots.push(consumer);
@@ -65,6 +66,21 @@ describe('Zod schema generation', () => {
       }
     },
   );
+
+  it('validates OpenAPI 3.2 discriminators with a default mapping', async () => {
+    const { directory } = await generateCase('zod-default-mapping', {
+      spec: { version: '3.2', input: fixture('features-3.2.yaml') },
+      features: VALIDATION,
+    });
+    const { PetSchema } = (await import(
+      pathToFileURL(path.join(directory, 'zod', 'pet.ts')).href
+    )) as { PetSchema: { safeParse(value: unknown): { success: boolean } } };
+    expect(PetSchema.safeParse({ kind: 'cat', name: 'Tom' }).success).toBe(true);
+    // Without the property, or with an unmapped value, the default schema applies.
+    expect(PetSchema.safeParse({ name: 'Rex' }).success).toBe(true);
+    expect(PetSchema.safeParse({ kind: 'parrot', name: 'Polly' }).success).toBe(true);
+    expect(PetSchema.safeParse({ kind: 'cat' }).success).toBe(false);
+  });
 
   it('keeps Zod out of the main barrel and models', async () => {
     const { result } = await generateCase('zod-isolation', {

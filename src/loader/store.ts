@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SwaggerzError, type DiagnosticBag } from '../diagnostics/bag.ts';
 import type { Diagnostic } from '../diagnostics/types.ts';
 import { isRecord } from '../utils/object.ts';
-import { fetchText } from './fetch.ts';
+import { fetchText, type FetchTextOptions, type Validators } from './fetch.ts';
 import {
   DocumentParseError,
   detectFormat,
@@ -24,6 +24,8 @@ export interface LoadedDocument {
   readonly format: DocumentFormat;
   readonly text: string;
   readonly data: unknown;
+  /** Remote documents: HTTP cache validators, used when polling for changes. */
+  readonly validators?: Validators;
 }
 
 export interface ResolvedRef {
@@ -47,8 +49,52 @@ export interface DocumentStoreOptions {
     readonly maxBytes: number;
   };
   readonly diagnostics: DiagnosticBag;
-  /** Maximum number of documents that may be loaded. */
-  readonly maxDocuments?: number;
+  /** Maximum number of documents that may be loaded (`spec.refs.maxDocuments`). */
+  readonly maxDocuments: number;
+}
+
+/**
+ * Fetch options for a remote document under the store's policy. Configured headers (which may
+ * carry credentials) only go to the origin of the root document; the root may redirect anywhere,
+ * other documents only to their own origin or an allowed host.
+ */
+export function documentFetchOptions(
+  options: Pick<DocumentStoreOptions, 'fetch' | 'policy'>,
+  url: URL,
+  root: { readonly isRoot: true } | { readonly isRoot: false; readonly origin: string | undefined },
+): FetchTextOptions {
+  return {
+    ...options.fetch,
+    credentialOrigin: root.isRoot ? url.origin : root.origin,
+    checkRedirect: (next) => {
+      if (next.protocol !== 'https:' && next.protocol !== 'http:') return 'unsupported protocol';
+      if (root.isRoot || next.origin === url.origin) return undefined;
+      return hostAllowed(next.hostname, options.policy.allowedHosts)
+        ? undefined
+        : 'host not allowed';
+    },
+  };
+}
+
+/** Documents read or fetched at the same time. */
+const LOAD_CONCURRENCY = 32;
+
+/** Maps items with at most `limit` calls running at once; results keep the input order. */
+async function mapLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 const stripHash = (url: URL): string => {
@@ -69,7 +115,12 @@ export class DocumentStore {
   readonly #ids = new Map<string, { doc: LoadedDocument; pointer: string }>();
   /** Per document: pointer of each schema with an `$id` → its resolved base URI. */
   readonly #bases = new Map<string, Map<string, string>>();
+  /** OpenAPI 3.2 `$self`: document URL → the base URI it declares. */
+  readonly #selfBases = new Map<string, string>();
+  /** Other URIs that identify a loaded document (`$self`, or the URI a reference used). */
+  readonly #aliases = new Map<string, LoadedDocument>();
   #schemaIds = false;
+  #self = false;
   #root: LoadedDocument | undefined;
   #rootBase = '';
   #allowedRealDirs: string[] | undefined;
@@ -121,6 +172,49 @@ export class DocumentStore {
     this.#bases.clear();
   }
 
+  /**
+   * Enables OpenAPI 3.2 `$self`: a document's `$self` is its base URI and identifies it, so
+   * references resolved against it reach the document without fetching. A reference to a
+   * document next to it is fetched next to where the referencing document was read.
+   */
+  enableSelf(): void {
+    this.#self = true;
+    for (const doc of this.documents) this.#indexSelf(doc);
+  }
+
+  #indexSelf(doc: LoadedDocument): void {
+    if (!this.#self || !isRecord(doc.data) || typeof doc.data.$self !== 'string') return;
+    try {
+      const base = stripHash(new URL(doc.data.$self, doc.url));
+      this.#selfBases.set(doc.url, base);
+      if (!this.#aliases.has(base)) this.#aliases.set(base, doc);
+    } catch {
+      // An invalid $self cannot be used as a base; the retrieval URL stays the base.
+    }
+  }
+
+  /** The URI relative references of a document resolve against: `$self`, else its URL. */
+  #documentBase(doc: LoadedDocument): string {
+    return this.#selfBases.get(doc.url) ?? doc.url;
+  }
+
+  /** A document by its URL or by another URI that identifies it. */
+  #document(url: string): LoadedDocument | undefined {
+    return this.#documents.get(url) ?? this.#aliases.get(url);
+  }
+
+  /**
+   * Where to read a document a reference identifies. A target next to the referencing document's
+   * `$self` is read at the same relative location next to that document's retrieval URL.
+   */
+  #retrievalUrl(target: URL, from: LoadedDocument): URL {
+    const self = this.#selfBases.get(from.url);
+    if (self === undefined) return target;
+    const directory = new URL('.', self).href;
+    if (!target.href.startsWith(directory)) return target;
+    return new URL(target.href.slice(directory.length), new URL('.', from.url));
+  }
+
   /** Replaces the parsed root data (used by `beforeParse` plugin hooks). */
   replaceRootData(data: unknown): void {
     const root = this.root;
@@ -132,46 +226,72 @@ export class DocumentStore {
     this.#ids.clear();
   }
 
-  /** Loads all documents reachable through `$ref`s and validates every reference target. */
+  /**
+   * Loads all documents reachable through `$ref`s and validates every reference target. Documents
+   * are loaded breadth-first, a whole level at a time with bounded concurrency, and registered in
+   * a deterministic (sorted) order.
+   */
   async loadReferencedDocuments(): Promise<void> {
-    const queue: LoadedDocument[] = [this.root];
-    const max = this.#options.maxDocuments ?? 500;
-    while (queue.length > 0) {
-      const doc = queue.shift();
-      if (doc === undefined) break;
+    const max = this.#options.maxDocuments;
+    let level: LoadedDocument[] = [this.root];
+    let limitReported = false;
+    while (level.length > 0) {
       const pending = new Map<string, { from: LoadedDocument; pointer: string; target: URL }>();
-      for (const occurrence of collectRefs(doc.data)) {
-        const target = this.#parseRef(occurrence.ref, doc, occurrence.pointer);
-        if (target === undefined) continue;
-        const docUrl = stripHash(target);
-        if (docUrl === doc.url || this.#documents.has(docUrl) || this.#failed.has(docUrl)) continue;
-        // A schema resource (`$id`) of a loaded document; nothing to fetch.
-        if (this.#findById(docUrl) !== undefined) continue;
-        if (!pending.has(docUrl))
-          pending.set(docUrl, { from: doc, pointer: occurrence.pointer, target });
+      for (const doc of level) {
+        for (const occurrence of collectRefs(doc.data)) {
+          const target = this.#parseRef(occurrence.ref, doc, occurrence.pointer);
+          if (target === undefined) continue;
+          const docUrl = stripHash(target);
+          if (
+            docUrl === doc.url ||
+            this.#document(docUrl) !== undefined ||
+            this.#failed.has(docUrl)
+          )
+            continue;
+          // A schema resource (`$id`) of a loaded document; nothing to fetch.
+          if (this.#findById(docUrl) !== undefined) continue;
+          if (!pending.has(docUrl))
+            pending.set(docUrl, { from: doc, pointer: occurrence.pointer, target });
+        }
       }
-      // Load in parallel, but register documents in a deterministic (sorted) order.
       const ordered = [...pending.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-      const loaded = await Promise.all(
-        ordered.map(async ([docUrl, request], index) => {
-          if (this.#documents.size + index >= max) {
-            this.#failed.add(docUrl);
-            this.#options.diagnostics.error({
-              code: 'ref/too-many-documents',
-              message: `Reference resolution stopped after loading ${max} documents.`,
-              location: { file: request.from.location, pointer: request.pointer },
-            });
-            return undefined;
-          }
-          return this.#loadExternal(request.target, request.from, request.pointer);
-        }),
-      );
-      for (const next of loaded) {
-        if (next === undefined) continue;
-        this.#documents.set(next.url, next);
-        this.#indexIds(next);
-        queue.push(next);
+      const room = Math.max(0, max - this.#documents.size);
+      for (const [docUrl, request] of ordered.slice(room)) {
+        this.#failed.add(docUrl);
+        if (limitReported) continue;
+        limitReported = true;
+        this.#options.diagnostics.error({
+          code: 'ref/too-many-documents',
+          message: `Reference resolution stopped after loading ${max} documents; ${ordered.length - room} more ${ordered.length - room === 1 ? 'is' : 'are'} referenced at this depth alone.`,
+          location: { file: request.from.location, pointer: request.pointer },
+          hint: 'Raise spec.refs.maxDocuments if the description really consists of that many files.',
+        });
       }
+      const loaded = await mapLimit(
+        ordered.slice(0, room),
+        LOAD_CONCURRENCY,
+        async ([docUrl, request]) => {
+          const document = await this.#loadExternal(request.target, request.from, request.pointer);
+          return document === undefined ? undefined : { docUrl, document };
+        },
+      );
+      const next: LoadedDocument[] = [];
+      for (const item of loaded) {
+        if (item === undefined) continue;
+        const { docUrl, document } = item;
+        // The same document reached through another URI (a `$self`-relative reference).
+        const existing = this.#documents.get(document.url);
+        if (existing !== undefined) {
+          this.#aliases.set(docUrl, existing);
+          continue;
+        }
+        this.#documents.set(document.url, document);
+        if (docUrl !== document.url) this.#aliases.set(docUrl, document);
+        this.#indexSelf(document);
+        this.#indexIds(document);
+        next.push(document);
+      }
+      level = next;
     }
     // Report every broken reference target once, even for parts of the spec no operation uses.
     for (const doc of this.documents) {
@@ -187,7 +307,7 @@ export class DocumentStore {
     const target = this.#parseRef(ref, from, refPointer);
     if (target === undefined) return undefined;
     const docUrl = stripHash(target);
-    let doc = docUrl === from.url ? from : this.#documents.get(docUrl);
+    let doc = docUrl === from.url ? from : this.#document(docUrl);
     let basePointer = '';
     if (doc === undefined) {
       const byId = this.#findById(docUrl);
@@ -265,10 +385,11 @@ export class DocumentStore {
   }
 
   async #loadExternal(
-    target: URL,
+    reference: URL,
     from: LoadedDocument,
     refPointer: string,
   ): Promise<LoadedDocument | undefined> {
+    const target = this.#retrievalUrl(reference, from);
     const docUrl = stripHash(target);
     const refusal = await this.#checkPolicy(target, from);
     if (refusal !== undefined) {
@@ -382,37 +503,46 @@ export class DocumentStore {
     let text: string;
     let hint: string;
     let finalUrl = url;
+    let validators: Validators | undefined;
     if (url.protocol === 'file:') {
       const file = fileURLToPath(url);
       text = await readFile(file, 'utf8');
       hint = file;
     } else {
-      const fetched = await fetchText(url, {
-        ...this.#options.fetch,
-        credentialOrigin: isRoot
-          ? url.origin
-          : this.#root === undefined
-            ? undefined
-            : rootOrigin(this.#root),
-        checkRedirect: (next) => {
-          if (next.protocol !== 'https:' && next.protocol !== 'http:')
-            return 'unsupported protocol';
-          if (isRoot || next.origin === url.origin) return undefined;
-          return hostAllowed(next.hostname, this.#options.policy.allowedHosts)
-            ? undefined
-            : 'host not allowed';
-        },
-      });
+      const fetched = await fetchText(url, this.fetchOptions(url, isRoot));
       text = fetched.text;
       hint = `${fetched.contentType} ${fetched.url.pathname}`;
       finalUrl = fetched.url;
+      validators = fetched.validators;
     }
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     const format = detectFormat(text, hint);
     const data = parseDocumentText(text, format);
     const canonical = stripHash(finalUrl);
     const location = finalUrl.protocol === 'file:' ? fileURLToPath(finalUrl) : canonical;
-    return { url: canonical, display: this.#display(finalUrl), location, format, text, data };
+    return {
+      url: canonical,
+      display: this.#display(finalUrl),
+      location,
+      format,
+      text,
+      data,
+      ...(validators === undefined ? {} : { validators }),
+    };
+  }
+
+  /** Fetch options for a remote document of this store (see {@link documentFetchOptions}). */
+  fetchOptions(
+    url: URL,
+    isRoot = this.#root === undefined || stripHash(url) === this.#root.url,
+  ): FetchTextOptions {
+    return documentFetchOptions(
+      this.#options,
+      url,
+      isRoot
+        ? { isRoot: true }
+        : { isRoot: false, origin: this.#root === undefined ? undefined : rootOrigin(this.#root) },
+    );
   }
 
   #display(url: URL): string {
@@ -461,7 +591,7 @@ export class DocumentStore {
         visit(child, appendPointer(pointer, key), current);
       }
     };
-    visit(doc.data, '', doc.url);
+    visit(doc.data, '', this.#documentBase(doc));
     index = bases;
     this.#bases.set(doc.url, index);
     return index;
@@ -469,12 +599,12 @@ export class DocumentStore {
 
   /** The base URI `$ref` values at `pointer` resolve against. */
   #baseFor(doc: LoadedDocument, pointer: string): string {
-    if (!this.#schemaIds) return doc.url;
+    if (!this.#schemaIds) return this.#documentBase(doc);
     const index = this.#baseIndex(doc);
     for (let current = pointer; ; current = current.slice(0, current.lastIndexOf('/'))) {
       const base = index.get(current);
       if (base !== undefined) return base;
-      if (current === '') return doc.url;
+      if (current === '') return this.#documentBase(doc);
     }
   }
 

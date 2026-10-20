@@ -300,6 +300,7 @@ export function Overview({ data }: { data: OverviewResponse }) {
                     <Badge tone="outline">{data.config.language}</Badge>
                     <Badge tone="outline">{data.config.adapter}</Badge>
                     {data.config.reactQuery ? <Badge tone="outline">React Query</Badge> : null}
+                    {data.config.validation === 'zod' ? <Badge tone="outline">Zod</Badge> : null}
                   </span>,
                 ],
                 ['Input', <Mono key="i">{data.config.input}</Mono>],
@@ -377,12 +378,28 @@ export function Overview({ data }: { data: OverviewResponse }) {
                   {data.tags.map((tag) => (
                     <TableRow key={tag.name}>
                       <Td>
-                        <div className="font-medium">{tag.name}</div>
-                        {tag.description === undefined ? null : (
-                          <div className="mt-0.5 text-[12.5px] text-muted-foreground">
-                            {tag.description}
+                        {/* Nested tags (OpenAPI 3.2) are indented under their parent. */}
+                        <div style={{ paddingLeft: `${tag.depth * 18}px` }}>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {tag.depth > 0 ? (
+                              <span aria-hidden="true" className="text-faint-foreground">
+                                ↳
+                              </span>
+                            ) : null}
+                            <span className="font-medium">{tag.summary ?? tag.name}</span>
+                            {tag.summary === undefined ? null : (
+                              <code className="font-mono text-[11.5px] text-muted-foreground">
+                                {tag.name}
+                              </code>
+                            )}
+                            {tag.kind === undefined ? null : <Badge>{tag.kind}</Badge>}
                           </div>
-                        )}
+                          {tag.description === undefined ? null : (
+                            <div className="mt-0.5 text-[12.5px] text-muted-foreground">
+                              {tag.description}
+                            </div>
+                          )}
+                        </div>
                       </Td>
                       <Td>
                         <div className="flex items-center gap-2.5">

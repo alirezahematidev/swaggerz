@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { wireMethod } from '../ir/types.ts';
 import type { ProjectModel } from '../analysis/types.ts';
 import type { GeneratedFile } from '../codegen/types.ts';
 import { compareStrings } from '../utils/strings.ts';
@@ -44,7 +45,7 @@ export function snapshot(project: ProjectModel, files: readonly GeneratedFile[])
         {
           fingerprint: fingerprint(symbol.operation, contents.operations.get(symbol.key)),
           name: symbol.name,
-          label: `${symbol.operation.method.toUpperCase()} ${symbol.operation.path}`,
+          label: `${wireMethod(symbol.operation.method)} ${symbol.operation.path}`,
         },
       ]),
     ),

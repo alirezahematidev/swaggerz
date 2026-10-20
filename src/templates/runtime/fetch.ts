@@ -17,7 +17,12 @@ function isTextual(contentType: string): boolean {
     type === 'application/xml' ||
     type.endsWith('+xml') ||
     type === 'application/x-www-form-urlencoded' ||
-    type === 'application/javascript'
+    type === 'application/javascript' ||
+    // Sequences of JSON values (JSON Lines, NDJSON, JSON text sequences) are read as text.
+    type === 'application/jsonl' ||
+    type === 'application/x-ndjson' ||
+    type === 'application/json-seq' ||
+    type.endsWith('+json-seq')
   );
 }
 

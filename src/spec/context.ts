@@ -146,6 +146,20 @@ export class ParseContext {
   }
 
   /**
+   * Follows a `$ref` where the specification does not allow one but tools commonly accept it
+   * (Operation Objects in descriptions split into files), noting it with `spec/non-standard-ref`.
+   */
+  derefNonStandard(cursor: Cursor, what: string): Cursor | undefined {
+    if (!isRecord(cursor.value) || typeof cursor.value.$ref !== 'string') return cursor;
+    this.info(
+      'spec/non-standard-ref',
+      `${what} cannot be a $ref according to the specification; the reference is followed.`,
+      cursor,
+    );
+    return this.deref(cursor);
+  }
+
+  /**
    * Follows `$ref` chains for non-schema objects (parameters, responses, request bodies, path
    * items, headers, examples, security schemes). Returns `undefined` when a reference is broken
    * (already reported) or circular.

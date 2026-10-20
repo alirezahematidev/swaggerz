@@ -1,0 +1,80 @@
+# Patterns found in public API descriptions that once produced invalid code (see the corpus,
+# fixtures/corpus). One case per bug, kept small.
+openapi: 3.0.3
+info:
+  title: Real-world patterns
+  version: 1.0.0
+paths:
+  # DigitalOcean: Operation Objects as $refs to files (not allowed by the specification).
+  /v2/1-clicks:
+    get:
+      $ref: operations/list-one-clicks.yaml
+  /errors/{id}:
+    get:
+      operationId: getErrorDetails
+      tags: [Errors]
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorDetails'
+  /schemas:
+    get:
+      operationId: getSchemaProps
+      tags: [Schemas]
+      responses:
+        '200':
+          description: A recursive schema description.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JSONSchemaProps'
+components:
+  schemas:
+    # Discord: a recursive map in a union (TypeScript rejects `Record<string, Self> | Other`).
+    ErrorDetails:
+      oneOf:
+        - type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ErrorDetails'
+        - $ref: '#/components/schemas/InnerErrors'
+    InnerErrors:
+      type: object
+      properties:
+        message:
+          type: string
+    # Kubernetes: recursive maps inside a recursive object.
+    JSONSchemaProps:
+      type: object
+      properties:
+        title:
+          type: string
+        properties:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/JSONSchemaProps'
+        items:
+          $ref: '#/components/schemas/JSONSchemaProps'
+    # DigitalOcean: a union with an unconstrained member is `unknown`.
+    PageLinks:
+      type: object
+      properties:
+        pages:
+          anyOf:
+            - $ref: '#/components/schemas/ForwardLinks'
+            - $ref: '#/components/schemas/BackwardLinks'
+            - {}
+    ForwardLinks:
+      type: object
+      properties:
+        next:
+          type: string
+    BackwardLinks:
+      type: object
+      properties:
+        prev:
+          type: string

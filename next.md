@@ -1,6 +1,6 @@
 # What to build next
 
-Status: proposals, nothing is committed. Ordered by value for effort within each group. This complements [docs/roadmap.md](docs/roadmap.md) (the short list) and [website.md](website.md) (docs site). Effort: **S** ≈ days, **M** ≈ one to two weeks, **L** ≈ several weeks.
+Status: proposals. Items 1, 2, 3, 5 and 7 are implemented (see [docs/roadmap.md](docs/roadmap.md#after-the-initial-implementation)); the rest is not committed. Ordered by value for effort within each group. This complements [docs/roadmap.md](docs/roadmap.md) (the short list) and [website.md](website.md) (docs site). Effort: **S** ≈ days, **M** ≈ one to two weeks, **L** ≈ several weeks.
 
 ## First: ship 0.1
 
@@ -14,13 +14,13 @@ None of the features below matter until people can install the package.
 
 | #   | Feature                                              | Why it matters                                                               | Effort |
 | --- | ---------------------------------------------------- | ---------------------------------------------------------------------------- | ------ |
-| 1   | `generate --check` for CI                            | Fail a pull request when committed output is stale                           | S      |
-| 2   | Errors typed by status                               | `if (error.status === 404) error.body` narrows to the 404 body               | S–M    |
-| 3   | Retry and token-refresh middleware                   | The two things every production client re-implements                         | M      |
+| 1   | `generate --check` for CI ✓                          | Fail a pull request when committed output is stale                           | S      |
+| 2   | Errors typed by status ✓                             | `if (error.status === 404) error.body` narrows to the 404 body               | S–M    |
+| 3   | Retry and token-refresh middleware ✓                 | The two things every production client re-implements                         | M      |
 | 4   | "What changed" in the dashboard                      | Badges say _Updated_; this shows how                                         | S–M    |
-| 5   | Live reload for remote specs                         | URL inputs are not watched today                                             | S      |
+| 5   | Live reload for remote specs ✓                       | URL inputs are not watched today                                             | S      |
 | 6   | MCP server for coding agents                         | Agents call the generated client correctly instead of guessing from the spec | S–M    |
-| 7   | OpenAPI 3.2                                          | Current spec version; rejected today                                         | M–L    |
+| 7   | OpenAPI 3.2 ✓                                        | Current spec version; rejected today                                         | M–L    |
 | 8   | Streaming responses (SSE, JSON Lines)                | Typed `for await` over event streams, LLM-style APIs                         | M      |
 | 9   | Mocks: MSW handlers and data factories               | Tests, Storybook and offline development from the same spec                  | M      |
 | 10  | `swaggerz diff`: breaking-change detection           | Catch API breaks in CI before clients do                                     | M–L    |
@@ -35,6 +35,8 @@ None of the features below matter until people can install the package.
 Small changes with an outsized effect on everyday use.
 
 ### 1. `generate --check`
+
+> **Implemented** as described. The generator version recorded in the manifest is not compared, so upgrading swaggerz alone does not fail the check.
 
 **Why.** Teams that commit generated code need CI to fail when someone changes the spec and forgets to regenerate. Today `--dry-run` lists the changes but exits 0.
 
@@ -51,6 +53,8 @@ With `--json`, the stale files and their change kinds are in the output. A recip
 **Done when.** Exit codes are covered by the CLI tests for up-to-date, stale, missing and hand-edited output.
 
 ### 2. Errors typed by status
+
+> **Implemented** with two deviations from the sketch below: the status is `ApiError`'s second type parameter (`ApiError<Body, Status>`, like `ApiResponse<Data, Status>`, so `ApiError<Body>` keeps working), and the narrowing guard is generated per operation (`isGetPetByIdApiError(error)`) instead of `isApiError(getPetById, error)`, which would need the function to carry a runtime marker. See [decision 15](docs/decisions.md#15-errors-are-typed-by-status-with-one-guard-per-operation).
 
 **Why.** `ApiError<Body>` has `status: number` and a body typed as the union of every error response, so `status === 404` does not narrow the body. This is the most common complaint about generated clients.
 
@@ -73,6 +77,8 @@ Each operation exports `GetPetByIdApiError = ApiError<404, NotFound> | ApiError<
 **Risk.** Changes the `ApiError` generic parameters. Fine before 1.0, but it needs a changelog entry and a migration note.
 
 ### 3. Retry and token-refresh middleware
+
+> **Implemented** as `retry()` and `refreshAuth()`. Middleware returns `context.retry()` from `onResponse`/`onError` to send the request again. `refreshAuth` also accepts a `refresh` without `scheme` for credentials kept in your own store, never refreshes operations without security requirements, and replays each call at most once.
 
 **Why.** Retries with backoff and "refresh the token once on 401, then replay" are written by hand in almost every app, and often wrongly (retrying non-idempotent requests, retry storms, refresh races).
 
@@ -107,6 +113,8 @@ client.use(
 **Done when.** The live reload integration tests assert the diff for a renamed property, a new required parameter and a narrowed enum.
 
 ### 5. Live reload for remote specs
+
+> **Implemented** as `spec.fetch.poll`: loopback hosts are polled every 2 s by default, other hosts when enabled (`true` or an interval of at least 500 ms).
 
 **Why.** `spec.input: https://…` is common (specs served by the backend in development), and it gets neither `--watch` nor dashboard live reload.
 
@@ -157,6 +165,8 @@ Generated modules are also exposed as resources (`swaggerz://operations/getPetBy
 **Done when.** An integration test drives the server over stdio (initialize, list tools, call each tool against the fixture specs), and the docs show a recorded agent session where `find_operations` and `get_operation` lead to a correct import and call.
 
 ### 7. OpenAPI 3.2
+
+> **Implemented**, checked against the published 3.2.0 text. `itemSchema` content is read as text until item 8 (streaming) exists; `itemEncoding`/`prefixEncoding` and `xml.nodeType` are not used. See [compatibility](docs/compatibility.md#specification-support).
 
 **Why.** 3.2 is the current OpenAPI version; documents that declare it are rejected today (`spec/unsupported-version`).
 
@@ -271,7 +281,7 @@ Valuable but larger, or waiting on something else.
 - **Server-side types and validators**: request and response types for route handlers (Hono, Fastify, Express), with optional Zod request validation, so the server is checked against the same contract as the client. The webhook handler types are the first step.
 - **Incremental compilation**: recompile only the documents and schemas that changed, for large specs in watch mode and the dashboard.
 - **Static dashboard export**: `swaggerz dashboard --export site/` writes the explorer as static files with pre-rendered data, for publishing internal API references.
-- **Smaller runtime**: emit only the serialization styles, body formats and helpers the spec uses (the shared runtime is about 12 KB today).
+- **Smaller runtime**: emit only the serialization styles, body formats and helpers the spec uses (the shared runtime is about 13 KB today).
 - **Migration from other generators**: read an orval, openapi-typescript or openapi-generator setup and write the equivalent `swaggerz.config.ts`, plus a guide for the code changes.
 - **More validators**: Valibot and ArkType next to Zod, behind the same `features.validation` option.
 - **`swaggerz test`**: run saved requests with declarative assertions in CI, reusing the request runner and the validator from item 11.
@@ -279,12 +289,12 @@ Valuable but larger, or waiting on something else.
 
 ## Verification gaps worth closing
 
-Not features, but each one would turn a "should work" into a tested claim ([docs/compatibility.md](docs/compatibility.md)).
+Not features, but each one turns a "should work" into a tested claim ([docs/compatibility.md](docs/compatibility.md)). All four are closed:
 
-- Generated clients in real browsers (Playwright) and in Deno, Bun and an edge runtime; today they run in Node.js and happy-dom only.
-- webpack in the tree-shaking tests (esbuild, Rollup and Vite are covered).
-- File watching on Linux and Windows (the live reload and `--watch` tests have only run on macOS).
-- A large real-world spec corpus (public APIs) compiled in CI, to catch crashes and diagnostics regressions.
+- ✓ Generated clients in real browsers (Chromium, Firefox, WebKit through Playwright), Deno, Bun and workerd: `pnpm test:runtimes`, one CI job per runtime.
+- ✓ webpack in the tree-shaking tests.
+- ✓ File watching on Linux: the whole suite passes in a Debian container; Windows runs in the CI matrix, with the platform differences reviewed (verified once CI has run there).
+- ✓ A corpus of 24 public API descriptions compiled and type-checked in CI against a baseline: `pnpm corpus`. It found five code generation bugs and two false warnings, now fixed with regression fixtures.
 
 ## Not planned
 

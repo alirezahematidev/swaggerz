@@ -9,9 +9,9 @@
  * before 1.0. Changes are recorded in the changelog and `IR_VERSION` is incremented.
  */
 
-export const IR_VERSION = 2;
+export const IR_VERSION = 3;
 
-export type SpecVersion = '2.0' | '3.0' | '3.1';
+export type SpecVersion = '2.0' | '3.0' | '3.1' | '3.2';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -38,7 +38,7 @@ export interface ApiDocument {
   readonly operations: readonly OperationIR[];
   /** Named schemas sorted by id. */
   readonly schemas: readonly SchemaDefinition[];
-  /** Requests the API sends to its consumers (OpenAPI 3.1 `webhooks`), sorted by name. */
+  /** Requests the API sends to its consumers (OpenAPI 3.1+ `webhooks`), sorted by name. */
   readonly webhooks: readonly WebhookIR[];
   readonly securitySchemes: readonly SecuritySchemeIR[];
   /** Document-level security requirements, applied when an operation declares none. */
@@ -62,6 +62,8 @@ export interface ApiInfo {
 
 export interface ServerIR {
   readonly url: string;
+  /** OpenAPI 3.2 server name. */
+  readonly name?: string;
   readonly description?: string;
   readonly variables: Readonly<
     Record<
@@ -73,8 +75,14 @@ export interface ServerIR {
 
 export interface TagIR {
   readonly name: string;
+  /** OpenAPI 3.2: a short display name. */
+  readonly summary?: string;
   readonly description?: string;
   readonly externalDocs?: ExternalDocsIR;
+  /** OpenAPI 3.2: the tag this one is nested under (validated: declared, no cycles). */
+  readonly parent?: string;
+  /** OpenAPI 3.2: what sort of tag it is, e.g. `nav`, `badge` or `audience`. */
+  readonly kind?: string;
 }
 
 export interface ExternalDocsIR {
@@ -82,9 +90,26 @@ export interface ExternalDocsIR {
   readonly description?: string;
 }
 
-export type HttpMethod = 'get' | 'put' | 'post' | 'delete' | 'options' | 'head' | 'patch' | 'trace';
+/** Methods with their own Path Item field (`query` since OpenAPI 3.2), lowercase. */
+export type StandardHttpMethod =
+  | 'get'
+  | 'put'
+  | 'post'
+  | 'delete'
+  | 'options'
+  | 'head'
+  | 'patch'
+  | 'trace'
+  | 'query';
 
-export const HTTP_METHODS: readonly HttpMethod[] = [
+/**
+ * A standard method in lowercase, or the method of an OpenAPI 3.2 `additionalOperations` entry
+ * spelled exactly as it is sent (e.g. `COPY`). Use {@link wireMethod} for the request method.
+ */
+// The `string & {}` member keeps editor completion for the standard methods.
+export type HttpMethod = StandardHttpMethod | (string & {});
+
+export const HTTP_METHODS: readonly StandardHttpMethod[] = [
   'get',
   'put',
   'post',
@@ -93,7 +118,18 @@ export const HTTP_METHODS: readonly HttpMethod[] = [
   'head',
   'patch',
   'trace',
+  'query',
 ];
+
+/** Whether a method is one of the standard (Path Item field) methods. */
+export function isStandardMethod(method: string): method is StandardHttpMethod {
+  return (HTTP_METHODS as readonly string[]).includes(method);
+}
+
+/** The method as sent: standard methods uppercased, additional operations as declared. */
+export function wireMethod(method: HttpMethod): string {
+  return isStandardMethod(method) ? method.toUpperCase() : method;
+}
 
 export interface OperationIR {
   /** Stable, unique key: `${method} ${path}`, e.g. `get /pets/{petId}`. */
@@ -134,10 +170,12 @@ export interface WebhookIR {
   readonly operations: readonly OperationIR[];
 }
 
-export type ParameterLocation = 'path' | 'query' | 'header' | 'cookie';
+/** `querystring` (OpenAPI 3.2) is the whole query string as one value, serialized by its media type. */
+export type ParameterLocation = 'path' | 'query' | 'querystring' | 'header' | 'cookie';
 
 /**
- * Serialization styles. `tabDelimited` exists only to preserve Swagger 2.0 `collectionFormat: tsv`.
+ * Serialization styles. `tabDelimited` exists only to preserve Swagger 2.0 `collectionFormat: tsv`;
+ * `cookie` is OpenAPI 3.2's style for cookies (`; ` separators, no percent-encoding).
  */
 export type ParameterStyle =
   | 'matrix'
@@ -147,7 +185,8 @@ export type ParameterStyle =
   | 'spaceDelimited'
   | 'pipeDelimited'
   | 'tabDelimited'
-  | 'deepObject';
+  | 'deepObject'
+  | 'cookie';
 
 export interface ParameterIR {
   readonly name: string;
@@ -161,6 +200,8 @@ export interface ParameterIR {
   readonly allowReserved: boolean;
   /** Set when the parameter uses `content` instead of `schema`; the value is serialized with it. */
   readonly contentType?: string;
+  /** `querystring` parameters with form content: how properties are encoded. */
+  readonly encoding?: Readonly<Record<string, EncodingIR>>;
   readonly examples: readonly ExampleIR[];
   readonly extensions: Extensions;
   readonly source: SourceRef;
@@ -170,7 +211,10 @@ export interface ExampleIR {
   readonly name?: string;
   readonly summary?: string;
   readonly description?: string;
+  /** The example data (`value`, or OpenAPI 3.2 `dataValue`). */
   readonly value?: JsonValue;
+  /** OpenAPI 3.2: the example in its serialized form. */
+  readonly serializedValue?: string;
   readonly externalValue?: string;
 }
 
@@ -185,7 +229,13 @@ export interface RequestBodyIR {
 
 export interface MediaTypeIR {
   readonly mediaType: string;
+  /**
+   * The complete content. For sequential media types described only by an OpenAPI 3.2
+   * `itemSchema`, the content as text (streaming is not generated yet).
+   */
   readonly schema: SchemaIR;
+  /** OpenAPI 3.2: the schema of each item of a sequential media type (JSON Lines, SSE, …). */
+  readonly itemSchema?: SchemaIR;
   readonly examples: readonly ExampleIR[];
   readonly encoding?: Readonly<Record<string, EncodingIR>>;
 }
@@ -199,6 +249,8 @@ export interface EncodingIR {
 export interface ResponseIR {
   /** `200`, `2XX` or `default`. */
   readonly status: string;
+  /** OpenAPI 3.2: a short summary. */
+  readonly summary?: string;
   readonly description?: string;
   readonly contents: readonly MediaTypeIR[];
   readonly headers: readonly HeaderIR[];
@@ -226,7 +278,12 @@ export type SecuritySchemeIR =
       readonly scheme: string;
       readonly bearerFormat?: string;
     })
-  | (SecuritySchemeBase & { readonly type: 'oauth2'; readonly flows: OAuthFlowsIR })
+  | (SecuritySchemeBase & {
+      readonly type: 'oauth2';
+      readonly flows: OAuthFlowsIR;
+      /** OpenAPI 3.2: RFC 8414 authorization server metadata. */
+      readonly oauth2MetadataUrl?: string;
+    })
   | (SecuritySchemeBase & { readonly type: 'openIdConnect'; readonly openIdConnectUrl: string })
   | (SecuritySchemeBase & { readonly type: 'mutualTLS' });
 
@@ -234,6 +291,8 @@ interface SecuritySchemeBase {
   /** Key under `components.securitySchemes` / `securityDefinitions`. */
   readonly key: string;
   readonly description?: string;
+  /** OpenAPI 3.2. */
+  readonly deprecated?: boolean;
   readonly extensions: Extensions;
   readonly source: SourceRef;
 }
@@ -243,10 +302,13 @@ export interface OAuthFlowsIR {
   readonly password?: OAuthFlowIR;
   readonly clientCredentials?: OAuthFlowIR;
   readonly authorizationCode?: OAuthFlowIR;
+  /** OpenAPI 3.2: RFC 8628 device authorization. */
+  readonly deviceAuthorization?: OAuthFlowIR;
 }
 
 export interface OAuthFlowIR {
   readonly authorizationUrl?: string;
+  readonly deviceAuthorizationUrl?: string;
   readonly tokenUrl?: string;
   readonly refreshUrl?: string;
   readonly scopes: Readonly<Record<string, string>>;
@@ -341,6 +403,11 @@ export interface DiscriminatorIR {
   readonly propertyName: string;
   /** Discriminator value → definition id. Includes implicit mappings. */
   readonly mapping: readonly { readonly value: string; readonly target: string }[];
+  /**
+   * OpenAPI 3.2 `defaultMapping`: the definition that applies when the property is absent or has
+   * an unmapped value. It has no mapping entry.
+   */
+  readonly defaultTarget?: string;
 }
 
 export type SchemaIR =

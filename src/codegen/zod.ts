@@ -205,7 +205,7 @@ function zodBase(
       return expression;
     }
     case 'object':
-      return zodObject(schema, zc, z);
+      return zodObject(schema, zc, z, inGetter);
     case 'union': {
       const discriminator = schema.discriminator;
       const variants = schema.variants.map((variant) => {
@@ -235,11 +235,13 @@ function zodObject(
   schema: Extract<SchemaIR, { kind: 'object' }>,
   zc: ZodContext,
   z: string,
+  inGetter: boolean,
 ): string {
   const additional = schema.additionalProperties;
   if (schema.properties.length === 0) {
     if (additional === false) return `${z}.strictObject({})`;
-    return `${z}.record(${z}.string(), ${additional === undefined ? `${z}.unknown()` : zodExpression(additional, zc)})`;
+    // Inside a getter, references are evaluated lazily already and need no `z.lazy`.
+    return `${z}.record(${z}.string(), ${additional === undefined ? `${z}.unknown()` : zodExpression(additional, zc, inGetter)})`;
   }
   const members = schema.properties.map((property) => {
     const lazy = hasRef(property.schema);
@@ -267,11 +269,15 @@ export function generateZodModel(model: ModelSymbol, ctx: EmitContext): ModuleOu
   const module = model.zodModule;
   const outputs = renderAll(module, ctx, (imports: ImportManager, lang: Lang) => {
     imports.declare(name);
-    const doc = renderJsDoc({ summary: `Zod schema for {@link ${model.name}}.`, tags: [] });
+    const summary = `Zod schema for {@link ${model.name}}.`;
+    // The schema validates the wire format: with `types.dates: 'Date'`, dates are strings there.
+    const declared = (): string =>
+      model.datesName === undefined
+        ? imports.add(model.module, model.name, { typeOnly: true })
+        : 'unknown';
     if (lang === 'dts') {
       const z = imports.add('zod', 'z', { typeOnly: true, external: true });
-      const type = imports.add(model.module, model.name, { typeOnly: true });
-      return `${doc}export declare const ${name}: ${z}.ZodType<${type}>;\n`;
+      return `${renderJsDoc({ summary, tags: [] })}export declare const ${name}: ${z}.ZodType<${declared()}>;\n`;
     }
     const zc: ZodContext = { imports, ctx, self: { id: model.id, name } };
     let expression = zodExpression(model.definition.schema, zc, false);
@@ -283,7 +289,17 @@ export function generateZodModel(model: ModelSymbol, ctx: EmitContext): ModuleOu
       );
       expression = `${z}.intersection(${expression}, ${z}.looseObject({ ${propertyKey(property)}: ${tag} }))`;
     }
-    return `${doc}export const ${name} = ${expression};\n`;
+    const doc = renderJsDoc({ summary, tags: [] });
+    if (!ctx.project.graph.recursiveSchemas().has(model.id))
+      return `${doc}export const ${name} = ${expression};\n`;
+    // Recursive schemas are cast to their model type: Zod's inference cannot type a schema that
+    // refers to itself through `z.lazy`, and on large cycles it exceeds TypeScript's
+    // instantiation depth. A cast rather than an annotation, because Zod types optional
+    // properties as `T | undefined`, which `exactOptionalPropertyTypes` would reject.
+    const zodType = `${imports.add('zod', 'z', { typeOnly: true, external: true })}.ZodType<${declared()}>`;
+    return lang === 'js'
+      ? `${doc}export const ${name} = /** @type {${zodType}} */ (${expression});\n`
+      : `${doc}export const ${name} = ${expression} as ${zodType};\n`;
   });
   return {
     module,

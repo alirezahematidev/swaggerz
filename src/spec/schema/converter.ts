@@ -744,33 +744,46 @@ export class SchemaConverter {
     const raw = this.#dialect.readDiscriminator(cursor, this.#ctx);
     if (raw === undefined) return undefined;
     const mapping = this.#explicitMapping(raw);
+    // OpenAPI 3.2: the default schema applies to absent or unmapped values, so it gets no value.
+    const defaultTarget =
+      raw.defaultMapping === undefined ? undefined : this.#mappingTarget(raw.defaultMapping);
     const mapped = new Set(mapping.map((entry) => entry.target));
     for (const variant of variants) {
-      if (variant.kind !== 'ref' || mapped.has(variant.target)) continue;
+      if (variant.kind !== 'ref' || mapped.has(variant.target) || variant.target === defaultTarget)
+        continue;
       const value = this.#implicitDiscriminatorValue(variant.target);
       if (value !== undefined) mapping.push({ value, target: variant.target });
     }
-    return { propertyName: raw.propertyName, mapping };
+    return {
+      propertyName: raw.propertyName,
+      mapping,
+      ...(defaultTarget === undefined ? {} : { defaultTarget }),
+    };
   }
 
   #explicitMapping(raw: RawDiscriminator): { value: string; target: string }[] {
     const result: { value: string; target: string }[] = [];
     for (const entry of raw.mapping) {
-      const ref = looksLikeReference(entry.target)
-        ? entry.target
-        : `#${appendPointer(this.#dialect.componentsPointer, entry.target)}`;
-      // Plain schema names refer to the root document's reusable schemas.
-      const base = looksLikeReference(entry.target) ? entry.at.doc : this.#ctx.store.root;
-      const resolved = this.#ctx.store.resolve(ref, base, entry.at.pointer);
-      if (resolved === undefined) continue;
-      const id = this.#definitionAt({
-        doc: resolved.doc,
-        pointer: resolved.pointer,
-        value: resolved.value,
-      });
+      const id = this.#mappingTarget(entry);
       if (id !== undefined) result.push({ value: entry.value, target: id });
     }
     return result;
+  }
+
+  /** The definition id a mapping value (a schema name or a reference) points to. */
+  #mappingTarget(entry: { readonly target: string; readonly at: Cursor }): string | undefined {
+    const ref = looksLikeReference(entry.target)
+      ? entry.target
+      : `#${appendPointer(this.#dialect.componentsPointer, entry.target)}`;
+    // Plain schema names refer to the root document's reusable schemas.
+    const base = looksLikeReference(entry.target) ? entry.at.doc : this.#ctx.store.root;
+    const resolved = this.#ctx.store.resolve(ref, base, entry.at.pointer);
+    if (resolved === undefined) return undefined;
+    return this.#definitionAt({
+      doc: resolved.doc,
+      pointer: resolved.pointer,
+      value: resolved.value,
+    });
   }
 
   #implicitDiscriminatorValue(id: string): string | undefined {

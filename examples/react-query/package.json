@@ -6,7 +6,8 @@
     "generate": "swaggerz generate",
     "dev": "vite",
     "build": "vite build",
-    "check": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && vite build"
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && vite build",
+    "dashboard": "swaggerz dashboard"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.0",
@@ -18,7 +19,7 @@
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
-    "swaggerz": "file:../..",
+    "swaggerz": "workspace:*",
     "typescript": "~6.0.3",
     "vite": "^8.0.0"
   }

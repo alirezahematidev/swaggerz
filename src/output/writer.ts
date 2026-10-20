@@ -82,6 +82,19 @@ export interface PlannedWrite {
   /** Notes such as edited generated files that were kept. */
   readonly notes: readonly Diagnostic[];
   readonly manifest: Manifest;
+  /**
+   * How the manifest's file list (ownership and content hashes) changes. The recorded generator
+   * version is ignored, so upgrading swaggerz alone does not make the output stale.
+   */
+  readonly manifestChange: 'create' | 'update' | 'unchanged';
+}
+
+function sameFiles(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
 }
 
 /**
@@ -149,6 +162,9 @@ export async function planWrite(
   const sortedFiles: Record<string, string> = {};
   for (const key of Object.keys(nextFiles).sort(compareStrings))
     sortedFiles[key] = nextFiles[key] ?? '';
+  const manifestExists =
+    previous !== undefined ||
+    (await readIfExists(path.join(directory, MANIFEST_FILENAME))) !== undefined;
   return {
     plan: { directory, changes },
     conflicts,
@@ -158,6 +174,11 @@ export async function planWrite(
       generator: { name: PACKAGE_NAME, version: PACKAGE_VERSION },
       files: sortedFiles,
     },
+    manifestChange: !manifestExists
+      ? 'create'
+      : previous !== undefined && sameFiles(previous.files, sortedFiles)
+        ? 'unchanged'
+        : 'update',
   };
 }
 

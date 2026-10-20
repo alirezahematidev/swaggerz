@@ -18,18 +18,22 @@ The sources are run directly by Node.js (type stripping): `node src/cli/bin.ts g
 
 ## Scripts
 
-| Script                                       | Purpose                                                                                                |
-| -------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `pnpm typecheck`                             | Type-checks the sources, the runtime templates (browser-only lib), the dashboard client and its tests  |
-| `pnpm lint` / `pnpm format`                  | oxlint (type-aware rules via oxlint-tsgolint) / oxfmt                                                  |
-| `pnpm test`, `test:unit`, `test:integration` | Vitest; the global setup builds the runtime templates and the dashboard bundle                         |
-| `pnpm test:smoke`                            | Generates a JavaScript client and runs it on the current Node.js (CI runs it on Node.js 18–24)         |
-| `pnpm test:pack`                             | Packs the tarball and uses it in a fresh project: `init`, `generate`, `tsc`, a real request, the API   |
-| `pnpm compat`                                | Type-checks generated clients with the oldest and newest supported TypeScript, React Query, axios, Zod |
-| `pnpm bench`                                 | Compiler benchmarks on synthetic specifications ([docs/benchmarks.md](docs/benchmarks.md))             |
-| `node scripts/verify-examples.ts`            | Installs the packed tarball into each example and runs its `generate`, `check` and `start` scripts     |
+| Script                                                | Purpose                                                                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                                      | Type-checks the sources, the runtime templates (browser-only lib), the dashboard client and its tests     |
+| `pnpm lint` / `pnpm format`                           | oxlint (type-aware rules via oxlint-tsgolint) / oxfmt                                                     |
+| `pnpm test`, `test:unit`, `test:integration`          | Vitest; the global setup builds the runtime templates and the dashboard bundle                            |
+| `pnpm test:smoke`                                     | Generates a JavaScript client and runs it on the current Node.js (CI runs it on Node.js 18–24)            |
+| `pnpm test:runtimes [runtime…]`                       | Runs generated clients in Node.js, Deno, Bun, Chromium, Firefox, WebKit and workerd (installed on demand) |
+| `pnpm corpus [name…] [--update]`                      | Compiles and type-checks 24 public API descriptions and compares the diagnostics with a baseline          |
+| `pnpm test:pack`                                      | Packs the tarball and uses it in a fresh project: `init`, `generate`, `tsc`, a real request, the API      |
+| `pnpm compat`                                         | Type-checks generated clients with the oldest and newest supported TypeScript, React Query, axios, Zod    |
+| `pnpm bench`                                          | Compiler benchmarks on synthetic specifications ([docs/benchmarks.md](docs/benchmarks.md))                |
+| `pnpm example:<name>`, `pnpm example <name> [script]` | Builds swaggerz, generates the example's client and runs it (`dev`/`start`) or the given script           |
+| `pnpm examples:check`                                 | Builds swaggerz, then generates and type-checks every example                                             |
+| `node scripts/verify-examples.ts`                     | Installs the packed tarball into each example and runs its `generate`, `check` and `start` scripts        |
 
-`test:pack`, `compat` and `verify-examples` install packages from the npm registry.
+`test:pack`, `compat`, `test:runtimes`, `corpus` and `verify-examples` download packages or documents (network).
 
 ## Tests
 
@@ -40,7 +44,7 @@ Guidelines:
 
 - Add a fixture in `fixtures/specs` for new specification features, and a test that compiles the generated code. "It generates" is not enough; the output must type-check and, where it has runtime behavior, run.
 - Prefer asserting behavior and types over snapshotting whole files.
-- Specification features follow the three versions: when you add one, check how Swagger 2.0, OpenAPI 3.0 and 3.1 express it.
+- Specification features follow the four versions: when you add one, check how Swagger 2.0, OpenAPI 3.0, 3.1 and 3.2 express it.
 - Any change to generated output must keep it deterministic: the same input produces byte-identical files on every platform.
 
 ## Rules for code

@@ -6,6 +6,7 @@ import {
   serializeCookies,
   serializeHeader,
   serializeQuery,
+  serializeQuerystring,
 } from './serialization.js';
 import { linkSignal } from './signal.js';
 import type {
@@ -18,6 +19,7 @@ import type {
   OperationInfo,
   OperationRequest,
   RequestOptions,
+  RetryDirective,
   SecurityScheme,
   TransportRequest,
   TransportResponse,
@@ -85,18 +87,24 @@ function applyScheme(
 
 /**
  * Applies the first security requirement whose credentials are all configured. Requirements are
- * alternatives; schemes inside one requirement are applied together.
+ * alternatives; schemes inside one requirement are applied together. Without `queryAllowed` (the
+ * query string is a JSON or text document), requirements with query API keys are skipped.
  */
 async function applySecurity<T>(
   security: OperationRequest['security'],
   config: ClientConfig<T>,
   headers: Headers,
   query: Record<string, unknown>,
+  queryAllowed: boolean,
 ): Promise<void> {
   if (security === undefined || config.auth === undefined) return;
   const auth = config.auth;
+  const inQuery = (key: string): boolean => {
+    const scheme = config.securitySchemes?.[key];
+    return scheme?.type === 'apiKey' && scheme.in === 'query';
+  };
   for (const requirement of security) {
-    if (requirement.length === 0) continue;
+    if (requirement.length === 0 || (!queryAllowed && requirement.some(inQuery))) continue;
     const values = await Promise.all(requirement.map((key) => resolveAuth(auth[key])));
     if (values.every((value) => value !== undefined && value !== '')) {
       requirement.forEach((key, index) => {
@@ -131,6 +139,11 @@ function mergeTransportOptions<T>(base: T | undefined, override: T | undefined):
   return override;
 }
 
+/** The value `context.retry()` returns; only its identity matters. */
+const RETRY = {} as RetryDirective;
+const retry = (): RetryDirective => RETRY;
+const isRetry = (value: unknown): value is RetryDirective => value === RETRY;
+
 /** Creates a client. Generated code creates one default client; create more for multi-tenant use. */
 export function createClient<TTransportOptions = unknown>(
   initialConfig: ClientConfig<TTransportOptions>,
@@ -142,34 +155,18 @@ export function createClient<TTransportOptions = unknown>(
     operation: OperationRequest,
     options: RequestOptions<TTransportOptions> = {},
   ): Promise<TResponse> {
-    const current = config;
+    // One object per call: middleware may key per-call state on it across retries.
     const info: OperationInfo = {
       operationId: operation.operationId,
       method: operation.method,
       path: operation.path,
+      ...(operation.security === undefined ? {} : { security: operation.security }),
     };
     const context = {
       operationId: operation.operationId,
       method: operation.method,
       url: operation.path,
     };
-    const query: Record<string, unknown> = { ...operation.query };
-    const headers = new Headers();
-
-    setHeaders(
-      headers,
-      typeof current.headers === 'function' ? await current.headers() : current.headers,
-    );
-    if (operation.accept !== undefined && !headers.has('accept'))
-      headers.set('accept', operation.accept);
-    const headerParams = operation.headers ?? {};
-    for (const name of Object.keys(headerParams)) {
-      const value = headerParams[name];
-      if (value !== undefined && value !== null)
-        headers.set(name, serializeHeader(value, operation.styles?.header?.[name]));
-    }
-    appendCookie(headers, serializeCookies(operation.cookies, operation.styles?.cookie));
-    await applySecurity(operation.security, current, headers, query);
 
     let bodyValue = operation.body;
     // Encode first (e.g. `Date` values to strings) so validation sees the wire format.
@@ -187,88 +184,166 @@ export function createClient<TTransportOptions = unknown>(
         );
       }
     }
+    const serialize = <T>(build: () => T): T => {
+      try {
+        return build();
+      } catch (error) {
+        throw new RequestError(
+          'serialization',
+          `Could not serialize the request: ${error instanceof Error ? error.message : String(error)}`,
+          context,
+          error,
+        );
+      }
+    };
+    const serialized = serialize(() =>
+      serializeBody(bodyValue, operation.mediaType, operation.encoding),
+    );
+    const path = serialize(() =>
+      interpolatePath(operation.path, operation.pathParams, operation.styles?.path),
+    );
 
-    let url: string;
-    let body: unknown;
-    try {
-      const serialized = serializeBody(bodyValue, operation.mediaType, operation.encoding);
-      body = serialized.body;
+    // The timeout covers the whole call, including retries and the waits between them.
+    const timeout = options.timeout ?? config.timeout;
+    const linked = linkSignal(options.signal, timeout);
+    /** URL of the latest attempt, for errors raised between attempts. */
+    let lastUrl = operation.path;
+
+    /** Builds the request of one attempt from the current config (credentials may change). */
+    const prepare = async (attempt: number): Promise<TransportRequest<TTransportOptions>> => {
+      const current = config;
+      const query: Record<string, unknown> = { ...operation.query };
+      const headers = new Headers();
+      setHeaders(
+        headers,
+        typeof current.headers === 'function' ? await current.headers() : current.headers,
+      );
+      if (operation.accept !== undefined && !headers.has('accept'))
+        headers.set('accept', operation.accept);
+      const headerParams = operation.headers ?? {};
+      for (const name of Object.keys(headerParams)) {
+        const value = headerParams[name];
+        if (value !== undefined && value !== null)
+          headers.set(name, serializeHeader(value, operation.styles?.header?.[name]));
+      }
+      appendCookie(headers, serializeCookies(operation.cookies, operation.styles?.cookie));
+      // A JSON or text query string has no room for `name=value` credentials.
+      const querystringType = operation.querystring?.mediaType.split(';')[0]?.trim().toLowerCase();
+      const queryAllowed =
+        querystringType === undefined || querystringType === 'application/x-www-form-urlencoded';
+      await applySecurity(operation.security, current, headers, query, queryAllowed);
       if (serialized.contentType !== undefined) headers.set('content-type', serialized.contentType);
-      const path = interpolatePath(operation.path, operation.pathParams, operation.styles?.path);
       const baseUrl =
         options.baseUrl ??
         (operation.server !== undefined && current.operationServers !== false
           ? operation.server
           : current.baseUrl);
-      url = joinUrl(baseUrl, path, serializeQuery(query, operation.styles?.query));
-    } catch (error) {
-      throw new RequestError(
-        'serialization',
-        `Could not serialize the request: ${error instanceof Error ? error.message : String(error)}`,
-        context,
-        error,
-      );
-    }
-    setHeaders(headers, options.headers);
-
-    const timeout = options.timeout ?? current.timeout;
-    const linked = linkSignal(options.signal, timeout);
-    let request: TransportRequest<TTransportOptions> = {
-      operationId: operation.operationId,
-      method: operation.method,
-      url,
-      headers,
-      body,
-      signal: linked.signal,
-      credentials: current.credentials,
-      parseAs: options.parseAs ?? operation.parseAs ?? 'auto',
-      transportOptions: mergeTransportOptions(current.transportOptions, options.transportOptions),
-    };
-
-    try {
+      const url = serialize(() => {
+        const querystring =
+          operation.querystring === undefined
+            ? ''
+            : serializeQuerystring(
+                operation.querystring.value,
+                operation.querystring.mediaType,
+                operation.querystring.encoding,
+              );
+        const rest = serializeQuery(query, operation.styles?.query);
+        return joinUrl(baseUrl, path, [querystring, rest].filter((part) => part !== '').join('&'));
+      });
+      setHeaders(headers, options.headers);
+      let request: TransportRequest<TTransportOptions> = {
+        operationId: operation.operationId,
+        method: operation.method,
+        url,
+        headers,
+        body: serialized.body,
+        signal: linked.signal,
+        credentials: current.credentials,
+        parseAs: options.parseAs ?? operation.parseAs ?? 'auto',
+        transportOptions: mergeTransportOptions(current.transportOptions, options.transportOptions),
+      };
       for (const item of middleware.slice()) {
-        const replaced = await item.onRequest?.({ request, operation: info });
+        const replaced = await item.onRequest?.({ request, operation: info, attempt, client });
         if (replaced !== undefined) request = replaced;
       }
-      const errorContext = { ...context, url: request.url };
+      return request;
+    };
 
-      const sent = request;
-      const recover = async (error: unknown): Promise<TransportResponse> => {
+    /** Sends one attempt: the response after middleware, or `RETRY`. */
+    const attemptOnce = async (
+      attempt: number,
+    ): Promise<{
+      request: TransportRequest<TTransportOptions>;
+      response: TransportResponse | RetryDirective;
+    }> => {
+      const request = await prepare(attempt);
+      lastUrl = request.url;
+      const errorContext = { ...context, url: request.url };
+      const base = { request, operation: info, attempt, client, retry };
+      let response: TransportResponse;
+      try {
+        response = await config.transport(request);
+      } catch (error) {
+        let recovered: TransportResponse | RetryDirective | void = undefined;
         for (const item of middleware.slice()) {
-          const recovered: TransportResponse | void = await item.onError?.({
-            request: sent,
-            error,
-            operation: info,
-          });
-          if (recovered !== undefined) return recovered;
+          recovered = await item.onError?.({ ...base, error });
+          if (recovered !== undefined) break;
         }
-        if (error instanceof ApiError || error instanceof RequestError) throw error;
-        if (linked.timedOut()) {
+        if (isRetry(recovered)) return { request, response: RETRY };
+        if (recovered === undefined) {
+          if (error instanceof ApiError || error instanceof RequestError) throw error;
+          if (linked.timedOut()) {
+            throw new RequestError(
+              'timeout',
+              `Request timed out after ${String(timeout)} ms`,
+              errorContext,
+              error,
+            );
+          }
+          if (options.signal?.aborted === true) throw error;
           throw new RequestError(
-            'timeout',
-            `Request timed out after ${String(timeout)} ms`,
+            'network',
+            `Request failed: ${error instanceof Error ? error.message : String(error)}`,
             errorContext,
             error,
           );
         }
-        if (options.signal?.aborted === true) throw error;
-        throw new RequestError(
-          'network',
-          `Request failed: ${error instanceof Error ? error.message : String(error)}`,
-          errorContext,
-          error,
-        );
-      };
-      let response = await current.transport(sent).catch(recover);
-
+        response = recovered;
+      }
       for (const item of middleware.slice()) {
-        const replaced: TransportResponse | void = await item.onResponse?.({
-          request: sent,
-          response,
-          operation: info,
-        });
+        const replaced = await item.onResponse?.({ ...base, response });
+        if (isRetry(replaced)) return { request, response: RETRY };
         if (replaced !== undefined) response = replaced;
       }
+      return { request, response };
+    };
+
+    try {
+      let request: TransportRequest<TTransportOptions>;
+      let response: TransportResponse;
+      for (let attempt = 1; ; attempt++) {
+        let outcome: Awaited<ReturnType<typeof attemptOnce>>;
+        try {
+          outcome = await attemptOnce(attempt);
+        } catch (error) {
+          // Middleware waiting between attempts rejects with the abort reason.
+          if (linked.timedOut() && !(error instanceof RequestError)) {
+            throw new RequestError(
+              'timeout',
+              `Request timed out after ${String(timeout)} ms`,
+              { ...context, url: lastUrl },
+              error,
+            );
+          }
+          throw error;
+        }
+        if (!isRetry(outcome.response)) {
+          request = outcome.request;
+          response = outcome.response;
+          break;
+        }
+      }
+      const errorContext = { ...context, url: request.url };
 
       if (!isSuccess(response.status, operation.successStatuses)) {
         throw new ApiError({
@@ -311,7 +386,7 @@ export function createClient<TTransportOptions = unknown>(
     }
   }
 
-  return {
+  const client: Client<TTransportOptions> = {
     getConfig: () => ({ ...config }),
     setConfig(patch) {
       config = { ...config, ...patch };
@@ -332,4 +407,5 @@ export function createClient<TTransportOptions = unknown>(
       return response.data;
     },
   };
+  return client;
 }

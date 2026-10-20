@@ -82,7 +82,8 @@ export function normalizeSwagger2(ctx: ParseContext): ApiDocument {
     const pathItem = ctx.deref(rawItem);
     if (pathItem === undefined || !isRecord(pathItem.value)) continue;
     for (const method of keysOf(pathItem)) {
-      if (!isHttpMethod(method) || method === 'trace') continue;
+      // Swagger 2.0 has neither TRACE nor QUERY.
+      if (!isHttpMethod(method) || method === 'trace' || method === 'query') continue;
       const cursor = child(pathItem, method);
       const operation = convertOperation(ctx, converter, {
         cursor,
@@ -150,7 +151,12 @@ function convertOperation(
   converter: SchemaConverter,
   input: OperationInput,
 ): OperationIR | undefined {
-  const { cursor, method, path } = input;
+  const { method, path } = input;
+  const cursor = ctx.derefNonStandard(
+    input.cursor,
+    `The ${method.toUpperCase()} ${path} operation`,
+  );
+  if (cursor === undefined) return undefined;
   if (!isRecord(cursor.value)) {
     ctx.error(
       'spec/invalid-operation',

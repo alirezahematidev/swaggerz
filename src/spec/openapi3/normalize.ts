@@ -13,9 +13,11 @@ import {
   type RequestBodyIR,
   type ResponseIR,
   type SchemaIR,
+  type SecurityRequirementIR,
   type SecuritySchemeIR,
   type ServerIR,
   type WebhookIR,
+  isStandardMethod,
 } from '../../ir/types.ts';
 import { pickMeta } from '../../ir/utils.ts';
 import { isRecord } from '../../utils/object.ts';
@@ -31,6 +33,8 @@ import {
   type Cursor,
   type ParseContext,
 } from '../context.ts';
+import { parsePointer } from '../../loader/pointer.ts';
+import { looksLikeReference } from '../../loader/refs.ts';
 import { SchemaConverter } from '../schema/converter.ts';
 import type { SchemaDialect } from '../schema/dialects.ts';
 import {
@@ -42,6 +46,7 @@ import {
   readExamplesMap,
   readExternalDocs,
   readInfo,
+  checkTagParents,
   readSecurity,
   readStringArray,
   readTags,
@@ -66,6 +71,34 @@ const STYLES: ReadonlySet<string> = new Set<ParameterStyle>([
   'pipeDelimited',
   'deepObject',
 ]);
+/** An HTTP method token (RFC 9110). */
+const METHOD_TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+
+type Version = '3.0' | '3.1' | '3.2';
+
+/** Version-dependent document structure (schemas differ through the dialect). */
+interface Structure {
+  readonly version: Version;
+  /** OpenAPI 3.2 additions: `query`, `additionalOperations`, `querystring`, `style: cookie`, … */
+  readonly v32: boolean;
+  /** OpenAPI 3.2: security requirements may name a scheme by URI. */
+  readonly resolveSchemeUri?: (key: string, at: Cursor) => string | undefined;
+}
+
+/** Maps the URI of a security scheme in `components.securitySchemes` to its name. */
+function schemeUriResolver(ctx: ParseContext): (key: string, at: Cursor) => string | undefined {
+  return (key, at) => {
+    if (!looksLikeReference(key)) return undefined;
+    const resolved = ctx.store.resolve(key, at.doc, at.pointer);
+    if (resolved === undefined || resolved.doc.url !== ctx.store.root.url) return undefined;
+    const segments = parsePointer(resolved.pointer) ?? [];
+    return segments.length === 3 &&
+      segments[0] === 'components' &&
+      segments[1] === 'securitySchemes'
+      ? segments[2]
+      : undefined;
+  };
+}
 const IGNORED_HEADERS = new Set(['accept', 'content-type', 'authorization']);
 
 /**
@@ -75,11 +108,15 @@ const IGNORED_HEADERS = new Set(['accept', 'content-type', 'authorization']);
 export function normalizeOpenApi3(
   ctx: ParseContext,
   dialect: SchemaDialect,
-  version: '3.0' | '3.1',
+  version: Version,
   rawVersion: string,
 ): ApiDocument {
   const root = ctx.root;
   const converter = new SchemaConverter(ctx, dialect);
+  const structure: Structure =
+    version === '3.2'
+      ? { version, v32: true, resolveSchemeUri: schemeUriResolver(ctx) }
+      : { version, v32: false };
 
   validateRoot(ctx, version);
 
@@ -101,11 +138,10 @@ export function normalizeOpenApi3(
     if (pathItem === undefined || !isRecord(pathItem.value)) continue;
     const pathParameters = child(pathItem, 'parameters');
     const pathServers = readServers(child(pathItem, 'servers'));
-    for (const key of keysOf(pathItem)) {
-      if (!isHttpMethod(key)) continue;
-      const operation = convertOperation(ctx, converter, {
-        cursor: child(pathItem, key),
-        method: key,
+    for (const [method, cursor] of pathItemOperations(ctx, pathItem, structure)) {
+      const operation = convertOperation(ctx, converter, structure, {
+        cursor,
+        method,
         path,
         pathParameters,
         pathServers,
@@ -117,9 +153,9 @@ export function normalizeOpenApi3(
   }
 
   const webhooks: WebhookIR[] = [];
-  if (version === '3.1') {
+  if (version !== '3.0') {
     for (const [name, rawItem] of sortedEntries(child(root, 'webhooks'))) {
-      const webhookOperations = convertPathItem(ctx, converter, rawItem, schemeNames, {
+      const webhookOperations = convertPathItem(ctx, converter, structure, rawItem, schemeNames, {
         kind: 'webhook',
         path: '',
         keyPrefix: `webhook:${name}`,
@@ -128,6 +164,9 @@ export function normalizeOpenApi3(
     }
   }
   reportDuplicateOperationIds(ctx, operations);
+  const documentSecurity =
+    readSecurity(ctx, child(root, 'security'), schemeNames, structure.resolveSchemeUri) ?? [];
+  reportQuerystringCredentials(ctx, operations, securitySchemes, documentSecurity);
 
   const externalDocs = readExternalDocs(child(root, 'externalDocs'));
   return {
@@ -140,41 +179,44 @@ export function normalizeOpenApi3(
     schemas: converter.finalize(),
     webhooks,
     securitySchemes,
-    security: readSecurity(ctx, child(root, 'security'), schemeNames) ?? [],
-    tags: readTags(child(root, 'tags')),
+    security: documentSecurity,
+    tags: structure.v32
+      ? checkTagParents(ctx, child(root, 'tags'), readTags(child(root, 'tags'), true))
+      : readTags(child(root, 'tags')),
     ...(externalDocs === undefined ? {} : { externalDocs }),
     extensions: readExtensions(root),
     sources: ctx.sources(),
   };
 }
 
-function validateRoot(ctx: ParseContext, version: '3.0' | '3.1'): void {
+function validateRoot(ctx: ParseContext, version: Version): void {
   const root = ctx.root;
   if (version === '3.0' && !isRecord(child(root, 'paths').value)) {
     ctx.error('spec/missing-field', 'OpenAPI 3.0 documents require a `paths` object.', root);
   }
   if (
-    version === '3.1' &&
+    version !== '3.0' &&
     !has(root, 'paths') &&
     !has(root, 'components') &&
     !has(root, 'webhooks')
   ) {
     ctx.error(
       'spec/missing-field',
-      'OpenAPI 3.1 documents require at least one of `paths`, `components` or `webhooks`.',
+      `OpenAPI ${version} documents require at least one of \`paths\`, \`components\` or \`webhooks\`.`,
       root,
     );
   }
   const dialectUri = str(root, 'jsonSchemaDialect');
   if (
-    version === '3.1' &&
+    version !== '3.0' &&
     dialectUri !== undefined &&
     dialectUri !== 'https://spec.openapis.org/oas/3.1/dialect/base' &&
+    !(version === '3.2' && dialectUri.startsWith('https://spec.openapis.org/oas/3.2/dialect/')) &&
     dialectUri !== 'https://json-schema.org/draft/2020-12/schema'
   ) {
     ctx.warning(
       'spec/unsupported-dialect',
-      `jsonSchemaDialect "${dialectUri}" is not supported; schemas are interpreted as the OpenAPI 3.1 base dialect.`,
+      `jsonSchemaDialect "${dialectUri}" is not supported; schemas are interpreted as the OpenAPI ${version} base dialect.`,
       child(root, 'jsonSchemaDialect'),
     );
   }
@@ -203,7 +245,11 @@ export function readServers(cursor: Cursor): ServerIR[] {
         ...stripUndefined({ description: str(variable, 'description') }),
       };
     }
-    result.push({ url, variables, ...stripUndefined({ description: str(server, 'description') }) });
+    result.push({
+      url,
+      variables,
+      ...stripUndefined({ name: str(server, 'name'), description: str(server, 'description') }),
+    });
   });
   return result;
 }
@@ -221,10 +267,42 @@ interface OperationInput {
   readonly keyPrefix?: string;
 }
 
+/**
+ * The operations of a path item: the method fields, and in OpenAPI 3.2 `query` and
+ * `additionalOperations` (methods sent exactly as their key is spelled).
+ */
+function pathItemOperations(
+  ctx: ParseContext,
+  pathItem: Cursor,
+  structure: Structure,
+): [HttpMethod, Cursor][] {
+  const result: [HttpMethod, Cursor][] = [];
+  for (const key of keysOf(pathItem)) {
+    if (!isHttpMethod(key) || (key === 'query' && !structure.v32)) continue;
+    result.push([key, child(pathItem, key)]);
+  }
+  if (!structure.v32) return result;
+  for (const [method, cursor] of entries(child(pathItem, 'additionalOperations'))) {
+    if (isStandardMethod(method.toLowerCase())) {
+      ctx.error(
+        'operation/reserved-method',
+        `additionalOperations must not define "${method}"; use the path item's \`${method.toLowerCase()}\` field.`,
+        cursor,
+      );
+    } else if (!METHOD_TOKEN.test(method)) {
+      ctx.error('operation/invalid-method', `"${method}" is not a valid HTTP method.`, cursor);
+    } else {
+      result.push([method, cursor]);
+    }
+  }
+  return result;
+}
+
 /** Converts the operations of a webhook or callback path item (which may be a `$ref`). */
 function convertPathItem(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   rawItem: Cursor,
   schemeNames: ReadonlySet<string>,
   options: { kind: 'webhook' | 'callback'; path: string; keyPrefix: string },
@@ -232,11 +310,10 @@ function convertPathItem(
   const pathItem = ctx.deref(rawItem);
   if (pathItem === undefined || !isRecord(pathItem.value)) return [];
   const result: OperationIR[] = [];
-  for (const key of keysOf(pathItem)) {
-    if (!isHttpMethod(key)) continue;
-    const operation = convertOperation(ctx, converter, {
-      cursor: child(pathItem, key),
-      method: key,
+  for (const [method, cursor] of pathItemOperations(ctx, pathItem, structure)) {
+    const operation = convertOperation(ctx, converter, structure, {
+      cursor,
+      method,
       path: options.path,
       pathParameters: child(pathItem, 'parameters'),
       pathServers: readServers(child(pathItem, 'servers')),
@@ -254,6 +331,7 @@ function convertPathItem(
 function convertCallbacks(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   cursor: Cursor,
   schemeNames: ReadonlySet<string>,
   ownerKey: string,
@@ -264,7 +342,7 @@ function convertCallbacks(
     if (callback === undefined || !isRecord(callback.value)) continue;
     for (const [expression, rawItem] of sortedEntries(callback)) {
       if (expression.startsWith('x-')) continue;
-      const operations = convertPathItem(ctx, converter, rawItem, schemeNames, {
+      const operations = convertPathItem(ctx, converter, structure, rawItem, schemeNames, {
         kind: 'callback',
         path: expression,
         keyPrefix: `${ownerKey} callback:${name} ${expression}`,
@@ -278,9 +356,15 @@ function convertCallbacks(
 function convertOperation(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   input: OperationInput,
 ): OperationIR | undefined {
-  const { cursor, method, path } = input;
+  const { method, path } = input;
+  const cursor = ctx.derefNonStandard(
+    input.cursor,
+    `The ${method.toUpperCase()} ${path} operation`,
+  );
+  if (cursor === undefined) return undefined;
   if (!isRecord(cursor.value)) {
     ctx.error(
       'spec/invalid-operation',
@@ -300,6 +384,7 @@ function convertOperation(
   const parameters = mergeParameters(
     ctx,
     converter,
+    structure,
     input.pathParameters,
     child(cursor, 'parameters'),
     label,
@@ -307,7 +392,7 @@ function convertOperation(
   if (kind === 'operation') checkPathParameters(ctx, path, parameters, cursor, label);
 
   const requestBody = has(cursor, 'requestBody')
-    ? convertRequestBody(ctx, converter, child(cursor, 'requestBody'), label)
+    ? convertRequestBody(ctx, converter, structure, child(cursor, 'requestBody'), label)
     : undefined;
   if (
     requestBody !== undefined &&
@@ -324,7 +409,8 @@ function convertOperation(
 
   const responses: ResponseIR[] = [];
   const responsesCursor = child(cursor, 'responses');
-  if (!isRecord(responsesCursor.value)) {
+  // `responses` is required in OpenAPI 3.0 and optional since 3.1.
+  if (!isRecord(responsesCursor.value) && structure.version === '3.0') {
     ctx.warning('spec/missing-field', 'Operation has no `responses` object.', cursor, {
       operation: label,
     });
@@ -343,6 +429,7 @@ function convertOperation(
     const response = convertResponse(
       ctx,
       converter,
+      structure,
       rawResponse,
       /^[1-5]xx$/i.test(status) ? status.toUpperCase() : status,
       label,
@@ -352,10 +439,22 @@ function convertOperation(
 
   const callbacks =
     kind === 'operation' && has(cursor, 'callbacks')
-      ? convertCallbacks(ctx, converter, child(cursor, 'callbacks'), input.schemeNames, key)
+      ? convertCallbacks(
+          ctx,
+          converter,
+          structure,
+          child(cursor, 'callbacks'),
+          input.schemeNames,
+          key,
+        )
       : [];
 
-  const security = readSecurity(ctx, child(cursor, 'security'), input.schemeNames);
+  const security = readSecurity(
+    ctx,
+    child(cursor, 'security'),
+    input.schemeNames,
+    structure.resolveSchemeUri,
+  );
   const servers = readServers(child(cursor, 'servers'));
   const effectiveServers = servers.length > 0 ? servers : input.pathServers;
   const externalDocs = readExternalDocs(child(cursor, 'externalDocs'));
@@ -385,6 +484,7 @@ function convertOperation(
 function mergeParameters(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   pathLevel: Cursor,
   operationLevel: Cursor,
   label: string,
@@ -400,7 +500,7 @@ function mergeParameters(
     }
     const seen = new Set<string>();
     list.value.forEach((_, index) => {
-      const parameter = convertParameter(ctx, converter, child(list, index), label);
+      const parameter = convertParameter(ctx, converter, structure, child(list, index), label);
       if (parameter === undefined) return;
       const key = `${parameter.in}:${parameter.in === 'header' ? parameter.name.toLowerCase() : parameter.name}`;
       if (seen.has(key)) {
@@ -416,12 +516,34 @@ function mergeParameters(
       merged.set(key, parameter);
     });
   }
-  return [...merged.values()];
+  const parameters = [...merged.values()];
+  const querystrings = parameters.filter((parameter) => parameter.in === 'querystring');
+  const at = operationLevel.value === undefined ? pathLevel : operationLevel;
+  if (querystrings.length > 1) {
+    ctx.error(
+      'operation/invalid-querystring',
+      `Only one querystring parameter is allowed; found ${querystrings.map((p) => `"${p.name}"`).join(', ')}.`,
+      at,
+      { operation: label },
+    );
+  } else if (
+    querystrings.length === 1 &&
+    parameters.some((parameter) => parameter.in === 'query')
+  ) {
+    ctx.error(
+      'operation/invalid-querystring',
+      `The querystring parameter "${querystrings[0]?.name ?? ''}" describes the whole query string; it cannot be combined with query parameters.`,
+      at,
+      { operation: label },
+    );
+  }
+  return parameters;
 }
 
 function convertParameter(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   raw: Cursor,
   label: string,
 ): ParameterIR | undefined {
@@ -441,7 +563,7 @@ function convertParameter(
     });
     return undefined;
   }
-  if (!LOCATIONS.has(location)) {
+  if (!LOCATIONS.has(location) && !(structure.v32 && location === 'querystring')) {
     ctx.error(
       'spec/invalid-parameter',
       `Parameter "${name}" has invalid location "${location}".`,
@@ -474,15 +596,27 @@ function convertParameter(
 
   let schema: SchemaIR;
   let contentType: string | undefined;
+  let encoding: Record<string, EncodingIR> | undefined;
+  if (where === 'querystring' && has(cursor, 'schema')) {
+    ctx.error(
+      'spec/invalid-parameter',
+      `The querystring parameter "${name}" must describe its media type with \`content\`, not \`schema\`.`,
+      cursor,
+      { operation: label },
+    );
+    return undefined;
+  }
   if (has(cursor, 'schema')) {
     schema = converter.convert(child(cursor, 'schema'));
   } else if (isRecord(child(cursor, 'content').value)) {
-    const [mediaType, media] = entries(child(cursor, 'content'))[0] ?? [];
+    const [mediaType, rawMedia] = entries(child(cursor, 'content'))[0] ?? [];
+    const media = rawMedia === undefined ? undefined : ctx.deref(rawMedia);
     contentType = mediaType;
     schema =
       media !== undefined && has(media, 'schema')
         ? converter.convert(child(media, 'schema'))
         : { kind: 'unknown' };
+    if (where === 'querystring' && media !== undefined) encoding = readEncoding(media);
   } else {
     ctx.warning(
       'spec/invalid-parameter',
@@ -493,11 +627,13 @@ function convertParameter(
     schema = { kind: 'unknown' };
   }
 
-  const defaultStyle: ParameterStyle = where === 'query' || where === 'cookie' ? 'form' : 'simple';
+  const defaultStyle: ParameterStyle =
+    where === 'query' || where === 'querystring' || where === 'cookie' ? 'form' : 'simple';
   const rawStyle = str(cursor, 'style');
   let style: ParameterStyle = defaultStyle;
   if (rawStyle !== undefined) {
-    if (STYLES.has(rawStyle)) style = rawStyle as ParameterStyle;
+    if (STYLES.has(rawStyle) || (structure.v32 && rawStyle === 'cookie' && where === 'cookie'))
+      style = rawStyle as ParameterStyle;
     else
       ctx.warning(
         'operation/invalid-style',
@@ -506,8 +642,14 @@ function convertParameter(
         { operation: label },
       );
   }
-  const explode = bool(cursor, 'explode') ?? style === 'form';
+  const explode = bool(cursor, 'explode') ?? (style === 'form' || style === 'cookie');
   const examples = [...singleExample(cursor), ...readExamplesMap(ctx, child(cursor, 'examples'))];
+  // Parameters described by `content` may carry their examples on the media type.
+  if (examples.length === 0 && contentType !== undefined) {
+    const media = ctx.deref(child(cursor, 'content', contentType));
+    if (media !== undefined)
+      examples.push(...singleExample(media), ...readExamplesMap(ctx, child(media, 'examples')));
+  }
 
   return {
     name,
@@ -515,6 +657,7 @@ function convertParameter(
     required,
     deprecated: bool(cursor, 'deprecated') === true,
     ...stripUndefined({ description: str(cursor, 'description'), contentType }),
+    ...(encoding === undefined || Object.keys(encoding).length === 0 ? {} : { encoding }),
     schema,
     style,
     explode,
@@ -569,16 +712,49 @@ function checkPathParameters(
   }
 }
 
+/** The `encoding` map of a Media Type Object (forms and multipart). */
+function readEncoding(media: Cursor): Record<string, EncodingIR> {
+  const encoding: Record<string, EncodingIR> = {};
+  for (const [property, enc] of entries(child(media, 'encoding'))) {
+    const style = str(enc, 'style');
+    const explode = bool(enc, 'explode');
+    encoding[property] = {
+      ...stripUndefined({ contentType: str(enc, 'contentType') }),
+      ...(style !== undefined && STYLES.has(style) ? { style: style as ParameterStyle } : {}),
+      ...(explode === undefined ? {} : { explode }),
+    };
+  }
+  return encoding;
+}
+
 function convertMediaTypes(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   content: Cursor,
 ): MediaTypeIR[] {
   const result: MediaTypeIR[] = [];
-  for (const [mediaType, media] of entries(content)) {
-    let schema: SchemaIR = has(media, 'schema')
-      ? converter.convert(child(media, 'schema'))
-      : { kind: 'unknown' };
+  for (const [mediaType, raw] of entries(content)) {
+    // OpenAPI 3.2 media types may be references (components.mediaTypes).
+    const media = ctx.deref(raw);
+    if (media === undefined) continue;
+    const itemSchema =
+      structure.v32 && has(media, 'itemSchema')
+        ? converter.convert(child(media, 'itemSchema'))
+        : undefined;
+    let schema: SchemaIR;
+    if (has(media, 'schema')) {
+      schema = converter.convert(child(media, 'schema'));
+    } else if (itemSchema !== undefined) {
+      ctx.info(
+        'operation/item-schema',
+        `${mediaType} is only described by \`itemSchema\`; the whole content is typed as text (streaming is not generated yet).`,
+        child(media, 'itemSchema'),
+      );
+      schema = { kind: 'string' };
+    } else {
+      schema = { kind: 'unknown' };
+    }
     if (
       isBinaryMediaType(mediaType) &&
       (schema.kind === 'unknown' ||
@@ -588,19 +764,11 @@ function convertMediaTypes(
     ) {
       schema = { ...pickMeta(schema), kind: 'binary' };
     }
-    const encoding: Record<string, EncodingIR> = {};
-    for (const [property, enc] of entries(child(media, 'encoding'))) {
-      const style = str(enc, 'style');
-      const explode = bool(enc, 'explode');
-      encoding[property] = {
-        ...stripUndefined({ contentType: str(enc, 'contentType') }),
-        ...(style !== undefined && STYLES.has(style) ? { style: style as ParameterStyle } : {}),
-        ...(explode === undefined ? {} : { explode }),
-      };
-    }
+    const encoding = readEncoding(media);
     result.push({
       mediaType,
       schema,
+      ...(itemSchema === undefined ? {} : { itemSchema }),
       examples: [...singleExample(media), ...readExamplesMap(ctx, child(media, 'examples'))],
       ...(Object.keys(encoding).length > 0 ? { encoding } : {}),
     });
@@ -611,12 +779,13 @@ function convertMediaTypes(
 function convertRequestBody(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   raw: Cursor,
   label: string,
 ): RequestBodyIR | undefined {
   const cursor = ctx.deref(raw);
   if (cursor === undefined || !isRecord(cursor.value)) return undefined;
-  const contents = convertMediaTypes(ctx, converter, child(cursor, 'content'));
+  const contents = convertMediaTypes(ctx, converter, structure, child(cursor, 'content'));
   if (contents.length === 0) {
     ctx.warning(
       'operation/empty-request-body',
@@ -638,6 +807,7 @@ function convertRequestBody(
 function convertResponse(
   ctx: ParseContext,
   converter: SchemaConverter,
+  structure: Structure,
   raw: Cursor,
   status: string,
   label: string,
@@ -657,7 +827,8 @@ function convertResponse(
     let schema: SchemaIR = { kind: 'unknown' };
     if (has(header, 'schema')) schema = converter.convert(child(header, 'schema'));
     else if (isRecord(child(header, 'content').value)) {
-      const [, media] = entries(child(header, 'content'))[0] ?? [];
+      const [, rawMedia] = entries(child(header, 'content'))[0] ?? [];
+      const media = rawMedia === undefined ? undefined : ctx.deref(rawMedia);
       if (media !== undefined && has(media, 'schema'))
         schema = converter.convert(child(media, 'schema'));
     }
@@ -671,8 +842,11 @@ function convertResponse(
   }
   return {
     status,
-    ...stripUndefined({ description: str(cursor, 'description') }),
-    contents: convertMediaTypes(ctx, converter, child(cursor, 'content')),
+    ...stripUndefined({
+      summary: structure.v32 ? str(cursor, 'summary') : undefined,
+      description: str(cursor, 'description'),
+    }),
+    contents: convertMediaTypes(ctx, converter, structure, child(cursor, 'content')),
     headers,
     extensions: readExtensions(cursor),
     source: ctx.sourceRef(cursor),
@@ -687,6 +861,7 @@ function readSecuritySchemes(ctx: ParseContext, cursor: Cursor): SecuritySchemeI
     const base = {
       key,
       ...stripUndefined({ description: str(scheme, 'description') }),
+      ...(bool(scheme, 'deprecated') === true ? { deprecated: true } : {}),
       extensions: readExtensions(scheme),
       source: ctx.sourceRef(scheme),
     };
@@ -733,19 +908,31 @@ function readSecuritySchemes(ctx: ParseContext, cursor: Cursor): SecuritySchemeI
             scopes,
             ...stripUndefined({
               authorizationUrl: str(flow, 'authorizationUrl'),
+              deviceAuthorizationUrl: str(flow, 'deviceAuthorizationUrl'),
               tokenUrl: str(flow, 'tokenUrl'),
               refreshUrl: str(flow, 'refreshUrl'),
             }),
           };
         };
         const flowEntries = (
-          ['implicit', 'password', 'clientCredentials', 'authorizationCode'] as const
+          [
+            'implicit',
+            'password',
+            'clientCredentials',
+            'authorizationCode',
+            'deviceAuthorization',
+          ] as const
         )
           .map((name) => [name, readFlow(name)] as const)
           .filter(
             (entry): entry is readonly [(typeof entry)[0], OAuthFlowIR] => entry[1] !== undefined,
           );
-        result.push({ ...base, type: 'oauth2', flows: Object.fromEntries(flowEntries) });
+        result.push({
+          ...base,
+          type: 'oauth2',
+          flows: Object.fromEntries(flowEntries),
+          ...stripUndefined({ oauth2MetadataUrl: str(scheme, 'oauth2MetadataUrl') }),
+        });
         break;
       }
       case 'openIdConnect': {
@@ -773,6 +960,49 @@ function readSecuritySchemes(ctx: ParseContext, cursor: Cursor): SecuritySchemeI
     }
   }
   return result;
+}
+
+/**
+ * A JSON or text `querystring` parameter (OpenAPI 3.2) is the whole query string, so API keys
+ * declared `in: query` cannot be added to it; the runtime skips such security requirements.
+ */
+function reportQuerystringCredentials(
+  ctx: ParseContext,
+  operations: readonly OperationIR[],
+  schemes: readonly SecuritySchemeIR[],
+  documentSecurity: readonly SecurityRequirementIR[],
+): void {
+  const inQuery = new Set(
+    schemes.filter((s) => s.type === 'apiKey' && s.in === 'query').map((s) => s.key),
+  );
+  if (inQuery.size === 0) return;
+  for (const operation of operations) {
+    const querystring = operation.parameters.find((p) => p.in === 'querystring');
+    const type = (querystring?.contentType ?? 'application/x-www-form-urlencoded')
+      .split(';')[0]
+      ?.trim()
+      .toLowerCase();
+    if (querystring === undefined || type === 'application/x-www-form-urlencoded') continue;
+    const requirements = (operation.security ?? documentSecurity).filter(
+      (requirement) => Object.keys(requirement).length > 0,
+    );
+    const blocked = requirements.filter((requirement) =>
+      Object.keys(requirement).some((key) => inQuery.has(key)),
+    );
+    if (blocked.length === 0) continue;
+    const keys = [...new Set(blocked.flatMap((r) => Object.keys(r).filter((k) => inQuery.has(k))))];
+    const label = operationLabel(operation.method, operation.path, operation.operationId);
+    ctx.diagnostics.warning({
+      code: 'operation/querystring-credentials',
+      message: `${label}: the query string is a ${type} document, so the API key${keys.length === 1 ? '' : 's'} ${keys.map((k) => `"${k}"`).join(', ')} sent in the query cannot be added to it. ${blocked.length === requirements.length ? 'Requests are sent without these credentials.' : 'Requirements that need them are skipped; the other alternatives are used.'}`,
+      location: {
+        file: ctx.store.byDisplay(querystring.source.file)?.location ?? ctx.store.root.location,
+        pointer: querystring.source.pointer,
+      },
+      operation: label,
+      hint: 'Send the key in a header or cookie (an apiKey scheme with in: header), or describe the query string as application/x-www-form-urlencoded.',
+    });
+  }
 }
 
 export function reportDuplicateOperationIds(

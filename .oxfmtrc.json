@@ -17,6 +17,9 @@
     ".tmp",
     ".bench",
     ".compat",
+    ".runtimes",
+    ".corpus",
+    "marketing",
     "config.schema.json",
     "pnpm-lock.yaml"
   ]

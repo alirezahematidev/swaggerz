@@ -39,10 +39,11 @@ const overview: OverviewResponse = {
     language: 'typescript',
     adapter: 'fetch',
     reactQuery: false,
+    validation: 'zod',
   },
   counts: { operations: 1, models: 1, files: 10, tags: 1, deprecated: 0 },
   methods: { GET: 1 },
-  tags: [{ name: 'pets', count: 1, description: HOSTILE }],
+  tags: [{ name: 'pets', count: 1, depth: 0, description: HOSTILE }],
   diagnostics: [
     {
       code: 'schema/unsupported-keyword',
@@ -138,6 +139,9 @@ describe('dashboard UI rendering', () => {
     expect(container.textContent).toContain('<img src=x onerror="alert(1)">');
     expect(container.querySelectorAll('.prose p')).toHaveLength(2);
     expect(container.textContent).toContain('2 files differ');
+    // The generation card lists the enabled features.
+    expect(screen.getByText('Zod')).toBeTruthy();
+    expect(screen.queryByText('React Query')).toBeNull();
   });
 
   it('filters diagnostics by severity', () => {

@@ -3,13 +3,18 @@
 A plain JavaScript Node.js script using a client generated as JavaScript with JSDoc and `.d.ts` declarations from an OpenAPI 3.0 document ([openapi.yaml](openapi.yaml)).
 
 ```sh
-npm install
-npm run generate   # src/generated/api (.js + .d.ts)
-npm start          # starts a local in-memory API (src/server.js) and calls it
-npm run check      # type-checks the JavaScript with `checkJs`
+pnpm example:node-javascript   # from the repository root: build swaggerz, generate, run
 ```
 
-[src/index.js](src/index.js) configures the base URL, the `apiKey` security scheme and a logging middleware, then creates and lists tasks (with an exploded array query parameter) and handles a typed `404`. Editors show the generated types and documentation for every call.
+Or, inside this directory once swaggerz is built:
+
+```sh
+pnpm generate   # src/generated/api (.js + .d.ts)
+pnpm start      # starts a local in-memory API (src/server.js) and calls it
+pnpm check      # type-checks the JavaScript with `checkJs`
+```
+
+[src/index.js](src/index.js) configures the base URL, the `apiKey` security scheme and a logging middleware, then creates and lists tasks (with an exploded array query parameter) and handles a `404` with the operation's error guard, which types the body by status. Editors show the generated types and documentation for every call.
 
 Expected output (ports vary):
 

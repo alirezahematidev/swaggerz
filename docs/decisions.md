@@ -12,7 +12,7 @@ Each entry records the context, the decision and its consequences. New decisions
 
 **Context.** Generated code could import a runtime from this package, or carry its own.
 **Decision.** Emit the runtime (`runtime/*`) into every client. The generator is a development dependency only.
-**Consequences.** No runtime coupling between the application and the generator version; the runtime is readable and patchable by the user; the runtime is duplicated if a project generates several clients (~11 KB minified each).
+**Consequences.** No runtime coupling between the application and the generator version; the runtime is readable and patchable by the user; the runtime is duplicated if a project generates several clients (~13 KB minified each).
 
 ## 3. Configuration files are loaded with Node.js's own module loader
 
@@ -22,8 +22,8 @@ Each entry records the context, the decision and its consequences. New decisions
 
 ## 4. Version-specific adapters and schema dialects, one IR
 
-**Context.** Swagger 2.0, OpenAPI 3.0 and 3.1 differ in document structure and in schema semantics.
-**Decision.** Each version has an adapter that produces the shared IR. Document structure is shared between 3.0 and 3.1; schema semantics differ through small `SchemaDialect` objects (type keyword, nullability, exclusive bounds, examples, binary detection, discriminator shape, `$ref` sibling rules) used by one schema converter. The configured version is enforced.
+**Context.** Swagger 2.0, OpenAPI 3.0, 3.1 and 3.2 differ in document structure and in schema semantics.
+**Decision.** Each version has an adapter that produces the shared IR. Document structure is shared between 3.0, 3.1 and 3.2 (3.2 additions are switched on by version); schema semantics differ through small `SchemaDialect` objects (type keyword, nullability, exclusive bounds, examples, binary detection, discriminator shape, `$ref` sibling rules) used by one schema converter. The configured version is enforced.
 **Consequences.** Supporting a new version means adding an adapter and maybe a dialect; generators are unaffected. Non-standard keywords that are common in practice (e.g. `oneOf` in Swagger 2.0) are honored with a warning rather than silently.
 
 ## 5. One module per operation and per model
@@ -78,3 +78,15 @@ Each entry records the context, the decision and its consequences. New decisions
 
 **Decision.** `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are kept in the IR as assertions. Generated Zod schemas enforce them with refinements; TypeScript types ignore them, and an info diagnostic (`schema/assertion-keyword`) says so.
 **Consequences.** Types may be wider than the schema (TypeScript cannot express negation or conditionals over arbitrary schemas), but validation is complete when Zod is enabled.
+
+## 15. Errors are typed by status, with one guard per operation
+
+**Context.** `ApiError<Body>` had `status: number` and a body typed as the union of every documented error response, so `error.status === 404` could not narrow the body. It also claimed the body was always one of the documented ones, which is false for statuses the specification does not mention.
+**Decision.** `ApiError` takes the status as a second type parameter (`ApiError<Body, Status>`, the same order as `ApiResponse<Data, Status>`, so `ApiError<Body>` keeps working). Each operation exports `<Name>ApiError`, a union with one member per documented status. Ranges (`4XX`) and `default` get the exact remaining codes through the runtime's `HttpStatus<Class>` literal unions, and statuses nothing documents get a final member with an `unknown` body, so every member has a disjoint status type and checking the status narrows the body. The narrowing guard is a generated function per operation (`isGetPetByIdApiError`) that checks `instanceof ApiError`, the `operationId` and the method. A shared `isApiError(getPetById, error)` was considered: it needs a value that ties the function to its errors at runtime, either a property on the function (a top-level side effect that defeats tree-shaking) or the function itself stored in every request descriptor and error, plus a phantom type on the return value. A per-operation guard needs neither and is dropped by bundlers when unused.
+**Consequences.** Code that read `error.body` without checking the status now sees `unknown` (the undocumented-status member) and either checks the status or casts to `<Name>ErrorBody`, which is unchanged. One more export per operation.
+
+## 16. OpenAPI 3.2 maps onto the existing IR where it can
+
+**Context.** OpenAPI 3.2 adds methods (`query`, `additionalOperations`), a parameter location for the whole query string, sequential media types with `itemSchema`, nested tags, `$self` and smaller fields.
+**Decision.** The 3.2 adapter is the 3.0/3.1 adapter with the 3.2 fields enabled and a JSON Schema 2020-12 dialect that also reads `discriminator.defaultMapping`. Methods are open in the IR (`HttpMethod` is the standard methods or any other string) and additional ones are sent exactly as their key is spelled. `in: querystring` is a parameter location serialized by its media type. Nested tags become nested operation directories and nested React Query key prefixes, so the existing key-factory invalidation covers child tags. `$self` is a document's base URI and an alias that identifies it; a reference next to `$self` is read next to the referencing file, which keeps multi-file descriptions working offline. Content described only by `itemSchema` is typed and read as text until streaming responses (typed async iteration) are designed; the item models are still generated.
+**Consequences.** `IR_VERSION` 3: plugins that switch over `operation.method` must handle other strings, and `ParameterLocation` gains `querystring`. The default `queryMethods` became `['get', 'query']`; for 3.0 and 3.1 documents, which have no `query` operations, the output does not change.

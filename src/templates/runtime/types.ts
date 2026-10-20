@@ -1,10 +1,38 @@
-/** HTTP methods used by generated operations. */
-export type HttpMethod = 'GET' | 'PUT' | 'POST' | 'DELETE' | 'OPTIONS' | 'HEAD' | 'PATCH' | 'TRACE';
+/**
+ * HTTP methods used by generated operations: the standard ones, `QUERY`, and any other method an
+ * OpenAPI 3.2 description declares (sent exactly as declared).
+ */
+export type HttpMethod =
+  | 'GET'
+  | 'PUT'
+  | 'POST'
+  | 'DELETE'
+  | 'OPTIONS'
+  | 'HEAD'
+  | 'PATCH'
+  | 'TRACE'
+  | 'QUERY'
+  // Keeps completion for the methods above while accepting others.
+  | (string & {});
+
+type Digit = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
+type ToNumber<T> = T extends `${infer N extends number}` ? N : never;
+
+/**
+ * HTTP status codes from 100 to 599 as literal types, optionally of some classes only:
+ * `HttpStatus<4>` is 400–499 and `HttpStatus<4 | 5>` 400–599. Generated error types use it to
+ * describe the statuses a response does not declare, so that `error.status === 404` narrows.
+ */
+export type HttpStatus<TClass extends 1 | 2 | 3 | 4 | 5 = 1 | 2 | 3 | 4 | 5> =
+  ToNumber<`${TClass}${Digit}${Digit}`>;
 
 /** How a response body is read. `auto` decides from the `Content-Type` header. */
 export type ParseAs = 'auto' | 'json' | 'text' | 'blob' | 'arrayBuffer' | 'stream';
 
-/** Parameter serialization styles (OpenAPI 3 `style`, plus `tabDelimited` for Swagger 2.0). */
+/**
+ * Parameter serialization styles (OpenAPI 3 `style`, `tabDelimited` for Swagger 2.0, and
+ * OpenAPI 3.2's `cookie`).
+ */
 export type ParamStyle =
   | 'form'
   | 'simple'
@@ -13,7 +41,8 @@ export type ParamStyle =
   | 'spaceDelimited'
   | 'pipeDelimited'
   | 'tabDelimited'
-  | 'deepObject';
+  | 'deepObject'
+  | 'cookie';
 
 export type ParamLocation = 'path' | 'query' | 'header' | 'cookie';
 
@@ -60,6 +89,15 @@ export interface OperationRequest {
   readonly query?: Readonly<Record<string, unknown>>;
   readonly headers?: Readonly<Record<string, unknown>>;
   readonly cookies?: Readonly<Record<string, unknown>>;
+  /**
+   * OpenAPI 3.2 `in: querystring`: the whole query string as one value, serialized by its media
+   * type (form-urlencoded, JSON, or text).
+   */
+  readonly querystring?: {
+    readonly value: unknown;
+    readonly mediaType: string;
+    readonly encoding?: Readonly<Record<string, PropertyEncoding>>;
+  };
   /** Non-default parameter serialization, by location and wire name. */
   readonly styles?: Readonly<
     Partial<Record<ParamLocation, Readonly<Record<string, ParamSerialization>>>>
@@ -128,34 +166,70 @@ export interface ApiResponse<TData, TStatus extends number = number> {
   readonly raw: unknown;
 }
 
+/**
+ * The operation a request belongs to. The same object is passed for every attempt of one call, so
+ * middleware can key per-call state on it (for example in a `WeakMap`).
+ */
 export interface OperationInfo {
   readonly operationId: string;
   readonly method: HttpMethod;
   readonly path: string;
+  /** Alternative security requirements (scheme names) of the operation; absent without auth. */
+  readonly security?: readonly (readonly string[])[];
+}
+
+declare const retryDirective: unique symbol;
+
+/** Returned from `onResponse` or `onError` (via `context.retry()`) to send the request again. */
+export interface RetryDirective {
+  readonly [retryDirective]: true;
+}
+
+/** What every middleware hook receives. */
+export interface MiddlewareContext<TTransportOptions = unknown> {
+  readonly request: TransportRequest<TTransportOptions>;
+  readonly operation: OperationInfo;
+  /** 1 for the first attempt of a call; each retry starts the next attempt. */
+  readonly attempt: number;
+  /** The client sending the request, e.g. to store a refreshed token with `setConfig`. */
+  readonly client: Client<TTransportOptions>;
+}
+
+/** Context of `onResponse` and `onError`, which may ask for the request to be sent again. */
+export interface RetryableContext<
+  TTransportOptions = unknown,
+> extends MiddlewareContext<TTransportOptions> {
+  /**
+   * Discards this attempt and sends the request again: return the result from the hook. The
+   * request is built anew (headers and `auth` from the current config, then every `onRequest`),
+   * and the call's timeout and signal still apply.
+   */
+  retry(): RetryDirective;
 }
 
 /** Hooks that run around every request. Registered with `client.use()`; run in order. */
 export interface Middleware<TTransportOptions = unknown> {
-  /** Inspect or replace the outgoing request. */
-  onRequest?(context: {
-    readonly request: TransportRequest<TTransportOptions>;
-    readonly operation: OperationInfo;
-  }):
+  /** Inspect or replace the outgoing request. Runs again for every retry. */
+  onRequest?(
+    context: MiddlewareContext<TTransportOptions>,
+  ):
     | void
     | TransportRequest<TTransportOptions>
     | Promise<void | TransportRequest<TTransportOptions>>;
-  /** Inspect or replace the response (also called for HTTP error statuses). */
-  onResponse?(context: {
-    readonly request: TransportRequest<TTransportOptions>;
-    readonly response: TransportResponse;
-    readonly operation: OperationInfo;
-  }): void | TransportResponse | Promise<void | TransportResponse>;
-  /** Called when the transport fails; return a response to recover. */
-  onError?(context: {
-    readonly request: TransportRequest<TTransportOptions>;
-    readonly error: unknown;
-    readonly operation: OperationInfo;
-  }): void | TransportResponse | Promise<void | TransportResponse>;
+  /**
+   * Inspect or replace the response (also called for HTTP error statuses), or return
+   * `context.retry()` to send the request again.
+   */
+  onResponse?(
+    context: RetryableContext<TTransportOptions> & { readonly response: TransportResponse },
+  ): void | TransportResponse | RetryDirective | Promise<void | TransportResponse | RetryDirective>;
+  /**
+   * Called when the transport fails: return a response to recover, or `context.retry()` to send
+   * the request again.
+   */
+  onError?(
+    context: RetryableContext<TTransportOptions> & { readonly error: unknown },
+  ): void | TransportResponse | RetryDirective | Promise<void | TransportResponse | RetryDirective>;
 }
 
 export type HeaderValues = Readonly<Record<string, string | undefined>>;

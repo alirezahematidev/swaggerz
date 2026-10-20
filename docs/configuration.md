@@ -54,14 +54,24 @@ Data configs cannot contain functions, so inline `hooks` are only available in T
 
 ## `spec`
 
-| Option           | Type                                | Default    |                                                                                                       |
-| ---------------- | ----------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- |
-| `version`        | `'2.0' \| '3.0' \| '3.1' \| 'auto'` | required   | The family the document must declare. A mismatch is an error; `'auto'` accepts any supported version. |
-| `input`          | `string`                            | required   | Local path or `http(s)` URL of a JSON or YAML document.                                               |
-| `refs`           | object                              |            | See below.                                                                                            |
-| `fetch.headers`  | `Record<string, string>`            | `{}`       | Sent only to the origin of `input` (e.g. `Authorization` for a private spec).                         |
-| `fetch.timeout`  | `number` (ms)                       | `30000`    | Per request.                                                                                          |
-| `fetch.maxBytes` | `number`                            | `52428800` | Maximum document size.                                                                                |
+| Option           | Type                                         | Default    |                                                                                                       |
+| ---------------- | -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- |
+| `version`        | `'2.0' \| '3.0' \| '3.1' \| '3.2' \| 'auto'` | required   | The family the document must declare. A mismatch is an error; `'auto'` accepts any supported version. |
+| `input`          | `string`                                     | required   | Local path or `http(s)` URL of a JSON or YAML document.                                               |
+| `refs`           | object                                       |            | See below.                                                                                            |
+| `fetch.headers`  | `Record<string, string>`                     | `{}`       | Sent only to the origin of `input` (e.g. `Authorization` for a private spec).                         |
+| `fetch.timeout`  | `number` (ms)                                | `30000`    | Per request.                                                                                          |
+| `fetch.maxBytes` | `number`                                     | `52428800` | Maximum document size.                                                                                |
+| `fetch.poll`     | `boolean \| number` (ms)                     | loopback   | Poll remote documents for changes while watching; see below.                                          |
+
+`generate --watch` and the dashboard poll remote documents (an `http(s)` input and remote `$ref` targets) for changes: every `fetch.poll` milliseconds after the previous round, with conditional requests (`If-None-Match`, `If-Modified-Since`) under the same rules as loading them (credentials only to the origin of `input`, redirect checks, `timeout`, `maxBytes`). Servers that send no `ETag` or `Last-Modified` are compared by content, so an unchanged document never triggers a regeneration. A changed document regenerates (or reloads the dashboard) like a changed file; a server that is down is reported once and polled until it is back.
+
+| `fetch.poll`      | Polled documents                                                                                                          |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| not set (default) | Documents on loopback hosts (`localhost`, `127.0.0.1`, `[::1]`), every 2000 ms: a specification served by a local backend |
+| `true`            | Every remote document, every 2000 ms                                                                                      |
+| a number (≥ 500)  | Every remote document, at that interval                                                                                   |
+| `false`           | None                                                                                                                      |
 
 ### `spec.refs`
 
@@ -75,6 +85,8 @@ External `$ref`s are resolved according to a policy:
 
 `allowedDirectories` defaults to the project root and the directory of the input file. Symbolic links are resolved before checking. Remote documents can never reference local files. Redirects are checked against the same policy. Each blocked reference is reported with a hint showing which option to change.
 
+`maxDocuments` (default `5000`) bounds how many documents one description may consist of; documents are loaded breadth-first, up to 32 at a time. Large descriptions split into many files (DigitalOcean's has about 1,900) fit the default; the limit stops runaway reference chains.
+
 ## `output`
 
 | Option            | Type                           | Default                 |                                                                                                                                                                    |
@@ -85,7 +97,7 @@ External `$ref`s are resolved according to a policy:
 | `importExtension` | `'.js' \| '.ts' \| 'none'`     | `'.js'`                 | `.js` works with Node ESM, TypeScript `nodenext`/`bundler` and all major bundlers. `.ts` requires `allowImportingTsExtensions`. `none` suits older webpack setups. |
 | `clean`           | `boolean`                      | `true`                  | Delete generated files that are no longer produced (never hand-edited ones).                                                                                       |
 | `barrel`          | `boolean`                      | `true`                  | `index`, `react-query/index`, `zod/index`.                                                                                                                         |
-| `groupBy`         | `'tag' \| 'none'`              | `'tag'`                 | Operation directories by first tag (`default` when untagged) or a single `operations/` directory.                                                                  |
+| `groupBy`         | `'tag' \| 'none'`              | `'tag'`                 | Operation directories by first tag (`default` when untagged; nested OpenAPI 3.2 tags in nested directories, `pets/cats`) or a single `operations/` directory.      |
 | `models`          | `'all' \| 'used'`              | `'all'`                 | `'used'` omits schemas no operation references.                                                                                                                    |
 | `webhooks`        | `boolean`                      | `true`                  | Payload, response and handler types for webhooks (`webhooks/`) and callbacks (`callbacks/`). See [generated code](generated-code.md#webhooks-and-callbacks).       |
 | `banner`          | `string`                       |                         | Additional `//` header lines.                                                                                                                                      |
@@ -105,11 +117,11 @@ External `$ref`s are resolved according to a policy:
 
 ## `features`
 
-| Option       | Default |                                                                                                                                                                                                                                                                            |
-| ------------ | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jsdoc`      | `true`  | Documentation comments (deprecations are always kept).                                                                                                                                                                                                                     |
-| `reactQuery` | `false` | `true`, or `{ queryMethods?: HttpMethod[]; infinite?: Record<name, { pageParam }>; invalidates?: Record<name, string[]> }`. Keys are generated operation names or `operationId`s; invalidation targets are operation names/ids or tags. See [React Query](react-query.md). |
-| `validation` | `false` | `'zod'` or `{ library: 'zod'; response?: boolean (true); request?: boolean (false) }`.                                                                                                                                                                                     |
+| Option       | Default |                                                                                                                                                                                                                                                                                                           |
+| ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `jsdoc`      | `true`  | Documentation comments (deprecations are always kept).                                                                                                                                                                                                                                                    |
+| `reactQuery` | `false` | `true`, or `{ queryMethods?: HttpMethod[] /* default ['get', 'query'] */; infinite?: Record<name, { pageParam }>; invalidates?: Record<name, string[]> }`. Keys are generated operation names or `operationId`s; invalidation targets are operation names/ids or tags. See [React Query](react-query.md). |
+| `validation` | `false` | `'zod'` or `{ library: 'zod'; response?: boolean (true); request?: boolean (false) }`.                                                                                                                                                                                                                    |
 
 ## `naming`
 

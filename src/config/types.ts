@@ -1,8 +1,8 @@
 import type { SwaggerzPlugin } from '../plugins/types.ts';
-import type { HttpMethod } from '../ir/types.ts';
+import type { StandardHttpMethod } from '../ir/types.ts';
 import type { ResolvedConfig } from './resolved.ts';
 
-export type SpecVersionOption = '2.0' | '3.0' | '3.1' | 'auto';
+export type SpecVersionOption = '2.0' | '3.0' | '3.1' | '3.2' | 'auto';
 export type CaseStyle = 'camelCase' | 'PascalCase' | 'snake_case' | 'kebab-case' | 'preserve';
 
 export interface SpecConfig {
@@ -35,6 +35,8 @@ export interface RefsConfig {
   allowedDirectories?: string[];
   /** Hosts remote references may be fetched from, e.g. `['schemas.example.com']`. */
   allowedHosts?: string[];
+  /** Maximum number of documents a description may consist of. Default `5000`. */
+  maxDocuments?: number;
 }
 
 export interface FetchConfig {
@@ -44,6 +46,13 @@ export interface FetchConfig {
   timeout?: number;
   /** Maximum document size in bytes. Default `52428800` (50 MiB). */
   maxBytes?: number;
+  /**
+   * Poll remote documents for changes in `generate --watch` and the dashboard, with conditional
+   * requests. `true` polls every 2000 ms, a number sets the interval in milliseconds (at least
+   * 500), `false` turns polling off. Default: only documents on loopback hosts (`localhost`,
+   * `127.0.0.1`, `[::1]`), such as a specification served by a local backend, every 2000 ms.
+   */
+  poll?: boolean | number;
 }
 
 export interface OutputConfig {
@@ -107,8 +116,11 @@ export interface ClientConfig {
 }
 
 export interface ReactQueryConfig {
-  /** HTTP methods that produce query hooks; others produce mutation hooks. Default `['get']`. */
-  queryMethods?: HttpMethod[];
+  /**
+   * HTTP methods that produce query hooks; others produce mutation hooks. Default
+   * `['get', 'query']` (`query` is OpenAPI 3.2's safe method with a body).
+   */
+  queryMethods?: StandardHttpMethod[];
   /**
    * Infinite query hooks, keyed by operation name (after naming conventions) or `operationId`.
    * `pageParam` names the query parameter that receives the page parameter.

@@ -16,6 +16,8 @@ export interface GeneratedFile {
 
 export type GeneratedExportKind =
   | 'operation'
+  /** `is<Operation>ApiError`: narrows an error to the operation's `ApiError`s. */
+  | 'error-guard'
   | 'type'
   | 'model'
   | 'hook'

@@ -65,6 +65,50 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: node tests/smoke/runtime.mjs
 
+  runtimes:
+    name: Generated client in ${{ matrix.runtime }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [deno, bun, chromium, firefox, webkit, workerd]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - if: matrix.runtime == 'deno'
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - if: matrix.runtime == 'bun'
+        uses: oven-sh/setup-bun@v2
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:assets runtime
+      # Browsers and workerd are installed by the script; --install-deps adds the browsers' system libraries.
+      - run: node scripts/runtimes.ts ${{ matrix.runtime }} --require --install-deps
+
+  corpus:
+    name: Public API corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      # The documents are pinned to commits and checksums, so the cache never goes stale.
+      - uses: actions/cache@v4
+        with:
+          path: .corpus
+          key: corpus-${{ hashFiles('fixtures/corpus/corpus.json') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:assets runtime
+      - run: pnpm corpus
+
   compat:
     name: Oldest and newest dependencies
     runs-on: ubuntu-latest

@@ -33,6 +33,9 @@
     "tests/.output/**",
     ".tmp/**",
     ".compat/**",
+    ".runtimes/**",
+    ".corpus/**",
+    "marketing/**",
     ".bench/**",
     "examples/**",
     "brand/**"
@@ -115,7 +118,7 @@
       }
     },
     {
-      "files": ["tests/**/*.{ts,tsx,mjs}", "scripts/**/*.ts"],
+      "files": ["tests/**/*.{ts,tsx,js,mjs}", "scripts/**/*.ts"],
       "rules": {
         "typescript/no-non-null-assertion": "off",
         "typescript/no-unsafe-argument": "off",

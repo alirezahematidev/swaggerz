@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { wireMethod, type TagIR } from '../ir/types.ts';
 import { findDuplicateSchemas } from '../analysis/graph.ts';
 import type { OperationSymbol, ProjectModel } from '../analysis/types.ts';
 import type { EmitContext } from '../codegen/context.ts';
@@ -11,6 +12,7 @@ import { SwaggerzError } from '../diagnostics/bag.ts';
 import { MANIFEST_FILENAME } from '../meta.ts';
 import { describeSchema, inspectData } from '../analysis/describe.ts';
 import { locatePointer } from '../loader/locate.ts';
+import { polledDocuments, type PolledDocument } from '../loader/remote-watcher.ts';
 import { diffHunks } from '../output/diff.ts';
 import { planWrite, readManifest, type PlannedWrite } from '../output/writer.ts';
 import { compile, type CompileResult } from '../pipeline/compile.ts';
@@ -30,6 +32,7 @@ import type {
   OperationDetail,
   OperationSummary,
   OverviewResponse,
+  OverviewTag,
   PreviewResponse,
   ReloadDelta,
   ReloadFailure,
@@ -77,6 +80,7 @@ export class DashboardState {
   #lastReload: SessionInfo['lastReload'];
   #failure: ReloadFailure | undefined;
   #watching: readonly string[] = [];
+  readonly #unreachable = new Map<string, { readonly error: string; readonly since: string }>();
 
   constructor(options: DashboardStateOptions) {
     this.#options = options;
@@ -170,10 +174,16 @@ export class DashboardState {
   }
 
   /**
-   * Files whose changes should reload the dashboard: the config file, every local document of the
-   * specification, and the output manifest (for the generation status).
+   * What should reload the dashboard: the config file and every local document of the
+   * specification (`sources`), the output manifest (for the generation status), and the remote
+   * documents to poll (`spec.fetch.poll`) with their interval.
    */
-  watchTargets(): { readonly sources: readonly string[]; readonly manifest: string } {
+  watchTargets(): {
+    readonly sources: readonly string[];
+    readonly manifest: string;
+    readonly remote: readonly PolledDocument[];
+    readonly interval: number;
+  } {
     const { config, file } = this.loaded;
     const sources = new Set<string>();
     if (file !== undefined) sources.add(file);
@@ -184,12 +194,28 @@ export class DashboardState {
     return {
       sources: [...sources].sort(compareStrings),
       manifest: path.join(config.output.directory, MANIFEST_FILENAME),
+      remote: polledDocuments(config, this.#compiled?.store),
+      interval: config.spec.fetch.poll.interval,
     };
   }
 
   /** Records which files are watched, for display. */
   setWatching(files: readonly string[]): void {
     this.#watching = files.map((file) => this.#relative(file));
+    for (const url of this.#unreachable.keys())
+      if (!files.includes(url)) this.#unreachable.delete(url);
+  }
+
+  /** A polled remote document cannot be fetched; returns the new revision. */
+  remoteFailed(url: string, error: string): number {
+    this.#unreachable.set(url, { error, since: new Date().toISOString() });
+    return ++this.#revision;
+  }
+
+  /** A polled remote document can be fetched again; returns the new revision. */
+  remoteRecovered(url: string): number {
+    this.#unreachable.delete(url);
+    return ++this.#revision;
   }
 
   #session(): SessionInfo {
@@ -201,6 +227,13 @@ export class DashboardState {
       ...(this.#lastReload === undefined ? {} : { lastReload: this.#lastReload }),
       changes: { operations: changes.operations, models: changes.models },
       ...(this.#failure === undefined ? {} : { failure: this.#failure }),
+      ...(this.#unreachable.size === 0
+        ? {}
+        : {
+            unreachable: [...this.#unreachable]
+              .sort(([a], [b]) => compareStrings(a, b))
+              .map(([url, problem]) => ({ url, ...problem })),
+          }),
     };
   }
 
@@ -211,6 +244,7 @@ export class DashboardState {
   }
 
   #relative(target: string): string {
+    if (/^https?:\/\//i.test(target)) return target;
     const relative = path.relative(this.loaded.config.root, target);
     return relative === '' ? '.' : relative.split(path.sep).join('/');
   }
@@ -252,18 +286,12 @@ export class DashboardState {
     const methods: Record<string, number> = {};
     const tagCounts = new Map<string, number>();
     for (const op of ir?.operations ?? []) {
-      const method = op.method.toUpperCase();
+      const method = wireMethod(op.method);
       methods[method] = (methods[method] ?? 0) + 1;
       for (const tag of op.tags.length === 0 ? ['default'] : op.tags)
         tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
     }
-    const declared = new Map((ir?.tags ?? []).map((tag) => [tag.name, tag.description]));
-    const tags = [...tagCounts.entries()]
-      .sort(([a], [b]) => compareStrings(a, b))
-      .map(([name, count]) => {
-        const description = declared.get(name);
-        return { name, count, ...(description === undefined ? {} : { description }) };
-      });
+    const tags = tagTree(ir?.tags ?? [], tagCounts);
     return {
       title: ir?.info.title ?? 'Unavailable',
       version: ir?.info.version ?? '',
@@ -280,6 +308,9 @@ export class DashboardState {
         language: config.output.language,
         adapter: config.client.adapter,
         reactQuery: config.features.reactQuery !== false,
+        ...(config.features.validation === false
+          ? {}
+          : { validation: config.features.validation.library }),
       },
       counts: {
         operations: ir?.operations.length ?? 0,
@@ -300,14 +331,16 @@ export class DashboardState {
   #operationSummary(symbol: OperationSymbol): OperationSummary {
     const op = symbol.operation;
     const security = op.security ?? this.project?.ir.security ?? [];
+    const ancestors = tagAncestors(op.tags, this.project?.ir.tags ?? []);
     return {
       key: symbol.key,
       name: symbol.name,
-      method: op.method.toUpperCase(),
+      method: wireMethod(op.method),
       path: op.path,
       ...(op.summary === undefined ? {} : { summary: op.summary }),
       ...(op.operationId === undefined ? {} : { operationId: op.operationId }),
       tags: op.tags,
+      ...(ancestors.length === 0 ? {} : { tagAncestors: ancestors }),
       deprecated: op.deprecated,
       module: symbol.module,
       auth: [...new Set(security.flatMap((requirement) => Object.keys(requirement)))].sort(
@@ -398,11 +431,14 @@ export class DashboardState {
       summary: this.#operationSummary(symbol),
       operation: op,
       // Only the type names the operation module actually exports.
-      typeNames: Object.fromEntries(
-        Object.entries(symbol.typeNames).filter(([role]) =>
-          role === 'params' ? plan.hasParams : role === 'body' ? plan.body !== undefined : true,
+      typeNames: {
+        ...Object.fromEntries(
+          Object.entries(symbol.typeNames).filter(([role]) =>
+            role === 'params' ? plan.hasParams : role === 'body' ? plan.body !== undefined : true,
+          ),
         ),
-      ),
+        errorGuard: symbol.errorGuard,
+      },
       hooks: [symbol.reactQuery?.hook, symbol.reactQuery?.infiniteHook].filter(
         (h): h is string => h !== undefined,
       ),
@@ -577,4 +613,58 @@ export class DashboardState {
       ...(write === undefined ? {} : { write }),
     };
   }
+}
+
+/** The tags an operation's tags are nested under (OpenAPI 3.2 `parent`), sorted. */
+function tagAncestors(tags: readonly string[], declared: readonly TagIR[]): string[] {
+  const parents = new Map(declared.map((tag) => [tag.name, tag.parent]));
+  const result = new Set<string>();
+  for (const tag of tags) {
+    for (let parent = parents.get(tag); parent !== undefined; parent = parents.get(parent)) {
+      if (result.has(parent) || tags.includes(parent)) break;
+      result.add(parent);
+    }
+  }
+  return [...result].sort(compareStrings);
+}
+
+/**
+ * Tags with their operation counts in tree order: nested tags (OpenAPI 3.2 `parent`) follow their
+ * parent with a greater depth. Declared parents of used tags are listed even without operations.
+ */
+function tagTree(declared: readonly TagIR[], counts: ReadonlyMap<string, number>): OverviewTag[] {
+  const byName = new Map(declared.map((tag) => [tag.name, tag]));
+  const names = new Set(counts.keys());
+  for (const name of names) {
+    for (
+      let parent = byName.get(name)?.parent;
+      parent !== undefined && !names.has(parent);
+      parent = byName.get(parent)?.parent
+    )
+      names.add(parent);
+  }
+  const children = new Map<string | undefined, string[]>();
+  for (const name of names) {
+    const parent = byName.get(name)?.parent;
+    const key = parent !== undefined && names.has(parent) ? parent : undefined;
+    children.set(key, [...(children.get(key) ?? []), name]);
+  }
+  const result: OverviewTag[] = [];
+  const visit = (parent: string | undefined, depth: number): void => {
+    for (const name of (children.get(parent) ?? []).sort(compareStrings)) {
+      const tag = byName.get(name);
+      result.push({
+        name,
+        count: counts.get(name) ?? 0,
+        depth,
+        ...(tag?.summary === undefined ? {} : { summary: tag.summary }),
+        ...(tag?.description === undefined ? {} : { description: tag.description }),
+        ...(tag?.kind === undefined ? {} : { kind: tag.kind }),
+        ...(tag?.parent === undefined ? {} : { parent: tag.parent }),
+      });
+      visit(name, depth + 1);
+    }
+  };
+  visit(undefined, 0);
+  return result;
 }

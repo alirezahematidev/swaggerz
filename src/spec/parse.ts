@@ -29,6 +29,7 @@ export async function parseSpecification(options: ParseOptions): Promise<ParseRe
     policy: config.spec.refs,
     fetch: config.spec.fetch,
     diagnostics,
+    maxDocuments: config.spec.refs.maxDocuments,
   });
   const root = await store.loadRoot(config.spec.input);
 
@@ -54,7 +55,8 @@ export async function parseSpecification(options: ParseOptions): Promise<ParseRe
     return { ir: undefined, store };
   }
 
-  if (detection.version === '3.1') store.enableSchemaIds();
+  if (detection.version === '3.1' || detection.version === '3.2') store.enableSchemaIds();
+  if (detection.version === '3.2') store.enableSelf();
   await store.loadReferencedDocuments();
   const ctx = new ParseContext(store, diagnostics);
   const ir = ADAPTERS[detection.version].normalize(ctx, detection.raw);

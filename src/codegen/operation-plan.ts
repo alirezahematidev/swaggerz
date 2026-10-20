@@ -143,7 +143,10 @@ export function planOperation(symbol: OperationSymbol, ir: ApiDocument): Operati
     parseAs = 'blob';
   else if (
     successMedia.length > 0 &&
-    successMedia.every((m) => m.mediaType.toLowerCase().startsWith('text/'))
+    // Sequential media types described by `itemSchema` (OpenAPI 3.2) are read as text for now.
+    successMedia.every(
+      (m) => m.mediaType.toLowerCase().startsWith('text/') || m.itemSchema !== undefined,
+    )
   )
     parseAs = 'text';
 

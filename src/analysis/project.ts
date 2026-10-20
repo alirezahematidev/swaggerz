@@ -1,11 +1,12 @@
 import type { ResolvedConfig } from '../config/resolved.ts';
 import type { DiagnosticBag } from '../diagnostics/bag.ts';
-import type {
-  ApiDocument,
-  OperationIR,
-  ParameterLocation,
-  SchemaDefinition,
-  WebhookIR,
+import {
+  wireMethod,
+  type ApiDocument,
+  type OperationIR,
+  type ParameterLocation,
+  type SchemaDefinition,
+  type WebhookIR,
 } from '../ir/types.ts';
 import { compareStrings } from '../utils/strings.ts';
 import { definitionsWithDates } from './dates.ts';
@@ -73,6 +74,9 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     modules.reserve(name);
   });
   const fileStyle = config.naming.files;
+  const tagParents = new Map(
+    ir.tags.flatMap((tag) => (tag.parent === undefined ? [] : [[tag.name, tag.parent] as const])),
+  );
   const used = graph.usedSchemas();
   const withDates = config.types.dates === 'Date' ? definitionsWithDates(ir) : new Set<string>();
 
@@ -144,10 +148,10 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     if (name !== preferred) {
       diagnostics.warning({
         code: 'naming/collision',
-        message: `Operation name "${preferred}" (${operation.method.toUpperCase()} ${operation.path}) is already taken; it is exported as "${name}".`,
+        message: `Operation name "${preferred}" (${wireMethod(operation.method)} ${operation.path}) is already taken; it is exported as "${name}".`,
       });
     }
-    const group = groupFor(operation, config);
+    const group = groupFor(operation, config, tagParents);
     const fileName = toFileName(name, fileStyle);
     const module = modules.claim(`${group}/${fileName}`, '-');
     const pascal = applyCase(name, 'PascalCase');
@@ -157,12 +161,14 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       body: exports.claim(`${pascal}Body`),
       response: exports.claim(`${pascal}Response`),
       error: exports.claim(`${pascal}Error`),
+      apiError: exports.claim(`${pascal}ApiError`),
       errorBody: exports.claim(`${pascal}ErrorBody`),
       // Request bodies by media type, only for operations that accept several.
       ...((operation.requestBody?.contents.length ?? 0) > 1
         ? { bodies: exports.claim(`${pascal}Bodies`) }
         : {}),
     };
+    const errorGuard = exports.claim(`is${pascal}ApiError`);
     const { properties, body, contentType } = parameterProperties(
       operation,
       config.naming.parameters,
@@ -170,7 +176,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
 
     let reactQuerySymbols: OperationSymbol['reactQuery'];
     if (reactQuery !== false) {
-      const isQuery = reactQuery.queryMethods.includes(operation.method);
+      const isQuery = (reactQuery.queryMethods as readonly string[]).includes(operation.method);
       const infiniteConfig =
         reactQuery.infinite[name] ??
         (operation.operationId === undefined
@@ -179,7 +185,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       const pageParam = isQuery
         ? resolvePageParam(operation, infiniteConfig?.pageParam, diagnostics)
         : undefined;
-      const groupPrefix = groupKeyPrefix(operation, config);
+      const groupPrefix = groupKeyPrefix(operation, config, tagParents);
       const keyPrefix = hooks?.queryKey?.(operation, [...groupPrefix, name]) ?? [
         ...groupPrefix,
         name,
@@ -215,6 +221,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       group,
       module,
       typeNames,
+      errorGuard,
       parameterProperties: properties,
       bodyProperty: body,
       contentTypeProperty: contentType,
@@ -225,15 +232,24 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
 
   const reactQueryGroups: ReactQueryGroup[] = [];
   if (reactQuery !== false && config.output.groupBy === 'tag') {
-    const seen = new Map<string, OperationIR>();
-    for (const symbol of operations)
-      if (!seen.has(symbol.group)) seen.set(symbol.group, symbol.operation);
-    for (const [group, operation] of seen) {
+    // Every group with operations, and the groups of their parent tags (OpenAPI 3.2), whose
+    // `all` key matches the queries of every nested group.
+    const prefixes = new Map<string, readonly string[]>();
+    for (const symbol of operations) {
+      const tags = tagPath(symbol.operation.tags[0] ?? 'default', tagParents);
+      tags.forEach((_, index) => {
+        const prefix = tags.slice(0, index + 1);
+        const group = groupPath(prefix, config);
+        if (!prefixes.has(group)) prefixes.set(group, prefix);
+      });
+    }
+    for (const [group, prefix] of [...prefixes].sort(([a], [b]) => compareStrings(a, b))) {
       reactQueryGroups.push({
         group,
         module: modules.claim(`react-query/${group}/keys`, '-'),
-        name: exports.claim(`${applyCase(group, 'camelCase') || 'default'}Keys`),
-        prefix: groupKeyPrefix(operation, config),
+        // A valid identifier even for groups such as `1-click-applications`.
+        name: exports.claim(toIdentifier(`${group} keys`, 'camelCase')),
+        prefix,
       });
     }
   }
@@ -298,9 +314,36 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
   };
 }
 
-/** Root of the React Query keys of an operation's group: the first tag, or nothing when ungrouped. */
-function groupKeyPrefix(operation: OperationIR, config: ResolvedConfig): string[] {
-  return config.output.groupBy === 'tag' ? [operation.tags[0] ?? 'default'] : [];
+/** The first tag preceded by its ancestors (OpenAPI 3.2 `parent`), root first. */
+function tagPath(tag: string, parents: ReadonlyMap<string, string>): string[] {
+  const path = [tag];
+  for (
+    let parent = parents.get(tag);
+    parent !== undefined && !path.includes(parent);
+    parent = parents.get(parent)
+  )
+    path.unshift(parent);
+  return path;
+}
+
+/**
+ * Root of the React Query keys of an operation's group: its first tag (after the tags it is
+ * nested under), or nothing when ungrouped.
+ */
+function groupKeyPrefix(
+  operation: OperationIR,
+  config: ResolvedConfig,
+  parents: ReadonlyMap<string, string>,
+): string[] {
+  return config.output.groupBy === 'tag' ? tagPath(operation.tags[0] ?? 'default', parents) : [];
+}
+
+/** Directory of a tag path, e.g. `pets/cats`; a first segment that is reserved gets `-api`. */
+function groupPath(tags: readonly string[], config: ResolvedConfig): string {
+  const segments = tags.map((tag) => toFileName(tag, config.naming.files));
+  const first = segments[0] ?? 'default';
+  if (RESERVED_MODULE_ROOTS.includes(first)) segments[0] = `${first}-api`;
+  return segments.join('/');
 }
 
 /** Validates the configured page parameter of an infinite query. */
@@ -313,7 +356,7 @@ function resolvePageParam(
   if (!operation.parameters.some((p) => p.in === 'query' && p.name === pageParam)) {
     diagnostics.error({
       code: 'react-query/invalid-page-param',
-      message: `Infinite query for ${operation.method.toUpperCase()} ${operation.path}: "${pageParam}" is not a query parameter of the operation.`,
+      message: `Infinite query for ${wireMethod(operation.method)} ${operation.path}: "${pageParam}" is not a query parameter of the operation.`,
       hint: `Use one of: ${
         operation.parameters
           .filter((p) => p.in === 'query')
@@ -326,18 +369,21 @@ function resolvePageParam(
   return pageParam;
 }
 
-function groupFor(operation: OperationIR, config: ResolvedConfig): string {
+function groupFor(
+  operation: OperationIR,
+  config: ResolvedConfig,
+  parents: ReadonlyMap<string, string>,
+): string {
   if (config.output.groupBy === 'none') return 'operations';
-  const tag = operation.tags[0] ?? 'default';
-  const group = toFileName(tag, config.naming.files);
-  return RESERVED_MODULE_ROOTS.includes(group) ? `${group}-api` : group;
+  return groupPath(tagPath(operation.tags[0] ?? 'default', parents), config);
 }
 
 const LOCATION_PRIORITY: Record<ParameterLocation, number> = {
   path: 0,
   query: 1,
-  header: 2,
-  cookie: 3,
+  querystring: 2,
+  header: 3,
+  cookie: 4,
 };
 
 /**

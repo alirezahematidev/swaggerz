@@ -1,0 +1,130 @@
+{
+  "//": "Public API descriptions compiled by `node scripts/corpus.ts`. Each document is pinned to a commit (or a release tag) and to the SHA-256 of its root file. `git` documents span many files: the pinned commit is checked out (shallow, sparse) and compiled locally.",
+  "documents": [
+    {
+      "name": "kubernetes",
+      "url": "https://raw.githubusercontent.com/kubernetes/kubernetes/v1.31.0/api/openapi-spec/swagger.json",
+      "sha256": "ac357350d9d00ee233ea9a172d7c868201ff405332fec8ffe0fda25dee3e41b4"
+    },
+    {
+      "name": "slack",
+      "url": "https://raw.githubusercontent.com/slackapi/slack-api-specs/bc08db49625630e3585bf2f1322128ea04f2a7f3/web-api/slack_web_openapi_v2.json",
+      "sha256": "742a5c977180a829df8767cf57bc417d99b3713583aee83741efb9c08ca731e7"
+    },
+    {
+      "name": "stripe",
+      "url": "https://raw.githubusercontent.com/stripe/openapi/f3799ad599a6cf7c76fd94ce72274c0367cc2ba7/openapi/spec3.yaml",
+      "sha256": "585b581504ae0d6760b823cdfae4ac8a218b53f2c32c0135f6a4e35a84d874f6"
+    },
+    {
+      "name": "github",
+      "url": "https://raw.githubusercontent.com/github/rest-api-description/755ee33b4a81d51f6f07a902cce26cbec3b822f2/descriptions/api.github.com/api.github.com.yaml",
+      "sha256": "258505f253efda24d0c3156203a8d632fa055154d5f16a8327043f4e0ceea7bc"
+    },
+    {
+      "name": "github-next",
+      "url": "https://raw.githubusercontent.com/github/rest-api-description/755ee33b4a81d51f6f07a902cce26cbec3b822f2/descriptions-next/api.github.com/api.github.com.yaml",
+      "sha256": "656e3dacf9f6d601dbd8df76ab474febef7ec5cd490813d49e812ff467d7314c"
+    },
+    {
+      "name": "twilio",
+      "url": "https://raw.githubusercontent.com/twilio/twilio-oai/d9775142962ea67d5f3d50c5021a23ae6d330c5b/spec/json/twilio_api_v2010.json",
+      "sha256": "bfdf249a129819af274d6bdc7672156ea3416ad48670a6f0544def6ef386ba87"
+    },
+    {
+      "name": "box",
+      "url": "https://raw.githubusercontent.com/box/box-openapi/a4f3e23d5bd01d9f4398bc1a764d410df3e607a7/openapi.json",
+      "sha256": "1b7848282862071cf2c929f7af101819060018cdebb89f8f024fe3ef965a1529"
+    },
+    {
+      "name": "asana",
+      "url": "https://raw.githubusercontent.com/Asana/openapi/dbe7d01f9fd976d33dcf117ed340a9fd59bebae7/defs/asana_oas.yaml",
+      "sha256": "07ab7185b4776f3c854781d07b39e2c37418e0549fef390721982ff659657ac1"
+    },
+    {
+      "name": "plaid",
+      "url": "https://raw.githubusercontent.com/plaid/plaid-openapi/655434566cd8f5e90c34b007da32f461b976f350/2020-09-14.yml",
+      "sha256": "ea443cd78f6f6bb648c6f0c13f4b00095c3520dcaf45fc7930c36594227a43ee"
+    },
+    {
+      "name": "spotify",
+      "url": "https://raw.githubusercontent.com/sonallux/spotify-web-api/f1d6138cd0b2bcc8dbd8567e28af97bf68eb7d7c/fixed-spotify-open-api.yml",
+      "sha256": "ddeb078a50208d94c4538bd891bec0c9e67c9f3406617a2d887f0a482a4501f4"
+    },
+    {
+      "name": "swagger-petstore",
+      "url": "https://raw.githubusercontent.com/swagger-api/swagger-petstore/d57941e8fe959e508796b27469b1e8bba73392dc/src/main/resources/openapi.yaml",
+      "sha256": "e1a2480ffa440e44b981db5b038374214c532ffc92026fd51fb957c88bfbdd88"
+    },
+    {
+      "name": "digitalocean",
+      "git": {
+        "repo": "https://github.com/digitalocean/openapi.git",
+        "commit": "5a1d9c7241fce27c01bad3b09c9c92394c94bef3",
+        "sparse": "specification"
+      },
+      "path": "specification/DigitalOcean-public.v2.yaml",
+      "sha256": "3b6d440549faf18c731fe22570fbaca02462cf61be9128b9f59e9672d5e76d39"
+    },
+    {
+      "name": "openai",
+      "url": "https://raw.githubusercontent.com/openai/openai-openapi/5cc3a83b491bb6abe8a3c6c4a838b75ddd39c860/openapi.yaml",
+      "sha256": "6d3a2bc88a0628519eb5fd69e3234329b91f888e2c4acf4beb1bd1b8706c337c"
+    },
+    {
+      "name": "discord",
+      "url": "https://raw.githubusercontent.com/discord/discord-api-spec/86f61fc1befc4eb77b6cab498170c8c254cf3b04/specs/openapi.json",
+      "sha256": "846324ae25ebf21f71d9c9e8bfe1eb05069e361027fb2e5a2c396f9cff044da9"
+    },
+    {
+      "name": "train-travel",
+      "url": "https://raw.githubusercontent.com/bump-sh-examples/train-travel-api/d0996aff3c4951a3c3618e2744e011ae6115f2f5/openapi.yaml",
+      "sha256": "16cd100b59ec32d7c9eecfde7de95e90f1ef8fbc5d61087bac56667556cde72b"
+    },
+    {
+      "name": "oai-petstore-expanded",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.0/petstore-expanded.yaml",
+      "sha256": "abc68d08c674c8f0415aaeeb87c4203d5dd7257cdb79ac7ccb0446d1c5b9a7c2"
+    },
+    {
+      "name": "oai-api-with-examples",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.0/api-with-examples.yaml",
+      "sha256": "2b8d39097f8d0800b3d9b94f784348ea6d046a82c2b78e83b737874c938e63b9"
+    },
+    {
+      "name": "oai-callback-example",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.0/callback-example.yaml",
+      "sha256": "c9695b830c457df0b2f7e62f91b270be5628f239947926e279ccca895b950c0f"
+    },
+    {
+      "name": "oai-link-example",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.0/link-example.yaml",
+      "sha256": "92b502f64d80d67e2a8e634e5b82e9b7ae1f1e8fb5b754cc1c2cad1102447206"
+    },
+    {
+      "name": "oai-uspto",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.0/uspto.yaml",
+      "sha256": "29d32d0a0710b0acac434807e018ebd9cc192ad604fefdcf51422833b5963642"
+    },
+    {
+      "name": "oai-webhook-example",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.1/webhook-example.yaml",
+      "sha256": "1bf9c928e1d42d5ffd3d793dbc6b569bd47a97a4679ee5c85cd78091136ab2a4"
+    },
+    {
+      "name": "oai-non-oauth-scopes",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.1/non-oauth-scopes.yaml",
+      "sha256": "f51b1e1e8abda7bfc790f6e9fbddf36c24353576d3bf7cd2e33e0670e965b177"
+    },
+    {
+      "name": "oai-query-example",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.2/3.2-query-example.yaml",
+      "sha256": "b303415fb10b1db28d74a35ec584441eba269e62c916b90337841dc0e3525c42"
+    },
+    {
+      "name": "oai-tags-example",
+      "url": "https://raw.githubusercontent.com/OAI/learn.openapis.org/82b82f372aa185a07ea11bc158619895ab21f741/examples/v3.2/3.2-tags-example.yaml",
+      "sha256": "8dcbcce8641c5fa11243faf3266daa2fcea7a2a5c2d919bf20fab8e3551b45de"
+    }
+  ]
+}

@@ -1,2 +1,7 @@
+# The examples are workspace packages so they use this checkout of swaggerz
+# (`pnpm example:<name>` builds it first).
+packages:
+  - examples/*
+
 allowBuilds:
   esbuild: true

@@ -60,7 +60,7 @@ function settings(
   const style = serialization?.style ?? DEFAULT_STYLE[location];
   return {
     style,
-    explode: serialization?.explode ?? style === 'form',
+    explode: serialization?.explode ?? (style === 'form' || style === 'cookie'),
     encode: serialization?.allowReserved === true ? encodeReserved : encodeStrict,
     json: serialization?.json === true,
   };
@@ -195,6 +195,10 @@ export function serializeCookies(
     const value = values[name];
     if (value === undefined || value === null) continue;
     const serialization = styles?.[name];
+    if (serialization?.style === 'cookie') {
+      parts.push(cookieStyle(name, value, serialization.explode ?? true));
+      continue;
+    }
     const text =
       serialization?.json === true
         ? JSON.stringify(value)
@@ -208,6 +212,49 @@ export function serializeCookies(
     parts.push(`${name}=${encodeStrict(text)}`);
   }
   return parts.join('; ');
+}
+
+/**
+ * OpenAPI 3.2 `style: cookie`: like `form`, but pairs are separated by `; ` and nothing is
+ * percent-encoded (values must already be escaped as the cookie requires).
+ */
+function cookieStyle(name: string, value: unknown, explode: boolean): string {
+  if (Array.isArray(value)) {
+    const items = value.map(primitiveToString);
+    return explode
+      ? items.map((item) => `${name}=${item}`).join('; ')
+      : `${name}=${items.join(',')}`;
+  }
+  if (isObject(value)) {
+    const pairs = entriesOf(value);
+    return explode
+      ? pairs.map(([key, item]) => `${key}=${primitiveToString(item)}`).join('; ')
+      : `${name}=${pairs.flatMap(([key, item]) => [key, primitiveToString(item)]).join(',')}`;
+  }
+  return `${name}=${primitiveToString(value)}`;
+}
+
+/**
+ * Serializes an OpenAPI 3.2 `querystring` parameter: the whole query string, without `?`. Form
+ * content uses `application/x-www-form-urlencoded` rules; other media types are serialized (JSON
+ * as JSON text, anything else as a string) and percent-encoded.
+ */
+export function serializeQuerystring(
+  value: unknown,
+  mediaType: string,
+  encoding?: Readonly<Record<string, PropertyEncoding>>,
+): string {
+  if (value === undefined || value === null) return '';
+  const type = (mediaType.split(';')[0] ?? '').trim().toLowerCase();
+  if (type === 'application/x-www-form-urlencoded') {
+    const params =
+      typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams
+        ? value
+        : toSearchParams(value, encoding);
+    return params.toString();
+  }
+  const text = isJsonMediaType(type) ? JSON.stringify(value) : primitiveToString(value);
+  return encodeURIComponent(text);
 }
 
 /** Whether a media type carries JSON (`application/json`, `application/problem+json`, ...). */

@@ -11,7 +11,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { generate } from '../src/api.ts';
 import type { UserConfig } from '../src/config/types.ts';
-import { FEATURES_CONSUMER, PETSTORE_CONSUMER } from '../tests/integration/codegen/consumers.ts';
+import {
+  FEATURES32_CONSUMER,
+  FEATURES_CONSUMER,
+  PETSTORE_CONSUMER,
+} from '../tests/integration/codegen/consumers.ts';
 import {
   REACT_QUERY_CONFIG,
   REACT_QUERY_CONSUMER,
@@ -83,6 +87,14 @@ const CASES: readonly Case[] = [
       features: { validation: { library: 'zod', request: true } },
     },
     consumer: FEATURES_CONSUMER,
+  },
+  {
+    name: 'openapi-3.2',
+    config: {
+      spec: { version: '3.2', input: fixture('features-3.2.yaml') },
+      features: { reactQuery: true, validation: 'zod' },
+    },
+    consumer: FEATURES32_CONSUMER,
   },
   {
     name: 'react-query-js',

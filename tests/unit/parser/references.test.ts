@@ -1,9 +1,11 @@
+import { writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DiagnosticBag } from '../../../src/diagnostics/bag.ts';
 import { SwaggerzError } from '../../../src/diagnostics/bag.ts';
 import { enrichLocations } from '../../../src/loader/locate.ts';
 import { parseSpecification } from '../../../src/spec/parse.ts';
-import { codes, fixture, makeConfig, parseFixture } from '../../helpers.ts';
+import { codes, fixture, makeConfig, parseFixture, withTempDir } from '../../helpers.ts';
 
 describe('multi-file specifications', () => {
   it('loads external documents, path item refs and nested refs', async () => {
@@ -158,5 +160,96 @@ describe('invalid specifications', () => {
       (e: unknown) => e,
     );
     expect((error as SwaggerzError).diagnostics[0]?.message).toMatch(/File not found/);
+  });
+});
+
+describe('component names that look like keywords', () => {
+  it('follows references inside components named like JSON Schema keywords', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        path.join(dir, 'openapi.yaml'),
+        `openapi: 3.0.3
+info: { title: t, version: '1' }
+paths:
+  /items:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/default'
+      responses: { '200': { description: ok } }
+components:
+  parameters:
+    default:
+      name: page
+      in: query
+      schema: { $ref: './shared.yaml#/Page' }
+`,
+      );
+      await writeFile(path.join(dir, 'shared.yaml'), 'Page: { type: integer, minimum: 1 }\n');
+      const diagnostics = new DiagnosticBag();
+      const { ir } = await parseSpecification({
+        config: makeConfig(
+          { spec: { version: '3.0', input: path.join(dir, 'openapi.yaml') } },
+          dir,
+        ),
+        diagnostics,
+      });
+      expect(codes(diagnostics.toArray())).toEqual([]);
+      expect(ir?.sources).toEqual(['openapi.yaml', 'shared.yaml']);
+      expect(ir?.operations[0]?.parameters[0]?.schema).toMatchObject({
+        kind: 'ref',
+        target: 'shared.yaml#/Page',
+      });
+    });
+  });
+});
+
+describe('document limit', () => {
+  it('stops at spec.refs.maxDocuments and reports it once', async () => {
+    await withTempDir(async (dir) => {
+      await writeFile(
+        path.join(dir, 'openapi.yaml'),
+        `openapi: 3.0.3
+info: { title: t, version: '1' }
+paths: {}
+components:
+  schemas:
+    A: { $ref: './a.yaml' }
+    B: { $ref: './b.yaml' }
+    C: { $ref: './c.yaml' }
+`,
+      );
+      for (const name of ['a', 'b', 'c'])
+        await writeFile(path.join(dir, `${name}.yaml`), 'type: string\n');
+      const parse = async (maxDocuments: number) => {
+        const diagnostics = new DiagnosticBag();
+        const config = makeConfig(
+          {
+            spec: { version: '3.0', input: path.join(dir, 'openapi.yaml'), refs: { maxDocuments } },
+          },
+          dir,
+        );
+        const { ir } = await parseSpecification({ config, diagnostics });
+        return { ir, codes: codes(diagnostics.toArray()) };
+      };
+      const limited = await parse(3);
+      expect(limited.codes.filter((code) => code === 'ref/too-many-documents')).toHaveLength(1);
+      expect((await parse(4)).ir?.sources).toEqual(['openapi.yaml', 'a.yaml', 'b.yaml', 'c.yaml']);
+    });
+  });
+});
+
+describe('operations written as references', () => {
+  it('follows a $ref in place of an Operation Object and notes it', async () => {
+    const parsed = await parseFixture('real-world/openapi.yaml', '3.0');
+    const operation = parsed.ir.operations.find((o) => o.operationId === 'oneClicksList');
+    expect(operation).toMatchObject({
+      tags: ['1-Click Applications'],
+      parameters: [{ name: 'type', in: 'query' }],
+      source: { file: 'operations/list-one-clicks.yaml', pointer: '' },
+    });
+    expect(operation?.responses.map((r) => r.status)).toEqual(['200']);
+    expect(parsed.diagnostics.map((d) => [d.severity, d.code])).toEqual([
+      ['info', 'spec/non-standard-ref'],
+    ]);
   });
 });

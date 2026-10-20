@@ -23,8 +23,8 @@ export function MethodBadge({
     <span
       className={cn(
         'inline-flex shrink-0 items-center justify-center rounded-[5px] font-mono font-semibold tracking-wide',
-        size === 'sm' && 'h-[18px] w-[46px] text-[9.5px]',
-        size === 'md' && 'h-5 w-[52px] text-[10.5px]',
+        size === 'sm' && 'h-[18px] min-w-[46px] px-1 text-[9.5px]',
+        size === 'md' && 'h-5 min-w-[52px] px-1 text-[10.5px]',
         size === 'lg' && 'h-7 px-2.5 text-[12px]',
         METHOD_CLASS[upper] ?? 'bg-method-other/12 text-method-other',
         className,

@@ -1,5 +1,6 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { request } from 'node:http';
+import { createServer, request } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
@@ -206,7 +207,7 @@ describe('dashboard API', () => {
     expect(overview).toMatchObject({
       title: 'Swagger Petstore - OpenAPI 3.0',
       specVersionRaw: '3.0.3',
-      counts: { operations: 15, models: 11, files: 34, tags: 3, deprecated: 1 },
+      counts: { operations: 15, models: 11, files: 35, tags: 3, deprecated: 1 },
       generation: { status: 'never' },
       config: { output: 'src/generated/api', language: 'typescript', adapter: 'fetch' },
     });
@@ -293,11 +294,11 @@ describe('dashboard API', () => {
       { confirm: true },
     );
     expect(result.ok).toBe(true);
-    expect(result.write.created).toHaveLength(34);
+    expect(result.write.created).toHaveLength(35);
     const overview = await api<OverviewResponse>('/api/overview');
     expect(overview.generation).toMatchObject({
       status: 'up-to-date',
-      manifestFiles: 34,
+      manifestFiles: 35,
       lastRun: { ok: true },
     });
   });
@@ -314,6 +315,9 @@ describe('dashboard API', () => {
       module: 'pet/get-pet-by-id',
     });
     expect(byName.get('getPetById')?.locations[0]).toMatchObject({ file: 'src/app.ts', line: 1 });
+    expect(byName.get('getPetById')?.kind).toBe('operation');
+    // Error guards are functions, but not operations: the operation counts must not include them.
+    expect(byName.get('isGetPetByIdApiError')?.kind).toBe('error-guard');
     expect(byName.get('Pet')).toMatchObject({ status: 'used', module: 'models/pet' });
     expect(byName.get('getInventory')).toMatchObject({ status: 'used', references: 1 });
     expect(byName.get('loginUser')?.status).toBe('unknown');
@@ -540,5 +544,140 @@ describe('dashboard live reload', () => {
     expect(
       (await api<OverviewResponse>('/api/overview', 'GET', undefined, live)).generation.status,
     ).toBe('up-to-date');
+  });
+});
+
+describe('dashboard live reload of a remote specification', () => {
+  it('polls the specification and reloads when it changes', async () => {
+    let spec = await readFile(fixture('petstore-3.0.yaml'), 'utf8');
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/yaml' });
+      res.end(spec);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/openapi.yaml`;
+    const directory = await createProject('dashboard-remote', {
+      config: { spec: { version: '3.0', input: url, fetch: { poll: 500 } } },
+    });
+    const remoteDashboard = await startDashboard({ cwd: directory, env: {}, port: 0 });
+    const stream = subscribe(remoteDashboard);
+    try {
+      await stream.next((event) => event.type === 'hello');
+      const overview = await api<OverviewResponse>(
+        '/api/overview',
+        'GET',
+        undefined,
+        remoteDashboard,
+      );
+      expect(overview.session.watching).toEqual(['swaggerz.config.mjs', url]);
+      spec = spec.replace('operationId: logoutUser', 'operationId: signOut');
+      const event = await stream.next((e) => e.type === 'reload' && e.ok);
+      // Operations are identified by method and path, so a new operationId is an update.
+      expect(event).toMatchObject({
+        trigger: 'watch',
+        files: [url],
+        delta: { operations: { new: 0, updated: 1, removed: 0 } },
+      });
+    } finally {
+      stream.close();
+      await remoteDashboard.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('dashboard with an unreachable remote specification', () => {
+  it('reports a polled document that cannot be fetched, and its recovery', async () => {
+    const spec = await readFile(fixture('petstore-3.0.yaml'), 'utf8');
+    let down = false;
+    const server = createServer((_req, res) => {
+      if (down) {
+        res.writeHead(503).end();
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/yaml' });
+      res.end(spec);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/openapi.yaml`;
+    const directory = await createProject('dashboard-unreachable', {
+      config: { spec: { version: '3.0', input: url, fetch: { poll: 500 } } },
+    });
+    const remoteDashboard = await startDashboard({ cwd: directory, env: {}, port: 0 });
+    const stream = subscribe(remoteDashboard);
+    try {
+      await stream.next((event) => event.type === 'hello');
+      down = true;
+      expect(await stream.next((e) => e.type === 'remote' && !e.reachable)).toMatchObject({
+        url,
+        error: 'HTTP 503 Service Unavailable',
+      });
+      const failing = await api<OverviewResponse>(
+        '/api/overview',
+        'GET',
+        undefined,
+        remoteDashboard,
+      );
+      expect(failing.session.unreachable).toEqual([
+        { url, error: 'HTTP 503 Service Unavailable', since: expect.any(String) as string },
+      ]);
+      // The last version that loaded stays visible.
+      expect(failing.counts.operations).toBe(15);
+      down = false;
+      expect(await stream.next((e) => e.type === 'remote' && e.reachable)).toMatchObject({ url });
+      const recovered = await api<OverviewResponse>(
+        '/api/overview',
+        'GET',
+        undefined,
+        remoteDashboard,
+      );
+      expect(recovered.session.unreachable).toBeUndefined();
+    } finally {
+      stream.close();
+      await remoteDashboard.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('dashboard with an OpenAPI 3.2 specification', () => {
+  it('shows nested tags, QUERY and additional methods, and querystring parameters', async () => {
+    const directory = await createProject('dashboard-32', {
+      config: { spec: { version: '3.2', input: fixture('features-3.2.yaml') } },
+    });
+    const dashboard32 = await startDashboard({ cwd: directory, env: {}, port: 0, watch: false });
+    try {
+      const overview = await api<OverviewResponse>('/api/overview', 'GET', undefined, dashboard32);
+      expect(overview.specVersion).toBe('OpenAPI 3.2');
+      expect(overview.methods).toMatchObject({ QUERY: 1, COPY: 1 });
+      expect(overview.tags.map((tag) => [tag.name, tag.depth, tag.count, tag.kind])).toEqual([
+        ['admin', 0, 2, 'audience'],
+        ['documents', 0, 3, 'nav'],
+        ['pets', 0, 2, 'nav'],
+        ['cats', 1, 1, 'nav'],
+      ]);
+      const operations = await api<OperationSummary[]>(
+        '/api/operations',
+        'GET',
+        undefined,
+        dashboard32,
+      );
+      const getPet = operations.find((op) => op.name === 'getPet');
+      expect(getPet).toMatchObject({ tags: ['cats'], tagAncestors: ['pets'] });
+      expect(operations.find((op) => op.name === 'copyDocument')?.method).toBe('COPY');
+      const detail = await api<OperationDetail>(
+        `/api/operation?key=${encodeURIComponent('get /pets')}`,
+        'GET',
+        undefined,
+        dashboard32,
+      );
+      expect(detail.operation.parameters[0]).toMatchObject({
+        in: 'querystring',
+        contentType: 'application/x-www-form-urlencoded',
+      });
+      expect(detail.typeNames.errorGuard).toBe('isListPetsApiError');
+    } finally {
+      await dashboard32.close();
+    }
   });
 });

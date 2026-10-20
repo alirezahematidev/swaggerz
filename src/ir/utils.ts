@@ -1,4 +1,4 @@
-import type { ApiDocument, OperationIR, SchemaIR, SchemaMeta } from './types.ts';
+import type { ApiDocument, MediaTypeIR, OperationIR, SchemaIR, SchemaMeta } from './types.ts';
 
 const META_KEYS: readonly (keyof SchemaMeta)[] = [
   'nullable',
@@ -86,13 +86,18 @@ export function forEachAssertion(schema: SchemaIR, visit: (child: SchemaIR) => v
   for (const child of Object.values(assertions.dependentSchemas ?? {})) visit(child);
 }
 
+/** The schemas of a media type: the content, and the items of a sequential media type. */
+export function mediaSchemas(media: MediaTypeIR): SchemaIR[] {
+  return media.itemSchema === undefined ? [media.schema] : [media.schema, media.itemSchema];
+}
+
 /** Every top-level schema used by an operation. */
 export function operationSchemas(operation: OperationIR): SchemaIR[] {
   return [
     ...operation.parameters.map((p) => p.schema),
-    ...(operation.requestBody?.contents.map((c) => c.schema) ?? []),
+    ...(operation.requestBody?.contents.flatMap(mediaSchemas) ?? []),
     ...operation.responses.flatMap((r) => [
-      ...r.contents.map((c) => c.schema),
+      ...r.contents.flatMap(mediaSchemas),
       ...r.headers.map((h) => h.schema),
     ]),
   ];

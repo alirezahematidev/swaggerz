@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fixture } from '../../helpers.ts';
@@ -50,6 +50,55 @@ describe.each(MODES)('React Query $name output', (mode) => {
       );
     },
   );
+});
+
+describe('React Query for operations without a response body', () => {
+  it('does not import types the hooks do not use', async () => {
+    // logoutUser has no response body: its query data is `null` and its response type unused.
+    const { directory } = await generateCase('rq-petstore', {
+      spec: { version: '3.0', input: fixture('petstore-3.0.yaml') },
+      features: { reactQuery: true },
+    });
+    expect(typecheck(await listFiles(directory, '.ts'), BROWSER)).toEqual([]);
+  });
+});
+
+describe('React Query with OpenAPI 3.2', () => {
+  it('nests key factories like tags and makes QUERY operations queries', async () => {
+    const name = 'rq-features32';
+    const { directory } = await generateCase(name, {
+      spec: { version: '3.2', input: fixture('features-3.2.yaml') },
+      features: { reactQuery: { invalidates: { copyDocument: ['pets'] } } },
+    });
+    const read = (file: string): Promise<string> => readFile(path.join(directory, file), 'utf8');
+    expect(await read('react-query/pets/keys.ts')).toContain("all: ['pets'] as const,");
+    expect(await read('react-query/pets/cats/keys.ts')).toContain(
+      "all: ['pets', 'cats'] as const,",
+    );
+    expect(await read('react-query/pets/cats/get-pet.ts')).toContain(
+      "return ['pets', 'cats', 'getPet', params];",
+    );
+    // QUERY is safe: a query hook whose key includes the query document.
+    const search = await read('react-query/pets/search-pets.ts');
+    expect(search).toContain('export function useSearchPets');
+    expect(search).toContain("return ['pets', 'searchPets', params];");
+    // Invalidating the parent tag covers the nested one.
+    expect(await read('react-query/documents/copy-document.ts')).toContain(
+      "client.invalidateQueries({ queryKey: ['pets'] })",
+    );
+    const consumer = path.join(OUTPUT_ROOT, `${name}.consumer.ts`);
+    await writeFile(
+      consumer,
+      `import { petsCatsKeys, petsKeys, useSearchPets } from './${name}/react-query/index.js';
+export function usage() {
+  const all: readonly ['pets'] = petsKeys.all;
+  const cats: readonly ['pets', 'cats'] = petsCatsKeys.all;
+  return [all, cats, useSearchPets({ body: { name: 'Tom' } }).data];
+}
+`,
+    );
+    expect(typecheck([...(await listFiles(directory, '.ts')), consumer], BROWSER)).toEqual([]);
+  });
 });
 
 describe('React Query isolation', () => {

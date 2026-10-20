@@ -5,9 +5,9 @@
   </picture>
 </h1>
 
-Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0**, **OpenAPI 3.0** and **OpenAPI 3.1** specifications.
+Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0**, **OpenAPI 3.0**, **3.1** and **3.2** specifications.
 
-- **One module per operation.** Applications bundle only the endpoints they import. Measured with esbuild, Rollup and Vite: one operation of a 1,000-operation client costs ~12 KB (shared runtime) + ~0.2 KB per extra operation.
+- **One module per operation.** Applications bundle only the endpoints they import. Measured with esbuild, Rollup, Vite and webpack: one operation of a 1,000-operation client costs ~13 KB (shared runtime) + ~0.2 KB per extra operation.
 - **TypeScript or JavaScript.** Strict TypeScript, or plain ES modules with JSDoc and optional `.d.ts` files — same runtime behavior.
 - **Fetch or axios.** Interchangeable transports behind one contract; bring your own axios instance and interceptors.
 - **Optional TanStack Query v5 hooks**, query/mutation option factories, key factories, infinite queries and invalidation — never imported unless enabled.
@@ -44,11 +44,12 @@ Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [
 
 ## Supported specifications
 
-| Family  | Versions | Notes                                                                                                                                                                                         |
-| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Swagger | 2.0      | `body`/`formData` parameters, `collectionFormat`, `consumes`/`produces`, `securityDefinitions`, `x-nullable`, `discriminator`                                                                 |
-| OpenAPI | 3.0.x    | `nullable`, `oneOf`/`anyOf`/`allOf`, discriminators, `content` parameters, `style`/`explode`, callbacks, operation `servers`                                                                  |
-| OpenAPI | 3.1.x    | JSON Schema 2020-12 types (`type: [..., "null"]`), `const`, `prefixItems`, `$ref` siblings, `$defs`, `$anchor`, `$id` scopes, webhooks, `if`/`then`/`else` and `dependent*` (enforced by Zod) |
+| Family  | Versions | Notes                                                                                                                                                                                                                                                                  |
+| ------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Swagger | 2.0      | `body`/`formData` parameters, `collectionFormat`, `consumes`/`produces`, `securityDefinitions`, `x-nullable`, `discriminator`                                                                                                                                          |
+| OpenAPI | 3.0.x    | `nullable`, `oneOf`/`anyOf`/`allOf`, discriminators, `content` parameters, `style`/`explode`, callbacks, operation `servers`                                                                                                                                           |
+| OpenAPI | 3.1.x    | JSON Schema 2020-12 types (`type: [..., "null"]`), `const`, `prefixItems`, `$ref` siblings, `$defs`, `$anchor`, `$id` scopes, webhooks, `if`/`then`/`else` and `dependent*` (enforced by Zod)                                                                          |
+| OpenAPI | 3.2.x    | Everything in 3.1, plus `QUERY` and `additionalOperations` methods, `in: querystring`, `style: cookie`, nested tags (`parent`, `kind`), `$self`, media type components, `discriminator.defaultMapping`, the OAuth 2 device flow; `itemSchema` content is typed as text |
 
 The configured `spec.version` is enforced: a 3.0 document is rejected when the config says `'3.1'` instead of being reinterpreted. Each version has its own adapter; all of them produce the same normalized intermediate representation. Features that cannot be represented are reported as diagnostics — see [compatibility](docs/compatibility.md) for the full matrix.
 
@@ -105,7 +106,7 @@ export default defineConfig({
 Use it:
 
 ```ts
-import { client, getPetById, isApiError } from './generated/api';
+import { client, getPetById, isGetPetByIdApiError } from './generated/api';
 
 client.setConfig({
   baseUrl: 'https://petstore3.swagger.io/api/v3',
@@ -116,7 +117,8 @@ try {
   const pet = await getPetById({ petId: 10 }, { timeout: 5_000 });
   console.log(pet.name);
 } catch (error) {
-  if (isApiError(error)) console.error(error.status, error.body);
+  // Checking the status narrows the body to that response's type.
+  if (isGetPetByIdApiError(error) && error.status === 404) console.error(error.body.message);
 }
 ```
 
@@ -144,7 +146,7 @@ In TypeScript and JavaScript, `defineConfig()` gives full autocomplete and type 
 | `spec.refs.external`                                            | `'local'`                                      | `'none'`, `'local'` (files in allowed directories) or `'remote'` (plus allow-listed hosts) |
 | `spec.refs.allowedDirectories`                                  | project root + spec directory                  | Directories external `$ref`s may read                                                      |
 | `spec.refs.allowedHosts`                                        | `[]`                                           | Hosts remote `$ref`s may fetch (`'*.example.com'` supported)                               |
-| `spec.fetch`                                                    | 30 s timeout, 50 MiB                           | `headers`, `timeout`, `maxBytes` for remote documents                                      |
+| `spec.fetch`                                                    | 30 s timeout, 50 MiB                           | `headers`, `timeout`, `maxBytes` for remote documents; `poll` for watching them            |
 | `output.directory`                                              | `./src/generated/api`                          | Output directory                                                                           |
 | `output.language`                                               | `'typescript'`                                 | `'typescript'` or `'javascript'`                                                           |
 | `output.declarations`                                           | `true`                                         | Emit `.d.ts` next to JavaScript files                                                      |
@@ -197,8 +199,9 @@ swaggerz <command> [options]
 | `--json`                                                                                                  | all                 | One machine-readable JSON document on stdout                                                            |
 | `--verbose` / `-q, --quiet`                                                                               | all                 | Show notes and timings / only errors                                                                    |
 | `--color` / `--no-color`                                                                                  | all                 | Force or disable color (`NO_COLOR` is respected)                                                        |
-| `-w, --watch`                                                                                             | `generate`          | Regenerate when the spec, any referenced file or the config changes                                     |
+| `-w, --watch`                                                                                             | `generate`          | Regenerate when the spec, any referenced file or the config changes (remote documents are polled)       |
 | `--dry-run`                                                                                               | `generate`, `clean` | Show changes without writing                                                                            |
+| `--check`                                                                                                 | `generate`          | Write nothing; exit `1` and list the differences when the output is not up to date (for CI)             |
 | `--force`                                                                                                 | `generate`, `clean` | Overwrite files the generator does not own; delete hand-edited generated files                          |
 | `--no-clean`                                                                                              | `generate`          | Keep generated files that are no longer produced                                                        |
 | `--operations`, `--models`, `--filter <text>`                                                             | `inspect`           | Narrow the listing                                                                                      |
@@ -242,8 +245,14 @@ export type GetPetByIdParams = {
 /** Response data of {@link getPetById}. */
 export type GetPetByIdResponse = Pet;
 
-/** Error rejected by {@link getPetById}. */
-export type GetPetByIdError = OperationError<GetPetByIdErrorBody>;
+/** The `ApiError`s {@link getPetById} rejects with: one per documented status, … */
+export type GetPetByIdApiError =
+  | ApiError<undefined, 400>
+  | ApiError<ErrorModel, 404>
+  | ApiError<unknown, Exclude<HttpStatus<1 | 3 | 4 | 5>, 400 | 404>>;
+
+/** Everything {@link getPetById} rejects with: … */
+export type GetPetByIdError = GetPetByIdApiError | RequestError;
 
 /**
  * Find pet by ID.
@@ -254,7 +263,7 @@ export type GetPetByIdError = OperationError<GetPetByIdErrorBody>;
  * @param params - Request parameters.
  * @param options - Per-request options: `signal`, `timeout`, `headers`, `client`.
  * @returns `200` successful operation
- * @throws {@link ApiError} `400` Invalid ID supplied; `404` Pet not found
+ * @throws {@link ApiError} `400` Invalid ID supplied; `404` Pet not found; narrow it with {@link isGetPetByIdApiError}.
  * @throws {@link RequestError} When no usable response is received (network failure, timeout or invalid body).
  */
 export function getPetById(
@@ -273,6 +282,11 @@ export function getPetById(
     options,
   );
 }
+
+/** Whether `error` is an `ApiError` rejected by {@link getPetById}. It narrows to … */
+export function isGetPetByIdApiError(error: unknown): error is GetPetByIdApiError {
+  return isApiError(error) && error.operationId === 'getPetById' && error.method === 'GET';
+}
 ```
 
 Highlights (details in [docs/generated-code.md](docs/generated-code.md)):
@@ -285,7 +299,7 @@ Highlights (details in [docs/generated-code.md](docs/generated-code.md)):
 - **Dates**: with `types.dates: 'Date'`, `date` and `date-time` values are `Date` objects in both directions.
 - **Servers**: operations and paths with their own `servers` are sent there (`client.operationServers`).
 - **Webhooks and callbacks**: payload, request, response and handler types to annotate your own route handlers.
-- **Errors**: other responses reject with `ApiError<Body>` (`status`, `body`, `headers`, `response`, `operationId`); network failures, timeouts, malformed JSON and validation failures reject with `RequestError` (`kind`). Aborting with an `AbortSignal` rethrows the original abort error.
+- **Errors**: other responses reject with `ApiError` (`status`, `body`, `headers`, `response`, `operationId`), typed per operation as one `ApiError<Body, Status>` per documented status, so `isGetPetByIdApiError(error) && error.status === 404` narrows `error.body`; network failures, timeouts, malformed JSON and validation failures reject with `RequestError` (`kind`). Aborting with an `AbortSignal` rethrows the original abort error.
 - **Models** are type aliases with documentation from the spec, `readonly` for `readOnly`, discriminated unions (`oneOf` + `discriminator`), narrowed subtypes (allOf inheritance), nullable types, index signatures, tuples and recursion.
 - **Authentication**: `apiKey` (header/query/cookie), HTTP bearer/basic/other, OAuth 2 and OpenID Connect tokens. Requirements are alternatives — the first one whose credentials are all configured is applied.
 
@@ -313,6 +327,22 @@ const remove = client.use({
     if (response.status === 401) console.warn(`${operation.operationId} needs authentication`);
   },
 });
+```
+
+Retries and token refresh are built in, opt in, and dropped by bundlers when unused:
+
+```ts
+import { client, refreshAuth, retry } from './generated/api';
+
+// Idempotent methods only, jittered exponential backoff, honours Retry-After and cancellation.
+client.use(retry({ attempts: 3, statuses: [429, 502, 503, 504] }));
+// On 401: one refresh shared by every failing request, then each request is sent again.
+client.use(
+  refreshAuth({
+    scheme: 'petstore_auth',
+    refresh: async () => (await fetch('/token', { method: 'POST' })).text(),
+  }),
+);
 ```
 
 Per call: `getPetById(params, { signal, timeout, headers, baseUrl, parseAs, transportOptions, client })`. For multi-tenant servers, create clients with `createClient({ ...client.getConfig(), baseUrl })` and pass `{ client }`.
@@ -348,7 +378,7 @@ Enable TanStack Query v5 support:
 ```ts
 features: {
   reactQuery: {
-    queryMethods: ['get'],                                 // default
+    queryMethods: ['get', 'query'],                        // default
     infinite: { listPets: { pageParam: 'cursor' } },       // infinite query hooks
     invalidates: { createPet: ['listPets'], deletePet: ['pet'] }, // operation names or tags
   },
@@ -376,7 +406,7 @@ const addPet = useAddPet({
 await queryClient.prefetchQuery(getPetByIdQueryOptions({ petId: 1 }));
 ```
 
-Query keys contain a static prefix (tag, operation) and **all** request parameters, so different parameters never share cache entries. React Query's `AbortSignal` is passed to the request, so cancelled queries cancel the HTTP request. `TData` is inferred from `select`, and errors are typed as the operation's `ApiError | RequestError`. Hooks live in `react-query/`; operation modules and the main barrel never import React. See [docs/react-query.md](docs/react-query.md).
+Query keys contain a static prefix (tag, operation) and **all** request parameters, so different parameters never share cache entries. React Query's `AbortSignal` is passed to the request, so cancelled queries cancel the HTTP request. `TData` is inferred from `select`, and errors are typed as the operation's `ApiError` union (narrowed by `status`) or `RequestError`. Hooks live in `react-query/`; operation modules and the main barrel never import React. See [docs/react-query.md](docs/react-query.md).
 
 ## Runtime validation with Zod
 
@@ -392,13 +422,14 @@ Each operation and model is its own ES module with no top-level side effects, im
 
 | Bundle                                              |     Size |
 | --------------------------------------------------- | -------: |
-| 1 operation (direct import, esbuild)                |  11.9 KB |
-| 3 operations via the barrel (esbuild)               |  12.4 KB |
-| 3 operations via the barrel (Vite production build) |  16.1 KB |
-| 1 React Query hook, excluding TanStack Query itself |  12.5 KB |
-| Entire client                                       | 215.3 KB |
+| 1 operation (direct import, esbuild)                |  13.3 KB |
+| 3 operations via the barrel (esbuild)               |  13.7 KB |
+| 3 operations via the barrel (Vite production build) |  17.9 KB |
+| 3 operations via the barrel (webpack production)    |  13.8 KB |
+| 1 React Query hook, excluding TanStack Query itself |  13.8 KB |
+| Entire client                                       | 326.4 KB |
 
-The ~12 KB base is the shared runtime (serialization, errors, client, transport). The tests assert that only the imported operations remain in esbuild, Rollup and Vite bundles.
+The ~13 KB base is the shared runtime (serialization, errors, client with retries, transport); the `retry` and `refreshAuth` middleware add to it only when imported. The tests assert that only the imported operations remain in esbuild, Rollup, Vite and webpack bundles.
 
 - Importing from the barrel (`./generated/api`) is as tree-shakeable as importing modules directly in Rollup, Vite and esbuild (all three are covered by the bundle tests). webpack is not part of the automated tests: in production mode its `usedExports` analysis and minifier remove unused exports of these side-effect-free modules, and marking the generated directory side-effect free in your package.json (`"sideEffects"`) lets it skip unused modules entirely.
 - Model types cost nothing at runtime. Zod schemas and React Query hooks are separate modules and only bundled when imported.
@@ -503,6 +534,7 @@ Hooks: `beforeParse`, `afterNormalize`, `operationName`, `modelName`, `jsdoc`, `
 - `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are enforced by the generated Zod schemas but cannot be expressed in TypeScript types, which may be wider than the schema. `$dynamicRef` and `$recursiveRef` are ignored with a warning.
 - Webhooks and callbacks produce types only; no server or routing code is generated.
 - Watch mode recompiles the whole specification on change (only changed files are written).
+- OpenAPI 3.2 sequential media types (`itemSchema`: JSON Lines, server-sent events) are read and typed as text; typed streaming is not generated yet.
 - Usage scanning is static: it reports what your code imports, not what runs.
 
 Earlier versions of this list included `readOnly`/`writeOnly` handling, `Date` conversion, multiple request media types, `304` responses, operation-level `servers`, webhooks and callbacks, and relative `$id` scopes. These are now supported; see [generated code](docs/generated-code.md).

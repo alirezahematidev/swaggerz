@@ -23,11 +23,23 @@ What "done" is backed by: the unit and integration suites, `pnpm compat` (TypeSc
 - Create the `alirezahematidev/swaggerz` repository, register the `swaggerz` name on npm and configure trusted publishing and the `npm` environment ([CONTRIBUTING.md](../CONTRIBUTING.md#releases)). The unscoped name was available on 2026-10-19; nothing has been published.
 - Run the CI workflow on all platforms. Windows and Linux are covered by the CI matrix but have not yet been exercised; development happened on macOS.
 
+## After the initial implementation
+
+Implemented from [next.md](../next.md), with tests and documentation:
+
+| Item                                     | Where it is documented                                                                                                                                                                    |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `generate --check` for CI                | [generated code](generated-code.md#checking-committed-output-in-ci)                                                                                                                       |
+| Errors typed by status                   | [generated code](generated-code.md#errors), [decision 15](decisions.md#15-errors-are-typed-by-status-with-one-guard-per-operation)                                                        |
+| `retry()` and `refreshAuth()` middleware | [generated code](generated-code.md#middleware)                                                                                                                                            |
+| Live reload for remote specifications    | [configuration](configuration.md#spec) (`spec.fetch.poll`), [dashboard](dashboard.md#live-reload)                                                                                         |
+| OpenAPI 3.2                              | [compatibility](compatibility.md#specification-support), [generated code](generated-code.md#openapi-32), [decision 16](decisions.md#16-openapi-32-maps-onto-the-existing-ir-where-it-can) |
+
 ## Candidates for later versions
 
 Ordered roughly by expected value. None of them is committed.
 
-- OpenAPI 3.2 support (currently rejected as an unsupported version).
+- Typed streaming responses (server-sent events, JSON Lines) for OpenAPI 3.2 `itemSchema` and `x-` annotations in 3.0/3.1 (today such content is read as text).
 - Opt-in `int64` → `bigint` (needs a JSON parser that keeps large integers exact, since `JSON.parse` already loses precision before any conversion).
 - XML request and response serialization (today XML bodies are passed and returned as strings).
 - `$dynamicRef` / `$recursiveRef`.

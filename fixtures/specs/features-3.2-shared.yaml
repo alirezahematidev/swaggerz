@@ -1,0 +1,17 @@
+openapi: 3.2.0
+# Referenced from features-3.2.yaml through its $self URI; read from the same directory.
+$self: https://api.example.com/specs/features-3.2-shared.yaml
+info:
+  title: Shared components
+  version: 1.0.0
+components:
+  schemas:
+    Owner:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email

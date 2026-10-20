@@ -1,0 +1,20 @@
+operationId: oneClicksList
+summary: List 1-Click applications.
+# DigitalOcean: a tag starting with a digit (React Query key factory names).
+tags:
+  - 1-Click Applications
+parameters:
+  - name: type
+    in: query
+    schema:
+      type: string
+responses:
+  '200':
+    description: The applications.
+    content:
+      application/json:
+        schema:
+          type: object
+          properties:
+            links:
+              $ref: '../openapi.yaml#/components/schemas/PageLinks'

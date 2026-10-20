@@ -13,6 +13,7 @@ import {
   Search,
   Sun,
   Unplug,
+  CloudOff,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { ModelSummary, OperationSummary, OverviewResponse } from '../api-types.ts';
@@ -398,7 +399,7 @@ function Banner({
   title,
   children,
 }: {
-  tone: 'danger' | 'neutral';
+  tone: 'danger' | 'warning' | 'neutral';
   icon: ReactNode;
   title: string;
   children: ReactNode;
@@ -410,7 +411,9 @@ function Banner({
         'flex shrink-0 items-start gap-3 border-b px-5 py-2.5 text-[13px] sm:px-8 lg:px-10 [&_svg]:mt-0.5 [&_svg]:size-4 [&_svg]:shrink-0',
         tone === 'danger'
           ? 'border-danger/25 bg-danger/8 [&_svg]:text-danger'
-          : 'border-border bg-muted/60 [&_svg]:text-muted-foreground',
+          : tone === 'warning'
+            ? 'border-warning/25 bg-warning/8 [&_svg]:text-warning'
+            : 'border-border bg-muted/60 [&_svg]:text-muted-foreground',
       )}
     >
       {icon}
@@ -647,6 +650,16 @@ export function App() {
                 ? ` (+${session.failure.diagnostics.length - 1} more)`
                 : ''}{' '}
               Showing the last version that loaded.
+            </Banner>
+          )}
+          {session?.unreachable === undefined ? null : (
+            <Banner
+              tone="warning"
+              icon={<CloudOff />}
+              title={`Cannot reach ${session.unreachable[0]?.url ?? 'the specification'}${session.unreachable.length > 1 ? ` (+${session.unreachable.length - 1} more)` : ''}.`}
+            >
+              {firstLine(session.unreachable[0]?.error ?? '')} Polling goes on; showing the last
+              version that loaded.
             </Banner>
           )}
           {reloadError === undefined ? null : (

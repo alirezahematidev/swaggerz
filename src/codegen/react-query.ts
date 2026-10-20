@@ -39,7 +39,8 @@ class Scope {
   readonly lang: Lang;
   readonly op: string;
   readonly params: string;
-  readonly response: string;
+  readonly #responseName: string;
+  readonly #module: string;
   /**
    * Data type of queries. TanStack Query rejects `undefined` query data, so operations that can
    * resolve without a body (204, 304) produce `null` instead.
@@ -58,7 +59,8 @@ class Scope {
     this.op =
       lang === 'dts' ? symbol.name : imports.add(symbol.module, symbol.name, { typeOnly: false });
     this.params = plan.hasParams ? type(symbol.typeNames.params) : 'never';
-    this.response = type(symbol.typeNames.response);
+    this.#module = symbol.module;
+    this.#responseName = symbol.typeNames.response;
     const dataStyle = ctx.config.client.responseStyle === 'data';
     const noBody = plan.success.every((s) => s.media === undefined);
     this.nullable = dataStyle && (noBody || plan.success.some((s) => s.media === undefined));
@@ -69,6 +71,14 @@ class Scope {
         : `Exclude<${this.response}, undefined> | null`;
     this.error = type(symbol.typeNames.error);
     this.options = imports.add('client', 'RequestOptions', { typeOnly: true });
+  }
+
+  /**
+   * The operation's response type, imported on first use: queries of operations without a
+   * response body never mention it, and an unused import fails `noUnusedLocals`.
+   */
+  get response(): string {
+    return this.imports.add(this.#module, this.#responseName, { typeOnly: true });
   }
 
   /** A value import from TanStack Query (empty in declaration files, which have no bodies). */
@@ -541,8 +551,9 @@ export function resolveInvalidations(plan: OperationPlan, ctx: EmitContext): str
       keys.push([...operation.reactQuery.keyPrefix]);
       continue;
     }
+    // A tag (nested tags match their own name) or a group directory.
     const group = ctx.project.reactQueryGroups.find(
-      (g) => g.prefix[0] === target || g.group === target,
+      (g) => g.prefix.at(-1) === target || g.group === target,
     );
     if (group !== undefined) keys.push([...group.prefix]);
   }

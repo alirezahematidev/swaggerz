@@ -30,6 +30,11 @@ const NAME_MAP_KEYS = new Set([
   'requestBodies',
   'pathItems',
   'variables',
+  // OpenAPI 3.2
+  'mediaTypes',
+  'additionalOperations',
+  // Component parameters are a name map; operation parameters are arrays (walked as keywords).
+  'parameters',
 ]);
 
 /** Keywords whose values are instance data, never schema or reference objects. */
@@ -91,8 +96,10 @@ export function collectRefs(root: unknown): RefOccurrence[] {
         }
         continue;
       }
-      if (key === 'discriminator' && isRecord(child) && isRecord(child.mapping)) {
-        for (const [value, target] of Object.entries(child.mapping)) {
+      if (key === 'discriminator' && isRecord(child)) {
+        for (const [value, target] of Object.entries(
+          isRecord(child.mapping) ? child.mapping : {},
+        )) {
           if (typeof target === 'string' && looksLikeReference(target)) {
             found.push({
               ref: target,
@@ -100,6 +107,14 @@ export function collectRefs(root: unknown): RefOccurrence[] {
               mapping: true,
             });
           }
+        }
+        const fallback = child.defaultMapping;
+        if (typeof fallback === 'string' && looksLikeReference(fallback)) {
+          found.push({
+            ref: fallback,
+            pointer: appendPointer(childPointer, 'defaultMapping'),
+            mapping: true,
+          });
         }
         continue;
       }

@@ -27,6 +27,15 @@ function runtimeExports(
       ],
     },
     {
+      module: 'runtime/middleware',
+      names: [
+        value('retry'),
+        value('refreshAuth'),
+        type('RetryOptions'),
+        type('RefreshAuthOptions'),
+      ],
+    },
+    {
       module: `runtime/${adapter}`,
       names:
         adapter === 'axios'
@@ -47,10 +56,14 @@ function runtimeExports(
         'ClientConfig',
         'HeaderValues',
         'HttpMethod',
+        'HttpStatus',
         'Middleware',
+        'MiddlewareContext',
         'OperationInfo',
         'OperationRequest',
         'ParseAs',
+        'RetryableContext',
+        'RetryDirective',
         'SecurityScheme',
         'Transport',
         'TransportRequest',
@@ -69,6 +82,7 @@ export function projectExportNames(project: ProjectModel): Set<string> {
   }
   for (const op of project.operations) {
     names.add(op.name);
+    names.add(op.errorGuard);
     Object.values(op.typeNames).forEach((name) => names.add(name));
   }
   for (const webhook of project.webhooks)

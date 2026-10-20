@@ -57,6 +57,12 @@ export class Reporter {
     this.options.stderr.write(`${this.paint('✖', 'red')} ${message}\n`);
   }
 
+  /** Details of an error, such as the files it concerns (stderr; also printed with `--quiet`). */
+  detail(message: string): void {
+    if (this.options.json) return;
+    this.options.stderr.write(`${message}\n`);
+  }
+
   json(value: unknown): void {
     if (this.options.json) this.options.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
   }

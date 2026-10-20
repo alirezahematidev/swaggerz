@@ -1,8 +1,9 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
 import { rollup } from 'rollup';
 import { build as viteBuild } from 'vite';
+import webpack from 'webpack';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { largeSpec } from '../../../scripts/large-spec.ts';
 import { generateCase, OUTPUT_ROOT } from '../../support/generate.ts';
@@ -76,6 +77,31 @@ async function bundleWithVite(file: string): Promise<string> {
     .join('\n');
 }
 
+/** A production webpack build (terser, `usedExports`) of a JavaScript entry. */
+async function bundleWithWebpack(file: string): Promise<string> {
+  const outputPath = path.join(ROOT, 'webpack', path.basename(file, path.extname(file)));
+  const stats = await new Promise<webpack.Stats | undefined>((resolve, reject) => {
+    webpack(
+      {
+        mode: 'production',
+        target: 'web',
+        entry: file,
+        output: { path: outputPath, filename: 'bundle.js', library: { type: 'module' } },
+        experiments: { outputModule: true },
+        externals: Object.fromEntries(EXTERNAL.map((name) => [name, `module ${name}`])),
+        externalsType: 'module',
+        performance: { hints: false },
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      },
+    );
+  });
+  if (stats?.hasErrors() === true) throw new Error(stats.toString('errors-only'));
+  return readFile(path.join(outputPath, 'bundle.js'), 'utf8');
+}
+
 beforeAll(async () => {
   await mkdir(ROOT, { recursive: true });
   const spec = path.join(ROOT, 'large.json');
@@ -102,6 +128,23 @@ describe('tree-shaking of a 1,000-operation client', () => {
     sizes['esbuild: 3 operations via barrel'] = code.length;
     expect(operationIds(code).sort()).toEqual([...USED].sort());
     expect(code).not.toContain('/resources-99');
+    // Unused runtime helpers (retry, refreshAuth) and error guards are dropped too.
+    expect(code).not.toContain('idempotency-key');
+  });
+
+  it('bundles the retry middleware only when it is imported', async () => {
+    const code = await bundleWithEsbuild(
+      await entry(
+        'retry-ts',
+        `import { client, getResource7, retry } from './ts/index.js';
+client.use(retry());
+export const run = () => getResource7({ id: '1' });
+`,
+      ),
+    );
+    expect(code).toContain('idempotency-key');
+    expect(code).not.toContain('refresh');
+    expect(operationIds(code)).toEqual(['getResource7']);
   });
 
   it('keeps only imported operations when importing modules directly (esbuild)', async () => {
@@ -127,6 +170,20 @@ export const run = () => getResource7({ id: '1' });
     const code = await bundleWithVite(await entry('barrel-vite', BARREL_IMPORT('ts')));
     sizes['vite: 3 operations via barrel'] = code.length;
     expect(operationIds(code).sort()).toEqual([...USED].sort());
+  });
+
+  it('removes unused operations with webpack (production build, JavaScript output)', async () => {
+    const code = await bundleWithWebpack(
+      await entry('barrel-webpack', BARREL_IMPORT('js')).then(async (file) => {
+        // webpack bundles the JavaScript output from a plain .mjs entry.
+        const mjs = file.replace(/\.ts$/, '.mjs');
+        await writeFile(mjs, await readFile(file, 'utf8'));
+        return mjs;
+      }),
+    );
+    sizes['webpack: 3 operations via barrel'] = code.length;
+    expect(operationIds(code).sort()).toEqual([...USED].sort());
+    expect(code).not.toContain('idempotency-key');
   });
 
   it('keeps React Query hooks independent per operation', async () => {

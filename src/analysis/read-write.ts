@@ -8,7 +8,7 @@ import type {
   SchemaIR,
   WebhookIR,
 } from '../ir/types.ts';
-import { webhookOperations } from '../ir/utils.ts';
+import { mediaSchemas, webhookOperations } from '../ir/utils.ts';
 import { compareStrings } from '../utils/strings.ts';
 
 /** Appended to a definition id to form the id of its request-side variant. */
@@ -98,11 +98,13 @@ export function splitReadWrite(ir: ApiDocument, suffix: string): ApiDocument {
   const writable = new Set<string>();
   const pending = [
     ...ir.operations.flatMap((operation) =>
-      (operation.requestBody?.contents ?? []).flatMap((media) => references(media.schema)),
+      (operation.requestBody?.contents ?? [])
+        .flatMap(mediaSchemas)
+        .flatMap((schema) => references(schema)),
     ),
     ...incoming.flatMap((operation) =>
       operation.responses.flatMap((response) =>
-        response.contents.flatMap((media) => references(media.schema)),
+        response.contents.flatMap(mediaSchemas).flatMap((schema) => references(schema)),
       ),
     ),
   ];
@@ -215,7 +217,11 @@ export function splitReadWrite(ir: ApiDocument, suffix: string): ApiDocument {
   const contents = (list: readonly MediaTypeIR[], direction: View): readonly MediaTypeIR[] => {
     const next = list.map((media) => {
       const schema = view(media.schema, direction);
-      return schema === media.schema ? media : { ...media, schema };
+      const itemSchema =
+        media.itemSchema === undefined ? undefined : view(media.itemSchema, direction);
+      return schema === media.schema && itemSchema === media.itemSchema
+        ? media
+        : { ...media, schema, ...(itemSchema === undefined ? {} : { itemSchema }) };
     });
     return next.every((media, i) => media === list[i]) ? list : next;
   };
@@ -276,8 +282,8 @@ function isEmptied(schema: SchemaIR): boolean {
 /** Schemas of an operation's bodies (request and responses). */
 function operationSchemas(operation: OperationIR): SchemaIR[] {
   return [
-    ...(operation.requestBody?.contents ?? []).map((media) => media.schema),
-    ...operation.responses.flatMap((response) => response.contents.map((media) => media.schema)),
+    ...(operation.requestBody?.contents ?? []).flatMap(mediaSchemas),
+    ...operation.responses.flatMap((response) => response.contents.flatMap(mediaSchemas)),
   ];
 }
 

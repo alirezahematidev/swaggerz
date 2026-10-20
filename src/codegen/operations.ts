@@ -1,5 +1,10 @@
 import { isPropertyIdentifier } from '../analysis/naming.ts';
-import type { MediaTypeIR, ParameterIR, ParameterLocation } from '../ir/types.ts';
+import {
+  wireMethod,
+  type MediaTypeIR,
+  type ParameterIR,
+  type ParameterLocation,
+} from '../ir/types.ts';
 import { applyJsDocHook, renderAll, type EmitContext, type ModuleOutput } from './context.ts';
 import type { ImportManager, Lang } from './imports.ts';
 import { schemaTags, splitSummary } from './jsdoc.ts';
@@ -43,7 +48,7 @@ export function bodyVariants(
   return variants;
 }
 
-const LOCATION_FIELDS: Record<ParameterLocation, string> = {
+const LOCATION_FIELDS: Record<Exclude<ParameterLocation, 'querystring'>, string> = {
   path: 'pathParams',
   query: 'query',
   header: 'headers',
@@ -57,15 +62,67 @@ export function nonDefaultSerialization(
   const defaultStyle = parameter.in === 'query' || parameter.in === 'cookie' ? 'form' : 'simple';
   const result: Record<string, unknown> = {};
   if (parameter.style !== defaultStyle) result.style = parameter.style;
-  if (parameter.explode !== (parameter.style === 'form')) result.explode = parameter.explode;
+  if (parameter.explode !== (parameter.style === 'form' || parameter.style === 'cookie'))
+    result.explode = parameter.explode;
   if (parameter.allowReserved) result.allowReserved = true;
   if (parameter.contentType !== undefined && /json/i.test(parameter.contentType))
     result.json = true;
   return Object.keys(result).length === 0 ? undefined : result;
 }
 
-function statusType(status: string): string {
-  return /^\d{3}$/.test(status) ? status : 'number';
+const EXPLICIT_STATUS = /^\d{3}$/;
+const STATUS_RANGE = /^([1-5])XX$/i;
+
+/**
+ * Status type expressions for an operation's responses. `httpStatus` imports the runtime's
+ * `HttpStatus` type (literal unions of status codes, optionally of one class).
+ */
+export class StatusTypes {
+  /** Explicitly declared codes, e.g. `404`, sorted. */
+  readonly #codes: number[];
+  /** Classes declared as ranges (`4XX`) or always resolved (2xx), sorted. */
+  readonly #classes: number[];
+  readonly #httpStatus: () => string;
+
+  constructor(plan: OperationPlan, httpStatus: () => string) {
+    const statuses = [...plan.success, ...plan.errors].map((r) => r.response.status);
+    this.#codes = [...new Set(statuses.filter((s) => EXPLICIT_STATUS.test(s)).map(Number))].sort(
+      (a, b) => a - b,
+    );
+    const ranges = statuses.flatMap((s) => {
+      const match = STATUS_RANGE.exec(s);
+      return match?.[1] === undefined ? [] : [Number(match[1])];
+    });
+    this.#classes = [...new Set([2, ...ranges])].sort((a, b) => a - b);
+    this.#httpStatus = httpStatus;
+  }
+
+  /** The status type of one declared response. */
+  of(status: string, success: boolean): string {
+    if (EXPLICIT_STATUS.test(status)) return status;
+    const range = STATUS_RANGE.exec(status)?.[1];
+    if (range !== undefined) return this.#range(Number(range));
+    // `default` as the success response (no 2xx declared) resolves for every 2xx status.
+    return success ? this.#range(2) : (this.rest() ?? 'never');
+  }
+
+  /**
+   * Statuses no response declares and that do not resolve, e.g. `Exclude<HttpStatus<1 | 3 | 4 | 5>,
+   * 404>`; `undefined` when there are none.
+   */
+  rest(): string | undefined {
+    const remaining = [1, 2, 3, 4, 5].filter((digit) => !this.#classes.includes(digit));
+    if (remaining.length === 0) return undefined;
+    const codes = this.#codes.filter((code) => remaining.includes(Math.floor(code / 100)));
+    const classes = `${this.#httpStatus()}<${remaining.join(' | ')}>`;
+    return codes.length === 0 ? classes : `Exclude<${classes}, ${codes.join(' | ')}>`;
+  }
+
+  #range(digit: number): string {
+    const codes = this.#codes.filter((code) => Math.floor(code / 100) === digit);
+    const range = `${this.#httpStatus()}<${digit}>`;
+    return codes.length === 0 ? range : `Exclude<${range}, ${codes.join(' | ')}>`;
+  }
 }
 
 function uniqueUnion(types: readonly string[]): string {
@@ -78,35 +135,50 @@ function uniqueUnion(types: readonly string[]): string {
   ].join(' | ');
 }
 
-/** Type expressions for an operation's response and error bodies. */
+/** Type expressions for an operation's responses and errors. */
 export function responseTypes(
   plan: OperationPlan,
   typeCtx: TypeContext,
   full: boolean,
-  apiResponse: () => string,
-): { response: string; errorBody: string } {
+  runtimeType: (module: 'runtime/types' | 'runtime/errors', name: string) => string,
+): { response: string; errorBody: string; apiErrors: readonly string[] } {
   const bodyType = (r: PlannedResponse): string =>
     r.media === undefined ? 'undefined' : printType(r.media.schema, typeCtx);
+  const statuses = new StatusTypes(plan, () => runtimeType('runtime/types', 'HttpStatus'));
   let response: string;
   if (full) {
+    const apiResponse = runtimeType('runtime/types', 'ApiResponse');
     const variants = plan.success.map(
-      (r) => `${apiResponse()}<${bodyType(r)}, ${statusType(r.response.status)}>`,
+      (r) => `${apiResponse}<${bodyType(r)}, ${statuses.of(r.response.status, true)}>`,
     );
-    response = variants.length === 0 ? `${apiResponse()}<undefined>` : uniqueUnion(variants);
+    response = variants.length === 0 ? `${apiResponse}<undefined>` : uniqueUnion(variants);
   } else {
     const types = plan.success.map(bodyType);
     response = types.every((t) => t === 'undefined') ? 'void' : uniqueUnion(types);
   }
   const errorTypes = plan.errors.map(bodyType);
-  return { response, errorBody: errorTypes.length === 0 ? 'unknown' : uniqueUnion(errorTypes) };
+  // One ApiError per documented error status, and one for statuses nothing documents.
+  const apiError = (): string => runtimeType('runtime/errors', 'ApiError');
+  const apiErrors = plan.errors.map(
+    (r) => `${apiError()}<${bodyType(r)}, ${statuses.of(r.response.status, false)}>`,
+  );
+  const rest = statuses.rest();
+  if (rest !== undefined && !plan.errors.some((r) => r.response.status === 'default'))
+    apiErrors.push(`${apiError()}<unknown, ${rest}>`);
+  return {
+    response,
+    errorBody: errorTypes.length === 0 ? 'unknown' : uniqueUnion(errorTypes),
+    apiErrors,
+  };
 }
 
 function describeResponses(responses: readonly PlannedResponse[]): string {
   return responses
-    .map(
-      ({ response }) =>
-        `\`${response.status}\`${response.description === undefined ? '' : ` ${response.description.split('\n')[0] ?? ''}`}`,
-    )
+    .map(({ response }) => {
+      // The first line, without its final period: entries are joined with `;`.
+      const summary = response.description?.split('\n')[0]?.replace(/[\s.]+$/, '') ?? '';
+      return `\`${response.status}\`${summary === '' ? '' : ` ${summary}`}`;
+    })
     .join('; ');
 }
 
@@ -121,7 +193,7 @@ interface DocTypes {
 
 function operationDoc(plan: OperationPlan, lang: Lang, types: DocTypes): JsDocBlock {
   const op = plan.symbol.operation;
-  const route = `${op.method.toUpperCase()} ${op.path}`;
+  const route = `${wireMethod(op.method)} ${op.path}`;
   const text =
     op.summary !== undefined
       ? {
@@ -157,7 +229,7 @@ function operationDoc(plan: OperationPlan, lang: Lang, types: DocTypes): JsDocBl
   tags.push({ tag: 'returns', text: `${js ? `{Promise<${types.response}>} ` : ''}${returns}` });
   tags.push({
     tag: 'throws',
-    text: `${js ? `{${types.apiError}}` : '{@link ApiError}'} ${plan.errors.length === 0 ? 'When the server responds with a non-2xx status.' : describeResponses(plan.errors)}`,
+    text: `${js ? `{${types.apiError}}` : '{@link ApiError}'} ${plan.errors.length === 0 ? 'When the server responds with a non-2xx status' : describeResponses(plan.errors)}; narrow it with {@link ${plan.symbol.errorGuard}}.`,
   });
   tags.push({
     tag: 'throws',
@@ -206,7 +278,9 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
       : [{ name: names.bodies, kind: 'type' as const, typeOnly: true }]),
     { name: names.response, kind: 'type', typeOnly: true },
     { name: names.errorBody, kind: 'type', typeOnly: true },
+    { name: names.apiError, kind: 'type', typeOnly: true },
     { name: names.error, kind: 'type', typeOnly: true },
+    { name: symbol.errorGuard, kind: 'error-guard', typeOnly: false },
   ];
 
   const body = (imports: ImportManager, lang: Lang): string => {
@@ -216,7 +290,9 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
       names.body,
       names.response,
       names.error,
+      names.apiError,
       names.errorBody,
+      symbol.errorGuard,
       ...(names.bodies === undefined ? [] : [names.bodies]),
     ])
       imports.declare(name);
@@ -228,9 +304,8 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
     };
     const input: TypeContext = { ...output, direction: 'input' };
     const requestOptions = imports.add('client', 'RequestOptions', { typeOnly: true });
-    const operationError = imports.add('runtime/errors', 'OperationError', { typeOnly: true });
-    const apiResponse = (): string =>
-      imports.add('runtime/types', 'ApiResponse', { typeOnly: true });
+    const runtimeType = (module: string, name: string): string =>
+      imports.add(module, name, { typeOnly: true });
     const parts: string[] = [];
 
     // Request body types -------------------------------------------------------------------
@@ -352,7 +427,7 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
     }
 
     // Response and error types ------------------------------------------------------------------
-    const types = responseTypes(plan, output, full, apiResponse);
+    const types = responseTypes(plan, output, full, runtimeType);
     const typedef = (name: string, type: string, doc: JsDocBlock): string =>
       lang === 'js'
         ? renderJsDoc({ ...doc, tags: [{ tag: 'typedef', text: `{${type}} ${name}` }] })
@@ -369,9 +444,21 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
         tags: [],
       }),
     );
+    const apiErrorDoc: JsDocBlock = {
+      summary: `The \`ApiError\`s {@link ${symbol.name}} rejects with: one per documented status, so checking \`status\` narrows \`body\`.`,
+      ...(types.apiErrors.length > plan.errors.length
+        ? { description: 'The last member covers statuses the specification does not document.' }
+        : {}),
+      tags: [],
+    };
     parts.push(
-      typedef(names.error, `${operationError}<${names.errorBody}>`, {
-        summary: `Error rejected by {@link ${symbol.name}}.`,
+      lang === 'js' || types.apiErrors.length === 1
+        ? typedef(names.apiError, types.apiErrors.join(' | '), apiErrorDoc)
+        : `${renderJsDoc(apiErrorDoc)}export type ${names.apiError} =\n${types.apiErrors.map((member) => `  | ${member}`).join('\n')};\n`,
+    );
+    parts.push(
+      typedef(names.error, `${names.apiError} | ${runtimeType('runtime/errors', 'RequestError')}`, {
+        summary: `Everything {@link ${symbol.name}} rejects with: an \`ApiError\` for an error status, or a \`RequestError\` when no usable response arrived.`,
         tags: [],
       }),
     );
@@ -478,6 +565,35 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
           `    options,\n  );\n}\n`,
       );
     }
+
+    // Error guard -------------------------------------------------------------------------------
+    // JavaScript needs the `@param`/`@returns` tags for its types, even without documentation.
+    const guardDoc: JsDocBlock = {
+      ...(ctx.config.features.jsdoc
+        ? {
+            summary: `Whether \`error\` is an \`ApiError\` rejected by {@link ${symbol.name}}. It narrows to {@link ${names.apiError}}, so checking \`status\` afterwards narrows \`body\` too.`,
+          }
+        : {}),
+      tags:
+        lang === 'js'
+          ? [
+              { tag: 'param', text: '{unknown} error' },
+              { tag: 'returns', text: `{error is ${names.apiError}}` },
+            ]
+          : [],
+    };
+    const guardSignature = `${symbol.errorGuard}(error${lang === 'js' ? '' : ': unknown'})`;
+    if (lang === 'dts') {
+      parts.push(
+        `${renderJsDoc(guardDoc)}export declare function ${guardSignature}: error is ${names.apiError};\n`,
+      );
+    } else {
+      const isApiError = imports.add('runtime/errors', 'isApiError', { typeOnly: false });
+      parts.push(
+        `${renderJsDoc(guardDoc)}export function ${guardSignature}${lang === 'ts' ? `: error is ${names.apiError}` : ''} {\n` +
+          `  return (\n    ${isApiError}(error) &&\n    error.operationId === ${quote(op.operationId ?? symbol.name)} &&\n    error.method === ${quote(wireMethod(op.method))}\n  );\n}\n`,
+      );
+    }
     return parts.join('\n');
   };
 
@@ -513,7 +629,7 @@ export function requestDescriptor(
   const access = (property: string): string => propertyAccess('params', property, optionalParams);
   const lines = [
     `operationId: ${quote(op.operationId ?? plan.symbol.name)}`,
-    `method: ${quote(op.method.toUpperCase())}`,
+    `method: ${quote(wireMethod(op.method))}`,
     `path: ${quote(op.path)}`,
   ];
   const styles: Partial<Record<ParameterLocation, Record<string, unknown>>> = {};
@@ -529,6 +645,18 @@ export function requestDescriptor(
     }
   }
   if (Object.keys(styles).length > 0) lines.push(`styles: ${literal(styles)}`);
+  const querystring = plan.parameters.find((p) => p.parameter.in === 'querystring');
+  if (querystring !== undefined) {
+    const { parameter } = querystring;
+    const value =
+      options.parameter?.(parameter, access(querystring.property)) ?? access(querystring.property);
+    const fields = [
+      `value: ${value}`,
+      `mediaType: ${quote(parameter.contentType ?? 'application/x-www-form-urlencoded')}`,
+      ...(parameter.encoding === undefined ? [] : [`encoding: ${literal(parameter.encoding)}`]),
+    ];
+    lines.push(`querystring: { ${fields.join(', ')} }`);
+  }
   if (plan.body !== undefined) {
     const body = access(plan.body.property);
     lines.push(`body: ${options.body === undefined ? body : options.body(body)}`);

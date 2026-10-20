@@ -6,8 +6,9 @@
 export const PETSTORE_CONSUMER = `
 import {
   addPet, client, createClient, deletePet, downloadPhoto, findPetsByStatus, findPetsByTags, getInventory,
-  getPetById, isApiError, loginUser, logoutUser, uploadFile, ApiError,
-  type GetPetByIdError, type NewPet, type Pet, type RequestOptions, type ValidationError,
+  getPetById, isApiError, isGetPetByIdApiError, loginUser, logoutUser, uploadFile, ApiError,
+  type Error as ErrorModel, type GetPetByIdError, type GetPetByIdErrorBody, type NewPet, type Pet,
+  type RequestOptions, type ValidationError,
 } from '__API__';
 
 export async function usage(signal: AbortSignal): Promise<unknown[]> {
@@ -43,11 +44,29 @@ export async function usage(signal: AbortSignal): Promise<unknown[]> {
       const status: number = error.status;
       void status;
     }
+    // The operation's guard narrows the body together with the status.
+    if (isGetPetByIdApiError(error)) {
+      if (error.status === 404) {
+        const message: string | undefined = error.body.message;
+        void message;
+      } else if (error.status === 400) {
+        const empty: undefined = error.body;
+        void empty;
+      } else {
+        // @ts-expect-error undocumented statuses have unknown bodies
+        const body: ErrorModel = error.body;
+        void body;
+      }
+      // @ts-expect-error 200 resolves; it is never an error status
+      if (error.status === 200) void error;
+    }
     const typed = error as GetPetByIdError;
-    if (typed instanceof ApiError) {
-      const message: string | undefined = typed.body?.message;
+    if (typed instanceof ApiError && typed.status === 404) {
+      const message: string | undefined = typed.body.message;
       void message;
     }
+    const legacy = (typed instanceof ApiError ? typed.body : undefined) as GetPetByIdErrorBody;
+    void legacy;
   }
   return [id, created, list, deleted, photo, inventory, token, errors];
 }
@@ -152,5 +171,58 @@ export async function usage(): Promise<unknown[]> {
     }
   };
   return [withId, createdAt, leaked, born, reminder, xml, account, issued, onClosed, onEvent];
+}
+`;
+
+export const FEATURES32_CONSUMER = `
+import {
+  copyDocument, exportAudit, getDocument, getPet, isSearchPetsApiError, listPets, searchDocuments,
+  searchPets, streamEvents,
+  type Document, type Owner, type Pet, type PetAdoptedWebhookRequest, type PetQuery, type Problem,
+} from '__API__';
+
+// Webhook requests include an OpenAPI 3.2 querystring parameter, parsed.
+export const adopted: PetAdoptedWebhookRequest = {
+  body: { kind: 'dog', name: 'Rex' },
+  querystring: { attempt: 2 },
+};
+
+export async function usage(): Promise<unknown[]> {
+  // QUERY: a body on a safe request.
+  const pets: Pet[] = await searchPets({ body: { name: 'Tom', kinds: ['cat'] } });
+  // @ts-expect-error the query document is required
+  await searchPets({});
+  for (const pet of pets) {
+    // With defaultMapping, OtherPet stays possible for any kind (its kind is any string).
+    const kind: string | undefined = pet.kind;
+    if ('indoor' in pet) {
+      const indoor: boolean | undefined = pet.indoor;
+      void indoor;
+    }
+    void kind;
+  }
+  // The whole query string as one typed value.
+  await listPets({ filter: { name: 'x', tags: ['a'] } });
+  await listPets();
+  const documents: Document[] = await searchDocuments({ query: { text: 'q', limit: 5 } });
+  // @ts-expect-error text is required
+  await searchDocuments({ query: { limit: 1 } });
+  // A method from additionalOperations.
+  const copy: Document = await copyDocument({ documentId: 'd1', Destination: '/documents/d2' });
+  const owner: Owner = copy.owner;
+  const related: PetQuery | undefined = copy.related;
+  await getPet({ petId: 1, session: { id: 's', theme: 'dark' } });
+  // Sequential media types are read as text until streaming is generated.
+  const events: string = await streamEvents();
+  const audit: string = await exportAudit();
+  try {
+    await searchPets({ body: {} });
+  } catch (error) {
+    if (isSearchPetsApiError(error) && error.status === 422) {
+      const problem: Problem = error.body;
+      void problem;
+    }
+  }
+  return [documents, owner, related, events, audit, await getDocument({ documentId: 'd' })];
 }
 `;

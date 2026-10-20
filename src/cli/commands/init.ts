@@ -1,4 +1,5 @@
 import { access, readFile, readdir, writeFile } from 'node:fs/promises';
+import type { SpecVersion } from '../../ir/types.ts';
 import path from 'node:path';
 import { findConfigFile } from '../../config/load.ts';
 import { DEFAULT_OUTPUT_DIRECTORY } from '../../config/resolve.ts';
@@ -48,7 +49,7 @@ async function isModulePackage(cwd: string): Promise<boolean> {
   }
 }
 
-async function detectVersion(file: string): Promise<'2.0' | '3.0' | '3.1' | undefined> {
+async function detectVersion(file: string): Promise<SpecVersion | undefined> {
   try {
     const text = await readFile(file, 'utf8');
     const detection = detectSpecVersion(parseDocumentText(text, detectFormat(text, file)), file);
@@ -60,7 +61,7 @@ async function detectVersion(file: string): Promise<'2.0' | '3.0' | '3.1' | unde
 
 export interface InitAnswers {
   readonly input: string;
-  readonly version: '2.0' | '3.0' | '3.1' | 'auto';
+  readonly version: SpecVersion | 'auto';
   readonly output: string;
   readonly language: 'typescript' | 'javascript';
   readonly adapter: 'fetch' | 'axios';
@@ -90,7 +91,7 @@ export function configTemplate(answers: InitAnswers, format: ConfigFormat = 'ts'
   if (format === 'yaml') {
     return `# yaml-language-server: $schema=${SCHEMA_PATH}
 spec:
-  # Swagger 2.0 ("2.0"), OpenAPI 3.0 ("3.0"), OpenAPI 3.1 ("3.1") or "auto".
+  # Swagger 2.0 ("2.0"), OpenAPI 3.0 ("3.0"), 3.1 ("3.1"), 3.2 ("3.2") or "auto".
   version: ${JSON.stringify(answers.version)}
   # A local file (JSON or YAML) or an http(s) URL.
   input: ${JSON.stringify(answers.input)}
@@ -113,7 +114,7 @@ features:
 
 export default defineConfig({
   spec: {
-    // Swagger 2.0 ('2.0'), OpenAPI 3.0 ('3.0'), OpenAPI 3.1 ('3.1') or 'auto'.
+    // Swagger 2.0 ('2.0'), OpenAPI 3.0 ('3.0'), 3.1 ('3.1'), 3.2 ('3.2') or 'auto'.
     version: ${quote(answers.version)},
     // A local file (JSON or YAML) or an http(s) URL.
     input: ${quote(answers.input)},
@@ -160,7 +161,7 @@ export const initCommand: Command = {
       },
       'spec-version': {
         type: 'string',
-        value: '2.0|3.0|3.1|auto',
+        value: '2.0|3.0|3.1|3.2|auto',
         description: 'Specification version (default: detected).',
       },
       output: {
@@ -210,7 +211,7 @@ export const initCommand: Command = {
     const answers: InitAnswers = {
       input,
       version:
-        choice(ctx, 'spec-version', ['2.0', '3.0', '3.1', 'auto'] as const) ??
+        choice(ctx, 'spec-version', ['2.0', '3.0', '3.1', '3.2', 'auto'] as const) ??
         detectedVersion ??
         '3.1',
       output: option(ctx, 'output') ?? DEFAULT_OUTPUT_DIRECTORY,

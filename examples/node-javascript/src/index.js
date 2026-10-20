@@ -5,6 +5,7 @@ import {
   client,
   createTask,
   getTask,
+  isGetTaskApiError,
   listTasks,
 } from './generated/api/index.js';
 import { startServer } from './server.js';
@@ -41,10 +42,12 @@ try {
 
   await getTask({ taskId: 404 });
 } catch (error) {
-  if (error instanceof ApiError) {
-    // Error bodies are typed per operation; here: Problem.
-    const problem = /** @type {import('./generated/api/index.js').GetTaskErrorBody} */ (error.body);
-    console.log(`Expected failure: HTTP ${error.status} — ${problem.title}`);
+  if (isGetTaskApiError(error) && error.status === 404) {
+    // The guard types errors by status: a 404 from getTask has a Problem body.
+    console.log(`Expected failure: HTTP ${error.status} — ${error.body.title}`);
+  } else if (error instanceof ApiError) {
+    console.error(`Unexpected HTTP ${error.status} from ${error.operationId}`);
+    process.exitCode = 1;
   } else if (error instanceof RequestError) {
     console.error(`Request failed (${error.kind}): ${error.message}`);
     process.exitCode = 1;

@@ -1,7 +1,7 @@
 {
   "name": "swaggerz",
   "version": "0.1.0",
-  "description": "Generate fully typed, documented, tree-shakeable API clients from Swagger 2.0 and OpenAPI 3.0/3.1 specifications.",
+  "description": "Generate fully typed, documented, tree-shakeable API clients from Swagger 2.0 and OpenAPI 3.0/3.1/3.2 specifications.",
   "keywords": [
     "openapi",
     "swagger",
@@ -68,12 +68,19 @@
     "test:integration": "vitest run --project integration",
     "test:pack": "node scripts/verify-pack.ts",
     "test:smoke": "node dist/cli/bin.js generate --config tests/smoke/swaggerz.config.mjs && node tests/smoke/runtime.mjs",
+    "test:runtimes": "node scripts/runtimes.ts",
     "bench": "node scripts/bench.ts",
+    "example": "node scripts/example.ts",
+    "example:react-query": "node scripts/example.ts react-query",
+    "example:node-javascript": "node scripts/example.ts node-javascript",
+    "example:custom-plugin": "node scripts/example.ts custom-plugin",
+    "examples:check": "node scripts/example.ts all check",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "release": "release-it",
     "release:dry": "release-it --dry-run",
     "prepack": "node scripts/build.ts",
-    "compat": "node scripts/compat.ts"
+    "compat": "node scripts/compat.ts",
+    "corpus": "node scripts/corpus.ts"
   },
   "dependencies": {
     "yaml": "^2.9.0"
@@ -112,6 +119,7 @@
     "typescript": "~6.0.3",
     "vite": "^8.0.0",
     "vitest": "^5.0.0",
+    "webpack": "^5.112.0",
     "zod": "^4.6.0"
   },
   "publishConfig": {

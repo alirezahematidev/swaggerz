@@ -37,7 +37,7 @@ export interface ParsedFixture {
 
 export async function parseFixture(
   name: string,
-  version: '2.0' | '3.0' | '3.1' | 'auto' = 'auto',
+  version: '2.0' | '3.0' | '3.1' | '3.2' | 'auto' = 'auto',
   extra: Partial<UserConfig> = {},
 ): Promise<ParsedFixture> {
   const diagnostics = new DiagnosticBag();

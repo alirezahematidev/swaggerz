@@ -10,6 +10,16 @@ export function isRemoteUrl(input: string): boolean {
   return /^https?:\/\//i.test(input);
 }
 
+export const DEFAULT_POLL_INTERVAL = 2000;
+/** A bound on runaway descriptions, not on large ones (DigitalOcean's has about 1,900 files). */
+export const DEFAULT_MAX_DOCUMENTS = 5000;
+
+function resolvePoll(poll: boolean | number | undefined): ResolvedConfig['spec']['fetch']['poll'] {
+  if (poll === undefined) return { hosts: 'loopback', interval: DEFAULT_POLL_INTERVAL };
+  if (typeof poll === 'number') return { hosts: 'all', interval: poll };
+  return { hosts: poll ? 'all' : 'none', interval: DEFAULT_POLL_INTERVAL };
+}
+
 /** Applies defaults and resolves paths. `config` must already be validated. */
 export function resolveConfig(
   config: UserConfig,
@@ -41,11 +51,13 @@ export function resolveConfig(
         external: config.spec.refs?.external ?? 'local',
         allowedDirectories: [...new Set(allowedDirectories)],
         allowedHosts: config.spec.refs?.allowedHosts ?? [],
+        maxDocuments: config.spec.refs?.maxDocuments ?? DEFAULT_MAX_DOCUMENTS,
       },
       fetch: {
         headers: config.spec.fetch?.headers ?? {},
         timeout: config.spec.fetch?.timeout ?? 30_000,
         maxBytes: config.spec.fetch?.maxBytes ?? 50 * 1024 * 1024,
+        poll: resolvePoll(config.spec.fetch?.poll),
       },
     },
     output: {
@@ -76,7 +88,10 @@ export function resolveConfig(
         reactQuery === false
           ? false
           : {
-              queryMethods: (reactQuery === true ? undefined : reactQuery.queryMethods) ?? ['get'],
+              queryMethods: (reactQuery === true ? undefined : reactQuery.queryMethods) ?? [
+                'get',
+                'query',
+              ],
               infinite: (reactQuery === true ? undefined : reactQuery.infinite) ?? {},
               invalidates: (reactQuery === true ? undefined : reactQuery.invalidates) ?? {},
             },

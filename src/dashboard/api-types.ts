@@ -87,6 +87,18 @@ export interface SessionInfo {
    * showing the last version that loaded.
    */
   readonly failure?: ReloadFailure;
+  /**
+   * Polled remote documents (`spec.fetch.poll`) that cannot be fetched right now. Polling goes on;
+   * the dashboard keeps showing the last version that loaded.
+   */
+  readonly unreachable?: readonly UnreachableDocument[];
+}
+
+export interface UnreachableDocument {
+  readonly url: string;
+  readonly error: string;
+  /** When polling started failing (ISO 8601). */
+  readonly since: string;
 }
 
 /** Events streamed from `GET /api/events` (server-sent events). */
@@ -101,7 +113,15 @@ export type ServerEvent =
       readonly delta?: ReloadDelta;
       readonly error?: string;
     }
-  | { readonly type: 'output'; readonly revision: number };
+  | { readonly type: 'output'; readonly revision: number }
+  | {
+      /** A polled remote document became unreachable, or reachable again. */
+      readonly type: 'remote';
+      readonly revision: number;
+      readonly url: string;
+      readonly reachable: boolean;
+      readonly error?: string;
+    };
 
 export interface OverviewResponse {
   readonly title: string;
@@ -117,6 +137,8 @@ export interface OverviewResponse {
     readonly language: string;
     readonly adapter: string;
     readonly reactQuery: boolean;
+    /** The validation library when runtime validation is on. */
+    readonly validation?: 'zod';
   };
   readonly counts: {
     readonly operations: number;
@@ -126,15 +148,25 @@ export interface OverviewResponse {
     readonly deprecated: number;
   };
   readonly methods: Readonly<Record<string, number>>;
-  readonly tags: readonly {
-    readonly name: string;
-    readonly description?: string;
-    readonly count: number;
-  }[];
+  /** In tree order: nested tags (OpenAPI 3.2) follow their parent. */
+  readonly tags: readonly OverviewTag[];
   readonly diagnostics: readonly Diagnostic[];
   readonly generation: GenerationStatus;
   readonly timings: Readonly<Record<string, number>>;
   readonly session: SessionInfo;
+}
+
+export interface OverviewTag {
+  readonly name: string;
+  readonly summary?: string;
+  readonly description?: string;
+  /** OpenAPI 3.2 tag kind, e.g. `nav` or `audience`. */
+  readonly kind?: string;
+  readonly parent?: string;
+  /** Nesting level: 0 for top-level tags. */
+  readonly depth: number;
+  /** Operations tagged with it directly. */
+  readonly count: number;
 }
 
 export interface OperationSummary {
@@ -145,6 +177,8 @@ export interface OperationSummary {
   readonly summary?: string;
   readonly operationId?: string;
   readonly tags: readonly string[];
+  /** Tags its tags are nested under (OpenAPI 3.2), so filtering by a parent tag finds it. */
+  readonly tagAncestors?: readonly string[];
   readonly deprecated: boolean;
   readonly module: string;
   readonly auth: readonly string[];

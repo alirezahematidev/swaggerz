@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { SwaggerzError } from '../diagnostics/bag.ts';
+import { polledDocuments, RemoteWatcher, type PolledDocument } from '../loader/remote-watcher.ts';
 import { FileWatcher } from '../utils/file-watcher.ts';
 import { generateOnce } from './commands/generate.ts';
 import { findConfigFile } from '../config/load.ts';
@@ -9,7 +10,8 @@ const DEBOUNCE_MS = 120;
 
 /**
  * Watches the config file and every local document of the specification (including external
- * `$ref` targets) and regenerates on change. Failures are reported and watching continues.
+ * `$ref` targets), polls remote documents (`spec.fetch.poll`), and regenerates on change.
+ * Failures are reported and watching continues.
  */
 export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
   const { reporter } = ctx;
@@ -21,6 +23,9 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       ? await findConfigFile(ctx.cwd)
       : path.resolve(ctx.cwd, explicitConfig);
   let targets = new Set<string>(configFile === undefined ? [] : [configFile]);
+  let remoteTargets: readonly PolledDocument[] = [];
+  let interval = 0;
+  let unpolledInput: string | undefined;
 
   const run = async (): Promise<void> => {
     try {
@@ -32,6 +37,13 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
         if (doc.url.startsWith('file:')) files.add(doc.location);
       }
       targets = files;
+      remoteTargets = polledDocuments(loaded.config, result.store);
+      interval = loaded.config.spec.fetch.poll.interval;
+      const input = loaded.config.spec.input;
+      unpolledInput =
+        /^https?:/i.test(input) && !remoteTargets.some((doc) => doc.url === new URL(input).href)
+          ? input
+          : undefined;
     } catch (error) {
       if (error instanceof SwaggerzError) {
         reporter.diagnostics(error.diagnostics);
@@ -43,31 +55,51 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       }
     }
     watcher.set(targets);
+    remote.set(remoteTargets, interval);
   };
 
-  const watcher = new FileWatcher({
-    debounceMs: DEBOUNCE_MS,
-    onChange: async () => {
+  // File and remote changes can arrive together; generations never overlap.
+  let queue = Promise.resolve();
+  const regenerate = (): Promise<void> =>
+    (queue = queue.then(async () => {
       reporter.log(reporter.paint('Change detected, regenerating…', 'dim'));
       await run();
-    },
+    }));
+  const watcher = new FileWatcher({
+    debounceMs: DEBOUNCE_MS,
+    onChange: regenerate,
     onError: (directory, error) => {
       reporter.warn(
         `Cannot watch ${relative(ctx, directory)}: ${error instanceof Error ? error.message : String(error)}`,
       );
     },
   });
+  const remote = new RemoteWatcher({
+    onChange: regenerate,
+    onError: (url, error) => {
+      reporter.warn(
+        `Cannot poll ${url}: ${error instanceof Error ? error.message : String(error)}. Retrying…`,
+      );
+    },
+    onRecover: (url) => {
+      reporter.log(reporter.paint(`${url} is reachable again.`, 'dim'));
+    },
+  });
 
   await run();
-  if (targets.size === 0) {
-    reporter.warn('Nothing to watch (remote specifications are not watched).');
-  } else {
-    reporter.log(
-      reporter.paint(
-        `Watching ${[...targets].map((file) => relative(ctx, file)).join(', ')}. Press Ctrl+C to stop.`,
-        'dim',
-      ),
+  const watched = [
+    ...[...targets].map((file) => relative(ctx, file)),
+    ...remote.urls.map((url) => `${url} (every ${interval / 1000} s)`),
+  ];
+  if (unpolledInput !== undefined) {
+    reporter.warn(
+      `${unpolledInput} is not polled for changes; set spec.fetch.poll to true or an interval to poll it.`,
     );
+  }
+  if (watched.length === 0) {
+    reporter.warn('Nothing to watch.');
+  } else {
+    reporter.log(reporter.paint(`Watching ${watched.join(', ')}. Press Ctrl+C to stop.`, 'dim'));
   }
 
   await new Promise<void>((resolve) => {
@@ -80,6 +112,6 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       { once: true },
     );
   });
-  await watcher.close();
+  await Promise.all([watcher.close(), remote.close()]);
   return EXIT.OK;
 }

@@ -23,6 +23,7 @@ describe('config validation', () => {
           version: '3.1',
           input: './openapi.yaml',
           refs: { external: 'remote', allowedHosts: ['schemas.example.com'] },
+          fetch: { poll: 1000 },
         },
         output: {
           directory: './api',
@@ -54,7 +55,7 @@ describe('config validation', () => {
   it('reports precise, actionable issues', () => {
     expect(
       validateUserConfig({
-        spec: { version: '3.2', input: '' },
+        spec: { version: '3.3', input: '' },
         output: { langauge: 'typescript', clean: 'yes' },
         client: { adapter: 'fech' },
         plugins: [{}],
@@ -62,7 +63,7 @@ describe('config validation', () => {
     ).toEqual([
       {
         path: 'spec.version',
-        message: 'Expected one of "2.0", "3.0", "3.1", "auto" but received "3.2".',
+        message: 'Expected one of "2.0", "3.0", "3.1", "3.2", "auto" but received "3.3".',
         hint: 'Did you mean "3.0"?',
       },
       { path: 'spec.input', message: 'Expected a non-empty string.' },
@@ -76,6 +77,15 @@ describe('config validation', () => {
       { path: 'plugins[0].name', message: 'This option is required.' },
     ]);
     expect(validateUserConfig({})).toEqual([{ path: 'spec', message: 'This option is required.' }]);
+    expect(
+      validateUserConfig({ spec: { version: '3.1', input: 'x', fetch: { poll: 100 } } }),
+    ).toEqual([
+      {
+        path: 'spec.fetch.poll',
+        message:
+          'Expected a boolean or an interval in milliseconds (at least 500) but received a number.',
+      },
+    ]);
   });
 });
 

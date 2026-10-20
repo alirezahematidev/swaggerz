@@ -13,6 +13,7 @@ import {
 import type { UserConfig } from '../../../src/config/types.ts';
 import {
   ADVANCED_CONSUMER,
+  FEATURES32_CONSUMER,
   FEATURES_CONSUMER,
   PETSTORE_CONSUMER,
   SWAGGER2_CONSUMER,
@@ -21,7 +22,7 @@ import {
 interface Spec {
   readonly name: string;
   readonly input: string;
-  readonly version: '2.0' | '3.0' | '3.1';
+  readonly version: '2.0' | '3.0' | '3.1' | '3.2';
   readonly consumer: string | undefined;
   readonly config?: Partial<UserConfig>;
 }
@@ -29,9 +30,24 @@ interface Spec {
 const SPECS: readonly Spec[] = [
   { name: 'petstore30', input: 'petstore-3.0.yaml', version: '3.0', consumer: PETSTORE_CONSUMER },
   { name: 'features31', input: 'features-3.1.yaml', version: '3.1', consumer: FEATURES_CONSUMER },
+  {
+    name: 'features32',
+    input: 'features-3.2.yaml',
+    version: '3.2',
+    consumer: FEATURES32_CONSUMER,
+    config: { features: { reactQuery: true, validation: 'zod' } },
+  },
   { name: 'swagger20', input: 'petstore-2.0.json', version: '2.0', consumer: SWAGGER2_CONSUMER },
   { name: 'external30', input: 'external/openapi.yaml', version: '3.0', consumer: undefined },
   { name: 'ids31', input: 'ids-3.1.yaml', version: '3.1', consumer: undefined },
+  {
+    // Patterns from public API descriptions that once produced invalid code.
+    name: 'realworld30',
+    input: 'real-world/openapi.yaml',
+    version: '3.0',
+    consumer: undefined,
+    config: { features: { reactQuery: true, validation: 'zod' } },
+  },
   {
     name: 'advanced31',
     input: 'advanced-3.1.yaml',

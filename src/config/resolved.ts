@@ -1,4 +1,4 @@
-import type { HttpMethod } from '../ir/types.ts';
+import type { StandardHttpMethod } from '../ir/types.ts';
 
 /**
  * Fully defaulted configuration used internally by the compiler. Paths are absolute.
@@ -10,18 +10,21 @@ export interface ResolvedConfig {
   /** Absolute path of the loaded config file, if any. */
   readonly configFile?: string;
   readonly spec: {
-    readonly version: '2.0' | '3.0' | '3.1' | 'auto';
+    readonly version: '2.0' | '3.0' | '3.1' | '3.2' | 'auto';
     /** Absolute path or URL. */
     readonly input: string;
     readonly refs: {
       readonly external: 'none' | 'local' | 'remote';
       readonly allowedDirectories: readonly string[];
       readonly allowedHosts: readonly string[];
+      readonly maxDocuments: number;
     };
     readonly fetch: {
       readonly headers: Readonly<Record<string, string>>;
       readonly timeout: number;
       readonly maxBytes: number;
+      /** Which remote documents are polled for changes while watching, and how often (ms). */
+      readonly poll: { readonly hosts: 'loopback' | 'all' | 'none'; readonly interval: number };
     };
   };
   readonly output: {
@@ -52,7 +55,7 @@ export interface ResolvedConfig {
     readonly reactQuery:
       | false
       | {
-          readonly queryMethods: readonly HttpMethod[];
+          readonly queryMethods: readonly StandardHttpMethod[];
           readonly infinite: Readonly<Record<string, { readonly pageParam: string }>>;
           readonly invalidates: Readonly<Record<string, readonly string[]>>;
         };

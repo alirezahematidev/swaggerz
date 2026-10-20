@@ -30,7 +30,7 @@ afterAll(async () => {
 async function load(
   name: string,
   input: string,
-  version: '2.0' | '3.0' | '3.1',
+  version: '2.0' | '3.0' | '3.1' | '3.2',
   adapter: 'fetch' | 'axios',
   extra = {},
 ): Promise<Module> {
@@ -55,12 +55,14 @@ describe.each(['fetch', 'axios'] as const)('%s adapter', (adapter) => {
   let petstore: Module;
   let features: Module;
   let swagger: Module;
+  let features32: Module;
 
   beforeAll(async () => {
     petstore = await load(`http-petstore-${adapter}`, 'petstore-3.0.yaml', '3.0', adapter);
     features = await load(`http-features-${adapter}`, 'features-3.1.yaml', '3.1', adapter);
     swagger = await load(`http-swagger-${adapter}`, 'petstore-2.0.json', '2.0', adapter);
-    for (const api of [petstore, features, swagger])
+    features32 = await load(`http-features32-${adapter}`, 'features-3.2.yaml', '3.2', adapter);
+    for (const api of [petstore, features, swagger, features32])
       api.client.setConfig({ baseUrl: `${server.url}/api` });
   });
 
@@ -197,6 +199,11 @@ describe.each(['fetch', 'axios'] as const)('%s adapter', (adapter) => {
     expect(error.url).toBe(`${server.url}/api/pet/9`);
     // The axios adapter keeps the original AxiosError as the cause.
     expect(adapter !== 'axios' || axios.isAxiosError(error.cause)).toBe(true);
+    // Each operation's guard only accepts its own errors.
+    const guards = petstore as unknown as Record<string, (error: unknown) => boolean>;
+    expect(guards.isGetPetByIdApiError!(error)).toBe(true);
+    expect(guards.isGetInventoryApiError!(error)).toBe(false);
+    expect(guards.isGetPetByIdApiError!(new Error('x'))).toBe(false);
 
     server.respond(() => ({
       status: 500,
@@ -266,6 +273,81 @@ describe.each(['fetch', 'axios'] as const)('%s adapter', (adapter) => {
     });
     await expect(petstore.getInventory!()).resolves.toEqual({ fallback: true });
     removeRecovery();
+  });
+
+  it('sends OpenAPI 3.2 methods, query strings and cookies', async () => {
+    server.respond(() => ({ body: [{ kind: 'cat', name: 'Tom' }] }));
+    await features32.searchPets!({ body: { name: 'Tom', kinds: ['cat'] } });
+    expect(server.requests.at(-1)).toMatchObject({ method: 'QUERY', path: '/api/pets' });
+    expect(server.requests.at(-1)?.headers['content-type']).toBe('application/json');
+    expect(server.requests.at(-1)?.json()).toEqual({ name: 'Tom', kinds: ['cat'] });
+
+    server.respond(() => ({ status: 201, body: { id: 'd2', owner: { name: 'Ann' } } }));
+    await expect(
+      features32.copyDocument!({ documentId: 'd1', Destination: '/documents/d2' }),
+    ).resolves.toMatchObject({ id: 'd2' });
+    expect(server.requests.at(-1)).toMatchObject({ method: 'COPY', path: '/api/documents/d1' });
+    expect(server.requests.at(-1)?.headers.destination).toBe('/documents/d2');
+
+    // `in: querystring`: form-encoded, then JSON, as the whole query string.
+    server.respond(() => ({ body: [] }));
+    await features32.listPets!({ filter: { name: 'a b', tags: ['x', 'y'] } });
+    expect(server.requests.at(-1)?.rawQuery).toBe('name=a+b&tags=x%2Cy');
+    await features32.listPets!();
+    expect(server.requests.at(-1)?.url).toBe('/api/pets');
+    await features32.searchDocuments!({ query: { text: 'q', limit: 2 } });
+    expect(decodeURIComponent(server.requests.at(-1)?.rawQuery ?? '')).toBe(
+      '{"text":"q","limit":2}',
+    );
+
+    // `style: cookie`: one cookie per property, not percent-encoded.
+    server.respond(() => ({ body: { kind: 'dog', name: 'Rex' } }));
+    await features32.getPet!({ petId: 1, session: { id: 's/1', theme: 'dark' } });
+    expect(server.requests.at(-1)?.headers.cookie).toBe('id=s/1; theme=dark');
+
+    // Sequential media types described by itemSchema are read as text.
+    const lines = '{"action":"a"}\n{"action":"b"}\n';
+    server.respond(() => ({ headers: { 'content-type': 'application/jsonl' }, body: lines }));
+    await expect(features32.exportAudit!()).resolves.toBe(lines);
+  });
+
+  it('retries failed requests and refreshes expired tokens with the built-in middleware', async () => {
+    const helpers = features as unknown as {
+      retry(options: Record<string, unknown>): Record<string, unknown>;
+      refreshAuth(options: Record<string, unknown>): Record<string, unknown>;
+    };
+    let failures = 1;
+    server.respond(() => (failures-- > 0 ? { status: 503, body: {} } : { body: { id: 'root' } }));
+    const removeRetry = features.client.use(helpers.retry({ delay: 1 }));
+    await expect(features.getTree!()).resolves.toEqual({ id: 'root' });
+    expect(server.requests).toHaveLength(2);
+    removeRetry();
+
+    // getTree inherits the document's bearerAuth requirement.
+    features.client.setConfig({ auth: { bearerAuth: 'expired' } });
+    server.respond((request) =>
+      request.headers.authorization === 'Bearer renewed'
+        ? { body: { id: 'root' } }
+        : { status: 401, body: { title: 'expired' } },
+    );
+    let refreshes = 0;
+    const removeRefresh = features.client.use(
+      helpers.refreshAuth({
+        scheme: 'bearerAuth',
+        refresh: () => {
+          refreshes++;
+          return Promise.resolve('renewed');
+        },
+      }),
+    );
+    await expect(Promise.all([features.getTree!(), features.getTree!()])).resolves.toHaveLength(2);
+    expect(refreshes).toBe(1);
+    // Two attempts with the expired token, two replays (in any order) with the renewed one.
+    expect(
+      server.requests.map((r) => r.headers.authorization ?? '').sort((a, b) => a.localeCompare(b)),
+    ).toEqual(['Bearer expired', 'Bearer expired', 'Bearer renewed', 'Bearer renewed']);
+    removeRefresh();
+    features.client.setConfig({ auth: undefined });
   });
 
   it('supports per-call clients, headers and default headers', async () => {

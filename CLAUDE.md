@@ -1,6 +1,6 @@
 # swaggerz
 
-A compiler from Swagger 2.0 / OpenAPI 3.0 / 3.1 documents to typed, tree-shakeable API clients (fetch or axios, optional TanStack Query v5 hooks and Zod 4 schemas). Ships as a CLI, a programmatic API and a local dashboard. Read [docs/architecture.md](docs/architecture.md) before changing the pipeline and [docs/decisions.md](docs/decisions.md) before revisiting a design choice.
+A compiler from Swagger 2.0 / OpenAPI 3.0 / 3.1 / 3.2 documents to typed, tree-shakeable API clients (fetch or axios, optional TanStack Query v5 hooks and Zod 4 schemas). Ships as a CLI, a programmatic API and a local dashboard. Read [docs/architecture.md](docs/architecture.md) before changing the pipeline and [docs/decisions.md](docs/decisions.md) before revisiting a design choice.
 
 ## Commands
 
@@ -15,8 +15,12 @@ pnpm format           # oxfmt --write; run it instead of hand-formatting
 pnpm build            # dist/, runtime templates, dashboard bundle, config.schema.json
 pnpm test:pack        # packs, installs the tarball in a temp project and uses it like a user would (network)
 pnpm test:smoke       # needs `pnpm build`; generates and runs a client
+pnpm test:runtimes    # the client in Node.js, Deno, Bun, Chromium, Firefox, WebKit, workerd (network)
+pnpm corpus           # 24 public API descriptions vs fixtures/corpus/baseline.json; --update records changes (network)
 pnpm compat           # oldest/newest supported zod, axios, TanStack Query, TypeScript (network)
-node scripts/verify-examples.ts                       # builds and type-checks examples/* (network)
+pnpm example:react-query                              # build, generate and run an example (also node-javascript, custom-plugin)
+pnpm examples:check                                   # build, then generate and type-check every example
+node scripts/verify-examples.ts                       # packs, installs and checks examples/* like a user (network)
 node dist/cli/bin.js dashboard --config <file>        # run the dashboard against a config
 ```
 
@@ -28,7 +32,8 @@ The vitest global setup builds the runtime templates and the dashboard bundle on
 - `src/loader` → `src/spec` (version adapters, schema converter) → `src/ir` (version-independent `ApiDocument`, `IR_VERSION`) → `src/analysis` (graph, naming, read/write split, `ProjectModel`) → `src/codegen` → `src/plugins` → `src/output` (manifest, atomic writes). `src/pipeline/compile.ts` wires them.
 - `src/templates/runtime` — the runtime copied into every generated client. It must stay dependency-free and type-check against the browser-only `src/templates/tsconfig.json`.
 - `src/dashboard` — HTTP server (`server.ts`), state derived from `compile()`, usage scanner (oxc-parser/oxc-resolver, optional dependencies), and the React client in `client/` (Vite + Tailwind v4 + Radix primitives, shadcn-style components in `components/ui`).
-- `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions).
+- `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions; `features-3.2.yaml` every OpenAPI 3.2 addition).
+- `examples/` — pnpm workspace packages (`swaggerz: workspace:*`), run from the root with `pnpm example:<name>`.
 - `brand/` — logo sources; `scripts/` — build, pack verification, compat, release notes.
 
 ## Rules that are not negotiable

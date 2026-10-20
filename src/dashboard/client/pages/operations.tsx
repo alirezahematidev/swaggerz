@@ -29,7 +29,7 @@ import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group.tsx'
 import { filterOperations, type OperationFilter } from '../filters.ts';
 import { href } from '../router.ts';
 
-const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE'];
+const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'TRACE', 'QUERY'];
 const PAGE_SIZE = 200;
 type Deprecated = OperationFilter['deprecated'];
 type ResponseLike = OperationIR['responses'][number];
@@ -56,13 +56,24 @@ export function OperationsPage({
   const search = useRef<HTMLInputElement>(null);
   const tags = useMemo(
     () =>
-      [...new Set(operations.flatMap((op) => (op.tags.length === 0 ? ['default'] : op.tags)))].sort(
-        (a, b) => a.localeCompare(b),
-      ),
+      [
+        ...new Set(
+          operations.flatMap((op) => [
+            ...(op.tags.length === 0 ? ['default'] : op.tags),
+            ...(op.tagAncestors ?? []),
+          ]),
+        ),
+      ].sort((a, b) => a.localeCompare(b)),
     [operations],
   );
+  // The standard methods in their usual order, then others (OpenAPI 3.2 additionalOperations).
   const methods = useMemo(
-    () => METHODS.filter((m) => operations.some((op) => op.method === m)),
+    () => [
+      ...METHODS.filter((m) => operations.some((op) => op.method === m)),
+      ...[...new Set(operations.map((op) => op.method))]
+        .filter((m) => !METHODS.includes(m))
+        .sort((a, b) => a.localeCompare(b)),
+    ],
     [operations],
   );
   const results = useMemo(() => filterOperations(operations, filter), [operations, filter]);
@@ -217,7 +228,7 @@ export function OperationsPage({
   );
 }
 
-const LOCATIONS: readonly Location[] = ['path', 'query', 'header', 'cookie'];
+const LOCATIONS: readonly Location[] = ['path', 'query', 'querystring', 'header', 'cookie'];
 
 function statusTone(status: string): BadgeTone {
   if (status.startsWith('2')) return 'success';
@@ -322,8 +333,15 @@ function Parameters({ operation, names }: { operation: OperationIR; names: Model
                           </code>
                           {parameter.deprecated ? <Badge tone="warning">deprecated</Badge> : null}
                         </div>
-                        {parameter.style !==
-                        (location === 'query' || location === 'cookie' ? 'form' : 'simple') ? (
+                        {location === 'querystring' ? (
+                          <div className="mt-1 text-[12px] break-all text-muted-foreground">
+                            as{' '}
+                            <code className="font-mono">
+                              {parameter.contentType ?? 'application/x-www-form-urlencoded'}
+                            </code>
+                          </div>
+                        ) : parameter.style !==
+                          (location === 'query' || location === 'cookie' ? 'form' : 'simple') ? (
                           <div className="mt-1 text-[12px] text-muted-foreground">
                             style {parameter.style}
                           </div>

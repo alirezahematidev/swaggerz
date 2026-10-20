@@ -15,6 +15,7 @@ const LABELS: Record<SpecVersion, string> = {
   '2.0': 'Swagger 2.0',
   '3.0': 'OpenAPI 3.0',
   '3.1': 'OpenAPI 3.1',
+  '3.2': 'OpenAPI 3.2',
 };
 
 export function versionLabel(version: SpecVersion): string {
@@ -75,13 +76,14 @@ export function detectSpecVersion(data: unknown, file: string): DetectionResult 
       const match = /^3\.(\d+)(?:\.\d+)?(?:-[\w.]+)?$/.exec(raw);
       if (match?.[1] === '0') return { ok: true, version: '3.0', raw, warnings };
       if (match?.[1] === '1') return { ok: true, version: '3.1', raw, warnings };
+      if (match?.[1] === '2') return { ok: true, version: '3.2', raw, warnings };
     }
     return {
       ok: false,
       diagnostic: {
         code: 'spec/unsupported-version',
         severity: 'error',
-        message: `Unsupported OpenAPI version ${JSON.stringify(data.openapi)}. Supported: 3.0.x and 3.1.x.`,
+        message: `Unsupported OpenAPI version ${JSON.stringify(data.openapi)}. Supported: 3.0.x, 3.1.x and 3.2.x.`,
         location: { file, pointer: '/openapi' },
       },
     };

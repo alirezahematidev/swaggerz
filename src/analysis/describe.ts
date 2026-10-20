@@ -1,4 +1,4 @@
-import type { SchemaIR } from '../ir/types.ts';
+import { wireMethod, type SchemaIR } from '../ir/types.ts';
 import type { ProjectModel } from './types.ts';
 
 /** Short human description of a schema's shape. */
@@ -30,7 +30,7 @@ export function inspectData(project: ProjectModel): {
   return {
     operations: project.operations.map((op) => ({
       name: op.name,
-      method: op.operation.method.toUpperCase(),
+      method: wireMethod(op.operation.method),
       path: op.operation.path,
       operationId: op.operation.operationId ?? null,
       tags: op.operation.tags,

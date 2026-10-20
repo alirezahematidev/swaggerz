@@ -65,11 +65,16 @@ export interface OperationSymbol {
     readonly params: string;
     readonly body: string;
     readonly response: string;
+    /** Everything the operation rejects with: its {@link apiError} union or a `RequestError`. */
     readonly error: string;
+    /** Union of one `ApiError<Body, Status>` per documented error status, plus undeclared ones. */
+    readonly apiError: string;
     readonly errorBody: string;
     /** Map of media type → body type; only when the request body offers several media types. */
     readonly bodies?: string;
   };
+  /** Type guard narrowing an unknown error to the operation's `apiError` union. */
+  readonly errorGuard: string;
   /** Parameter property name for each parameter (index-aligned with `operation.parameters`). */
   readonly parameterProperties: readonly string[];
   /** Property holding the request body inside the params object. */

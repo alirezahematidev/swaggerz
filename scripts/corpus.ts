@@ -1,0 +1,228 @@
+/**
+ * Compiles a corpus of public API descriptions (`fixtures/corpus/corpus.json`) with every feature
+ * enabled, type-checks the generated TypeScript, and compares the outcome with
+ * `fixtures/corpus/baseline.json`: a crash, a type error or any change in the diagnostics fails.
+ *
+ * Usage: node scripts/corpus.ts [name…] [--update] [--no-typecheck]
+ *   --update        record checksums of new documents and rewrite the baseline
+ *   --no-typecheck  skip type-checking the generated clients (faster)
+ *
+ * Documents are downloaded once into `.corpus/` (network) and verified against their checksums.
+ */
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveConfig } from '../src/config/resolve.ts';
+import { runGeneration } from '../src/pipeline/generate.ts';
+import { BROWSER, typecheck } from '../tests/support/typescript.ts';
+import { buildRuntimeTemplates } from './build-assets.ts';
+
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const LIST = path.join(ROOT, 'fixtures', 'corpus', 'corpus.json');
+const BASELINE = path.join(ROOT, 'fixtures', 'corpus', 'baseline.json');
+const CACHE = path.join(ROOT, '.corpus');
+/** Inside the repository, so generated clients resolve zod and React Query from node_modules. */
+const OUTPUT = path.join(ROOT, 'tests', '.output', 'corpus');
+
+interface Entry {
+  readonly name: string;
+  /** A single-file document. */
+  readonly url?: string;
+  /** A description spread over many files: checked out at a commit, compiled from `path`. */
+  readonly git?: { readonly repo: string; readonly commit: string; readonly sparse: string };
+  readonly path?: string;
+  sha256?: string;
+}
+
+interface Result {
+  readonly version: string;
+  readonly ok: boolean;
+  readonly operations: number;
+  readonly models: number;
+  readonly files: number;
+  /** `severity code` → count. */
+  readonly diagnostics: Record<string, number>;
+  /** Type errors in the generated TypeScript (`null` when not checked). */
+  readonly typeErrors: number | null;
+}
+
+const args = process.argv.slice(2);
+const update = args.includes('--update');
+const check = !args.includes('--no-typecheck');
+const only = args.filter((arg) => !arg.startsWith('--'));
+
+const list = JSON.parse(await readFile(LIST, 'utf8')) as { documents: Entry[] };
+const selected = list.documents.filter((entry) => only.length === 0 || only.includes(entry.name));
+if (selected.length === 0) throw new Error(`No corpus documents match ${only.join(', ')}.`);
+const baseline: Record<string, Result> = existsSync(BASELINE)
+  ? (JSON.parse(await readFile(BASELINE, 'utf8')) as Record<string, Result>)
+  : {};
+
+/** Checks out `sparse` of a repository at a commit (shallow), once. */
+function checkout(directory: string, git: NonNullable<Entry['git']>): void {
+  if (existsSync(path.join(directory, '.git'))) return;
+  const run = (...gitArgs: string[]): void => {
+    execFileSync('git', gitArgs, { cwd: directory, stdio: 'ignore' });
+  };
+  run('init', '--quiet');
+  run('remote', 'add', 'origin', git.repo);
+  run('sparse-checkout', 'set', git.sparse);
+  run('fetch', '--quiet', '--depth', '1', '--filter=blob:none', 'origin', git.commit);
+  run('checkout', '--quiet', 'FETCH_HEAD');
+}
+
+/** Downloads a document once and verifies (or, with --update, records) its checksum. */
+async function download(entry: Entry): Promise<string> {
+  let file: string;
+  if (entry.git !== undefined && entry.path !== undefined) {
+    const directory = path.join(CACHE, entry.name);
+    await mkdir(directory, { recursive: true });
+    checkout(directory, entry.git);
+    file = path.join(directory, entry.path);
+  } else if (entry.url !== undefined) {
+    file = path.join(CACHE, entry.name, path.basename(new URL(entry.url).pathname));
+    if (!existsSync(file)) {
+      const response = await fetch(entry.url);
+      if (!response.ok) throw new Error(`${entry.url}: HTTP ${response.status}`);
+      await mkdir(path.dirname(file), { recursive: true });
+      await writeFile(file, Buffer.from(await response.arrayBuffer()));
+    }
+  } else {
+    throw new Error(`${entry.name}: needs a url, or git and path.`);
+  }
+  const sha256 = createHash('sha256')
+    .update(await readFile(file))
+    .digest('hex');
+  if (entry.sha256 === undefined && update) entry.sha256 = sha256;
+  else if (entry.sha256 !== sha256)
+    throw new Error(
+      `${entry.name}: checksum ${sha256} does not match ${entry.sha256 ?? '(none recorded; run with --update)'}.`,
+    );
+  return file;
+}
+
+async function filesOf(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.ts'))
+    .map((entry) => path.join(entry.parentPath, entry.name));
+}
+
+async function compileEntry(entry: Entry): Promise<Result> {
+  const file = await download(entry);
+  const directory = path.join(OUTPUT, entry.name);
+  await rm(directory, { recursive: true, force: true });
+  const config = resolveConfig(
+    {
+      spec: {
+        version: 'auto',
+        input: file,
+      },
+      output: { directory },
+      features: { reactQuery: true, validation: { library: 'zod', request: true } },
+      types: { dates: 'Date' },
+    },
+    { root: path.dirname(file) },
+  );
+  const result = await runGeneration({ config });
+  const diagnostics: Record<string, number> = {};
+  for (const diagnostic of result.diagnostics) {
+    const key = `${diagnostic.severity} ${diagnostic.code}`;
+    diagnostics[key] = (diagnostics[key] ?? 0) + 1;
+  }
+  const sorted = Object.fromEntries(
+    Object.entries(diagnostics).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  let typeErrors: number | null = null;
+  if (check && result.ok) {
+    const problems = typecheck(await filesOf(directory), BROWSER);
+    typeErrors = problems.length;
+    for (const problem of problems.slice(0, 5)) console.log(`    ${problem}`);
+  }
+  return {
+    version: result.ir?.specVersionRaw ?? '',
+    ok: result.ok,
+    operations: result.ir?.operations.length ?? 0,
+    models: result.project?.models.length ?? 0,
+    files: result.files.length,
+    diagnostics: sorted,
+    typeErrors,
+  };
+}
+
+/** Differences between a baseline result and a new one, as readable lines. */
+function differences(before: Result | undefined, after: Result): string[] {
+  if (before === undefined) return ['not in the baseline'];
+  const lines: string[] = [];
+  for (const key of ['version', 'ok', 'operations', 'models', 'files'] as const) {
+    if (before[key] !== after[key])
+      lines.push(`${key}: ${String(before[key])} → ${String(after[key])}`);
+  }
+  if (after.typeErrors !== null && before.typeErrors !== after.typeErrors)
+    lines.push(`type errors: ${String(before.typeErrors)} → ${after.typeErrors}`);
+  const codes = new Set([...Object.keys(before.diagnostics), ...Object.keys(after.diagnostics)]);
+  for (const code of [...codes].sort()) {
+    const was = before.diagnostics[code] ?? 0;
+    const now = after.diagnostics[code] ?? 0;
+    if (was !== now) lines.push(`${code}: ${was} → ${now}`);
+  }
+  return lines;
+}
+
+if (!existsSync(path.join(ROOT, 'assets', 'runtime', 'client.js'))) await buildRuntimeTemplates();
+
+const results: Record<string, Result> = {};
+let failures = 0;
+console.log(
+  '| Document | Version | Operations | Models | Files | Errors | Warnings | Type errors | Time |',
+);
+console.log('| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |');
+for (const entry of selected) {
+  const started = performance.now();
+  let result: Result;
+  try {
+    result = await compileEntry(entry);
+  } catch (error) {
+    failures++;
+    console.log(
+      `| ${entry.name} | crashed: ${error instanceof Error ? error.message : String(error)} |`,
+    );
+    continue;
+  }
+  results[entry.name] = result;
+  const count = (severity: string): number =>
+    Object.entries(result.diagnostics)
+      .filter(([key]) => key.startsWith(`${severity} `))
+      .reduce((sum, [, value]) => sum + value, 0);
+  console.log(
+    `| ${entry.name} | ${result.version} | ${result.operations} | ${result.models} | ${result.files} | ${count('error')} | ${count('warning')} | ${result.typeErrors ?? '–'} | ${Math.round(performance.now() - started)} ms |`,
+  );
+  const internal = result.diagnostics['error internal/error'] ?? 0;
+  const changed = differences(baseline[entry.name], result);
+  if (internal > 0 || (result.typeErrors ?? 0) > 0) failures++;
+  else if (changed.length > 0 && !update) {
+    failures++;
+    for (const line of changed) console.log(`    ${line}`);
+  }
+}
+
+if (update) {
+  const merged = { ...baseline, ...results };
+  const ordered = Object.fromEntries(
+    list.documents.flatMap((e) => (e.name in merged ? [[e.name, merged[e.name]]] : [])),
+  );
+  await writeFile(BASELINE, `${JSON.stringify(ordered, null, 2)}\n`);
+  await writeFile(LIST, `${JSON.stringify(list, null, 2)}\n`);
+  console.log(
+    `\nUpdated ${path.relative(ROOT, BASELINE)} and checksums in ${path.relative(ROOT, LIST)}.`,
+  );
+}
+if (failures > 0) {
+  console.error(
+    `\n${failures} document${failures === 1 ? '' : 's'} crashed, produced type errors or changed diagnostics.${update ? '' : ' If the change is intended, run with --update.'}`,
+  );
+  process.exitCode = 1;
+}

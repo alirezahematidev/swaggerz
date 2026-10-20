@@ -5,11 +5,12 @@
   "scripts": {
     "generate": "swaggerz generate",
     "start": "node src/index.js",
-    "check": "tsc -p jsconfig.json"
+    "check": "tsc -p jsconfig.json",
+    "dashboard": "swaggerz dashboard"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "swaggerz": "file:../..",
+    "swaggerz": "workspace:*",
     "typescript": "~6.0.3"
   }
 }

@@ -1,6 +1,13 @@
 import { existsSync, watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 
+/**
+ * File systems on Windows and macOS are usually case-insensitive: a path from the config may
+ * differ in case from the name the platform watcher reports.
+ */
+const caseInsensitive = process.platform === 'win32' || process.platform === 'darwin';
+const fold = (file: string): string => (caseInsensitive ? file.toLowerCase() : file);
+
 export interface FileWatcherOptions {
   /**
    * Called with the changed files (sorted) once no further change arrived for `debounceMs`. Calls
@@ -91,13 +98,14 @@ export class FileWatcher {
 
   #onEvent(directory: string, name: string | null): void {
     if (this.#closed) return;
-    const changed = name === null ? undefined : path.join(directory, name);
+    const changed = name === null ? undefined : fold(path.join(directory, name));
     for (const target of this.#targets) {
+      const folded = fold(target);
       // The file itself, a directory on the way to it (created or removed), or an unnamed event.
       if (
         changed === undefined
-          ? path.dirname(target) === directory
-          : target === changed || target.startsWith(`${changed}${path.sep}`)
+          ? fold(path.dirname(target)) === fold(directory)
+          : folded === changed || folded.startsWith(`${changed}${path.sep}`)
       ) {
         this.#pending.add(target);
       }

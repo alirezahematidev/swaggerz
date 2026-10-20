@@ -18,8 +18,9 @@ export function filterOperations(
     .filter((t) => t !== '');
   return operations.filter((op) => {
     if (filter.methods.length > 0 && !filter.methods.includes(op.method)) return false;
-    if (filter.tag !== '' && !(op.tags.length === 0 ? ['default'] : op.tags).includes(filter.tag))
-      return false;
+    // A parent tag (OpenAPI 3.2) also matches the operations of the tags nested under it.
+    const tags = [...(op.tags.length === 0 ? ['default'] : op.tags), ...(op.tagAncestors ?? [])];
+    if (filter.tag !== '' && !tags.includes(filter.tag)) return false;
     if (filter.deprecated === 'only' && !op.deprecated) return false;
     if (filter.deprecated === 'hide' && op.deprecated) return false;
     if (terms.length === 0) return true;

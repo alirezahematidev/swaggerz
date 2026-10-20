@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { SwaggerzError } from '../diagnostics/bag.ts';
 import { TOOL_NAME } from '../meta.ts';
 import { FileWatcher } from '../utils/file-watcher.ts';
+import { isLoopback } from '../utils/net.ts';
+import { RemoteWatcher } from '../loader/remote-watcher.ts';
 import type { ServerEvent } from './api-types.ts';
 import { DashboardState } from './state.ts';
 
@@ -64,11 +66,7 @@ const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'cache-control': 'no-store',
 };
 
-export function isLoopback(host: string): boolean {
-  return (
-    host === 'localhost' || host === '::1' || host === '[::1]' || /^127(\.\d{1,3}){3}$/.test(host)
-  );
-}
+export { isLoopback };
 
 /** The HTML shell. It contains no specification data and no inline scripts or styles. */
 function indexHtml(nonce: string): string {
@@ -205,12 +203,27 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   };
 
   let watcher: FileWatcher | undefined;
+  let remote: RemoteWatcher | undefined;
   const watchFiles = (): void => {
     if (watcher === undefined) return;
-    const { sources, manifest } = state.watchTargets();
+    const { sources, manifest, remote: polled, interval } = state.watchTargets();
     watcher.set([...sources, manifest]);
-    state.setWatching(sources);
+    remote?.set(polled, interval);
+    state.setWatching([...sources, ...polled.map((document) => document.url)]);
   };
+  // Reloads from the file watcher, the remote watcher and the Reload button never overlap.
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(task: () => Promise<T>): Promise<T> => {
+    const next = queue.then(task);
+    queue = next.catch(() => undefined);
+    return next;
+  };
+  const reloadAfterChange = (changed: readonly string[]): Promise<void> =>
+    serial(async () => {
+      const outcome = await state.reload('watch', changed);
+      watchFiles();
+      broadcast({ type: 'reload', trigger: 'watch', ...outcome });
+    });
 
   const api: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown>> = {
     'GET /api/overview': () => state.overview(),
@@ -245,12 +258,13 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       }
       return state.generate();
     },
-    'POST /api/reload': async () => {
-      const outcome = await state.reload('manual');
-      watchFiles();
-      broadcast({ type: 'reload', trigger: 'manual', ...outcome });
-      return state.overview();
-    },
+    'POST /api/reload': () =>
+      serial(async () => {
+        const outcome = await state.reload('manual');
+        watchFiles();
+        broadcast({ type: 'reload', trigger: 'manual', ...outcome });
+        return state.overview();
+      }),
   };
 
   const assets = assetIndex();
@@ -375,9 +389,23 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
           broadcast({ type: 'output', revision: state.outputChanged() });
           return;
         }
-        const outcome = await state.reload('watch', sources);
-        watchFiles();
-        broadcast({ type: 'reload', trigger: 'watch', ...outcome });
+        await reloadAfterChange(sources);
+      },
+    });
+    remote = new RemoteWatcher({
+      onChange: reloadAfterChange,
+      onError: (url, error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        broadcast({
+          type: 'remote',
+          revision: state.remoteFailed(url, message),
+          url,
+          reachable: false,
+          error: message,
+        });
+      },
+      onRecover: (url) => {
+        broadcast({ type: 'remote', revision: state.remoteRecovered(url), url, reachable: true });
       },
     });
     watchFiles();
@@ -390,7 +418,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     state,
     close: async () => {
       clearInterval(heartbeat);
-      await watcher?.close();
+      await Promise.all([watcher?.close(), remote?.close()]);
       for (const client of clients) client.end();
       clients.clear();
       await new Promise<void>((resolve, reject) => {

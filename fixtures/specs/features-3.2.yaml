@@ -1,0 +1,356 @@
+openapi: 3.2.0
+# The document's own URI: relative references resolve against it (see features-3.2-shared.yaml).
+$self: https://api.example.com/specs/features.yaml
+info:
+  title: OpenAPI 3.2 features
+  version: 1.0.0
+servers:
+  - url: https://api.example.com/v1
+    name: production
+    description: Production
+security:
+  - bearerAuth: []
+tags:
+  - name: pets
+    summary: Pets
+    description: Every pet.
+    kind: nav
+  - name: cats
+    summary: Cats
+    parent: pets
+    kind: nav
+  - name: documents
+    kind: nav
+  - name: admin
+    kind: audience
+  - name: stray
+    parent: missing
+paths:
+  /pets:
+    # QUERY: a safe, idempotent request with a body (OpenAPI 3.2).
+    query:
+      operationId: searchPets
+      tags: [pets]
+      summary: Searches pets with a query document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PetQuery'
+      responses:
+        '200':
+          summary: Matching pets
+          description: The pets that match the query.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+        '422':
+          summary: Invalid query
+          content:
+            application/problem+json:
+              $ref: '#/components/mediaTypes/Problem'
+    get:
+      operationId: listPets
+      tags: [pets]
+      parameters:
+        # The whole query string as one form-encoded object.
+        - name: filter
+          in: querystring
+          content:
+            application/x-www-form-urlencoded:
+              schema:
+                $ref: '#/components/schemas/PetFilter'
+              encoding:
+                tags:
+                  explode: false
+              examples:
+                byName:
+                  dataValue: { name: Tom, tags: [a, b] }
+                  serializedValue: name=Tom&tags=a,b
+      responses:
+        '200':
+          description: Pets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+  /pets/{petId}:
+    parameters:
+      - name: petId
+        in: path
+        required: true
+        schema:
+          type: integer
+    get:
+      operationId: getPet
+      tags: [cats]
+      parameters:
+        - name: session
+          in: cookie
+          style: cookie
+          schema:
+            type: object
+            properties:
+              id:
+                type: string
+              theme:
+                type: string
+      responses:
+        '200':
+          description: The pet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '404':
+          description: Not found.
+          content:
+            application/problem+json:
+              $ref: '#/components/mediaTypes/Problem'
+  /documents/{documentId}:
+    parameters:
+      - name: documentId
+        in: path
+        required: true
+        schema:
+          type: string
+    # Methods without a Path Item field, sent exactly as spelled.
+    additionalOperations:
+      COPY:
+        operationId: copyDocument
+        tags: [documents]
+        parameters:
+          - name: Destination
+            in: header
+            required: true
+            schema:
+              type: string
+        responses:
+          '201':
+            description: Copied.
+            content:
+              application/json:
+                schema:
+                  $ref: '#/components/schemas/Document'
+    get:
+      operationId: getDocument
+      tags: [documents]
+      responses:
+        '200':
+          description: The document, with its owner from another document.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Document'
+  /search:
+    get:
+      operationId: searchDocuments
+      tags: [documents]
+      parameters:
+        # A JSON document as the whole query string.
+        - name: query
+          in: querystring
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [text]
+                properties:
+                  text:
+                    type: string
+                  limit:
+                    type: integer
+      responses:
+        '200':
+          description: Matches.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Document'
+  /events:
+    get:
+      operationId: streamEvents
+      tags: [admin]
+      summary: Server-sent events.
+      security:
+        - '#/components/securitySchemes/deviceAuth': [events:read]
+      responses:
+        '200':
+          description: A stream of events.
+          content:
+            text/event-stream:
+              itemSchema:
+                type: object
+                required: [data]
+                properties:
+                  event:
+                    type: string
+                  data:
+                    type: string
+                    contentMediaType: application/json
+                    contentSchema:
+                      $ref: '#/components/schemas/Event'
+                  id:
+                    type: string
+                  retry:
+                    type: integer
+                    minimum: 0
+  /audit:
+    get:
+      operationId: exportAudit
+      tags: [admin]
+      responses:
+        '200':
+          description: Audit entries as JSON Lines.
+          content:
+            application/jsonl:
+              itemSchema:
+                $ref: '#/components/schemas/AuditEntry'
+webhooks:
+  petAdopted:
+    post:
+      parameters:
+        - name: delivery
+          in: querystring
+          content:
+            application/x-www-form-urlencoded:
+              schema:
+                type: object
+                properties:
+                  attempt:
+                    type: integer
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Pet'
+      responses:
+        '204':
+          description: Received.
+components:
+  schemas:
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Cat'
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/OtherPet'
+      discriminator:
+        propertyName: kind
+        mapping:
+          cat: '#/components/schemas/Cat'
+          dog: '#/components/schemas/Dog'
+        defaultMapping: OtherPet
+    Cat:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          const: cat
+        name:
+          type: string
+        indoor:
+          type: boolean
+    Dog:
+      type: object
+      required: [kind, name]
+      properties:
+        kind:
+          const: dog
+        name:
+          type: string
+    OtherPet:
+      type: object
+      required: [name]
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+    PetQuery:
+      type: object
+      properties:
+        name:
+          type: string
+        kinds:
+          type: array
+          items:
+            type: string
+    PetFilter:
+      type: object
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    Document:
+      type: object
+      required: [id, owner]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        # Resolved against $self, read next to this file.
+        owner:
+          $ref: features-3.2-shared.yaml#/components/schemas/Owner
+        # The document's own $self URI points back into this document.
+        related:
+          $ref: https://api.example.com/specs/features.yaml#/components/schemas/PetQuery
+    Event:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+        at:
+          type: string
+          format: date-time
+    AuditEntry:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+        actor:
+          type: string
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+  mediaTypes:
+    Problem:
+      schema:
+        $ref: '#/components/schemas/Problem'
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+    deviceAuth:
+      type: oauth2
+      oauth2MetadataUrl: https://auth.example.com/.well-known/oauth-authorization-server
+      flows:
+        deviceAuthorization:
+          deviceAuthorizationUrl: https://auth.example.com/device
+          tokenUrl: https://auth.example.com/token
+          scopes:
+            events:read: Read events
+    legacyKey:
+      type: apiKey
+      in: header
+      name: X-Legacy-Key
+      deprecated: true

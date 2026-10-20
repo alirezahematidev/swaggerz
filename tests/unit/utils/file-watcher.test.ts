@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -70,5 +70,24 @@ describe('FileWatcher', () => {
     await mkdir(path.join(root, 'out', 'api'), { recursive: true });
     await writeFile(path.join(root, 'out', 'api', '.manifest.json'), '{}');
     expect(await next()).toEqual([path.join(root, 'out', 'api', '.manifest.json')]);
+  });
+
+  it.skipIf(process.platform === 'linux')(
+    'matches a file whose name differs in case on case-insensitive file systems',
+    async () => {
+      const { root, next } = await watching((dir) => [path.join(dir, 'OpenAPI.yaml')]);
+      await writeFile(path.join(root, 'openapi.yaml'), 'a');
+      expect(await next()).toEqual([path.join(root, 'OpenAPI.yaml')]);
+    },
+  );
+
+  it('keeps watching after a file is replaced by a rename, as editors save', async () => {
+    const { root, next } = await watching((dir) => [path.join(dir, 'spec.yaml')]);
+    const file = path.join(root, 'spec.yaml');
+    await writeFile(file, 'a');
+    expect(await next()).toEqual([file]);
+    await writeFile(`${file}.tmp`, 'b');
+    await rename(`${file}.tmp`, file);
+    expect(await next()).toEqual([file]);
   });
 });
