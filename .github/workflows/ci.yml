@@ -26,7 +26,7 @@ jobs:
           - { os: macos-latest, node: 24, lint: false }
           - { os: windows-latest, node: 24, lint: false }
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # pnpm's version comes from `packageManager` in package.json.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
@@ -50,7 +50,7 @@ jobs:
       matrix:
         node: [18, 20, 22, 24]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -73,7 +73,7 @@ jobs:
       matrix:
         runtime: [deno, bun, chromium, firefox, webkit, workerd]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -94,7 +94,7 @@ jobs:
     name: Public API corpus
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -113,7 +113,7 @@ jobs:
     name: Oldest and newest dependencies
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
@@ -131,7 +131,7 @@ jobs:
       matrix:
         node: [22.18.0, 24]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # pnpm's version comes from `packageManager` in package.json.
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
@@ -145,7 +145,7 @@ jobs:
     name: Examples
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
