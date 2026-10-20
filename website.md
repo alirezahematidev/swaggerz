@@ -1,6 +1,6 @@
 # swaggerz docs website — plan
 
-Status: plan, nothing built yet. The site is static, so it can be deployed anywhere later (section 9). It follows the brand in [brand/](brand/README.md) and the dashboard's palette, so the CLI, dashboard, editor extension and website look like one product.
+Status: plan, nothing built yet. The site is static, so it can be deployed anywhere later (section 9). It follows the brand in [brand/](brand/README.md) and the dashboard's palette, so the CLI, dashboard and website look like one product.
 
 ## 1. Goals
 
@@ -135,7 +135,7 @@ Motion is limited to 120–180 ms opacity and transform transitions; `prefers-re
 2. **The twin panel**, large: a petstore YAML on the left, the generated `getPetById.ts` on the right, linked highlighting, with tabs for React Query and Zod output. Real output, generated during the build.
 3. **Spec sheet** instead of feature cards: a two-column definition list (Input · Output · Runtime · Guarantees · Tooling), each line linking to its doc. For example: _Runtime_: dependency-free, fetch or axios, ~N kB for one operation (measured).
 4. **Measured**: the tree-shaking result (bytes for one operation vs. the whole client) and benchmark timings, with the date and commit they were measured on.
-5. **Tools**: the dashboard (real screenshot) and, once it exists, the VS Code extension. Nothing is shown before it ships.
+5. **Tools**: the dashboard (real screenshot) and, once they exist, other tools such as the MCP server. Nothing is shown before it ships.
 6. Footer colophon.
 
 ### Components
@@ -184,7 +184,7 @@ website/
   public/                 fonts, brand files, _headers
 ```
 
-It is a pnpm workspace package next to the root package (and `extension/`, see extension.md). The site builds the core first and uses the local build for every generated page, so docs always describe the code in the same commit.
+It is a pnpm workspace package next to the root package. The site builds the core first and uses the local build for every generated page, so docs always describe the code in the same commit.
 
 ## 9. Deployment (when ready)
 
@@ -206,5 +206,4 @@ It is a pnpm workspace package next to the root package (and `extension/`, see e
 ## 11. Open questions
 
 - Domain name and hosting provider (yours to choose; nothing in the plan depends on which).
-- Whether the VS Code extension's docs live on this site (recommended) or in the extension's README only.
 - Whether `docs/` moves into `website/` entirely after phase 1 (simpler tooling) or stays readable on GitHub (current plan).

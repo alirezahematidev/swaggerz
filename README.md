@@ -40,7 +40,7 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - [Security](#security)
 - [Contributing](#contributing)
 
-Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [React Query](docs/react-query.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover React with TanStack Query, a plain JavaScript Node.js project and custom plugins. Plans for a [VS Code extension](extension.md) and a [docs website](website.md) are in the repository root.
+Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [React Query](docs/react-query.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover React with TanStack Query, a plain JavaScript Node.js project and custom plugins. Proposals for upcoming features ([next.md](next.md)) and the plan for a [docs website](website.md) are in the repository root.
 
 ## Supported specifications
 

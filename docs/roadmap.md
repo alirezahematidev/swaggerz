@@ -31,7 +31,7 @@ Ordered roughly by expected value. None of them is committed.
 - Opt-in `int64` → `bigint` (needs a JSON parser that keeps large integers exact, since `JSON.parse` already loses precision before any conversion).
 - XML request and response serialization (today XML bodies are passed and returned as strings).
 - `$dynamicRef` / `$recursiveRef`.
-- The VS Code extension ([extension.md](../extension.md)) and the docs website ([website.md](../website.md)).
+- The docs website ([website.md](../website.md)). More detailed proposals are in [next.md](../next.md).
 - More integrations as optional generators: Vue Query, Svelte Query, SWR, Valibot.
 - Incremental compilation in watch mode (today the whole specification is recompiled; only changed files are written).
 - A stable, documented IR (currently experimental, see [plugins](plugins.md#stability)).
