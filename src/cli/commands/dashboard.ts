@@ -34,6 +34,11 @@ export const dashboardCommand: Command = {
         description: 'Port (default: 4400; the next free port is used if taken).',
       },
       open: { type: 'boolean', description: 'Open the dashboard in the default browser.' },
+      'no-watch': {
+        type: 'boolean',
+        description:
+          'Do not reload when the config, specification or output changes (use the Reload button instead).',
+      },
     },
   },
   async run(ctx) {
@@ -52,13 +57,16 @@ export const dashboardCommand: Command = {
       ...(configFile === undefined ? {} : { configFile }),
       ...(host === undefined ? {} : { host }),
       ...(port === undefined ? {} : { port }),
+      watch: !flag(ctx, 'no-watch'),
     });
     const { reporter } = ctx;
     reporter.json({ ok: true, url: server.url });
     reporter.success(`Dashboard running at ${reporter.paint(server.url, 'cyan')}`);
     reporter.log(
       reporter.paint(
-        'The link contains a session token; keep it private. Press Ctrl+C to stop.',
+        flag(ctx, 'no-watch')
+          ? 'The link contains a session token; keep it private. Press Ctrl+C to stop.'
+          : 'Open pages update when the config, specification or output changes. The link contains a session token; keep it private. Press Ctrl+C to stop.',
         'dim',
       ),
     );

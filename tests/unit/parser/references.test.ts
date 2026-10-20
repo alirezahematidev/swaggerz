@@ -64,7 +64,10 @@ describe('schema resources ($id)', () => {
     const item = parsed.schema('Item').schema;
     expect(
       item.kind === 'object' && item.properties.find((p) => p.name === 'variants')?.schema,
-    ).toMatchObject({ kind: 'array', items: { target: '#/components/schemas/Item/$defs/Variant' } });
+    ).toMatchObject({
+      kind: 'array',
+      items: { target: '#/components/schemas/Item/$defs/Variant' },
+    });
   });
 });
 

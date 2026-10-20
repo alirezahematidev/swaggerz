@@ -9,7 +9,7 @@
 Each example uses the local checkout of swaggerz (`"swaggerz": "file:../.."`). Build it once, then run an example:
 
 ```sh
-yarn install && yarn build     # in the repository root
+pnpm install && pnpm build     # in the repository root
 cd examples/react-query
 npm install
 npm run generate               # writes src/generated/api

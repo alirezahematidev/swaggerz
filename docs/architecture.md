@@ -13,7 +13,9 @@ Reference resolution     src/loader/store  external documents crawled under a se
     ↓
 Version-specific parser  src/spec/{swagger2,openapi3}  + schema dialects (swagger2, oas30, oas31)
     ↓
-Normalized IR            src/ir            ApiDocument: operations, schemas, security, provenance
+Normalized IR            src/ir            ApiDocument: operations, webhooks, schemas, security, provenance
+    ↓
+Read/write split         src/analysis/read-write  request-side model variants for readOnly/writeOnly (types.readWrite)
     ↓
 Semantic analysis        src/analysis      dependency graph, naming, symbol table, module layout (ProjectModel)
     ↓
@@ -48,10 +50,12 @@ There are no runtime import cycles between these modules. The dashboard and its 
 
 ## The intermediate representation
 
-`src/ir/types.ts` defines `ApiDocument`. It is the boundary between "understanding a specification" and "producing code": generators never read raw documents.
+`src/ir/types.ts` defines `ApiDocument`, versioned by `IR_VERSION` (bumped whenever its shape changes). It is the boundary between "understanding a specification" and "producing code": generators never read raw documents.
 
 - **Operations** (`OperationIR`) have a stable `key` (`get /pets/{id}`), merged path and operation parameters, a request body with all media types, responses sorted by status, effective security, servers, tags, deprecation, external docs, vendor extensions and a `source` reference.
 - **Schemas** (`SchemaIR`) are a closed union of kinds: `ref`, `string`, `number`, `integer`, `boolean`, `null`, `enum` (also `const`), `array` (with tuple `prefixItems`), `object` (properties, additional properties, allOf-polymorphism discriminator), `union` (`oneOf`/`anyOf`/type arrays, with discriminator mapping), `intersection` (`allOf`), `binary`, `unknown`, `never`. Every node carries metadata (`nullable`, `description`, `deprecated`, `readOnly`, `default`, `examples`, `format`, `extensions`).
+- **Webhooks** (`WebhookIR`, OpenAPI 3.1) and **callbacks** (`OperationIR.callbacks`) reuse the operation shape; they are generated as types only.
+- **Assertions** (`SchemaMeta.assertions`): `not`, conditionals and dependent schemas, kept for validators even though types cannot express them.
 - **Named schemas** (`SchemaDefinition`) are every `$ref` target and every component. Ids are document-relative (`#/components/schemas/Pet`, `schemas/team.yaml#`), so output never depends on absolute paths. Pure `$ref` components collapse into aliases of their target.
 - **Provenance**: operations, parameters, responses and definitions keep `{ file, pointer }`. Diagnostics carry the same, and line/column numbers are computed lazily by re-parsing only documents that have diagnostics (`loader/locate.ts`).
 

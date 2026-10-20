@@ -1,8 +1,13 @@
-# swaggerz
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo-dark.svg">
+    <img src="brand/logo.svg" alt="swaggerz" width="300">
+  </picture>
+</h1>
 
 Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0**, **OpenAPI 3.0** and **OpenAPI 3.1** specifications.
 
-- **One module per operation.** Applications bundle only the endpoints they import. Measured with esbuild, Rollup and Vite: one operation of a 1,000-operation client costs ~11 KB (shared runtime) + ~0.2 KB per extra operation.
+- **One module per operation.** Applications bundle only the endpoints they import. Measured with esbuild, Rollup and Vite: one operation of a 1,000-operation client costs ~12 KB (shared runtime) + ~0.2 KB per extra operation.
 - **TypeScript or JavaScript.** Strict TypeScript, or plain ES modules with JSDoc and optional `.d.ts` files — same runtime behavior.
 - **Fetch or axios.** Interchangeable transports behind one contract; bring your own axios instance and interceptors.
 - **Optional TanStack Query v5 hooks**, query/mutation option factories, key factories, infinite queries and invalidation — never imported unless enabled.
@@ -10,9 +15,10 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - **Self-contained output.** The generated client has no runtime dependency on this package.
 - **Safe, deterministic regeneration.** Identical input produces identical output; unchanged files are not rewritten; files you own are never overwritten.
 - **Local dashboard** to explore operations, models, dependency graphs, static usage in your code and generation diffs.
-- **Plugin API** with typed lifecycle hooks.
+- **Accurate types for what specs actually say**: separate request and response models for `readOnly`/`writeOnly`, every request media type, declared `304`s, per-operation servers, webhook and callback handler types, optional `Date` conversion.
+- **Plugin API** with typed lifecycle hooks; plugins can be referenced by module from any config format.
 
-> **Package name.** The package is configured as `swaggerz` in `package.json`. The unscoped `swaggerz` name is already taken on the npm registry, so it must be published under a scope (for example `@your-scope/swaggerz`) — the name is read from `package.json` everywhere, so only that file changes. The CLI command stays `swaggerz`.
+> **Status: pre-release.** swaggerz has not been published to npm yet, so the install commands below will work once the first version is released ([CONTRIBUTING.md](CONTRIBUTING.md#releases)).
 
 ## Contents
 
@@ -34,15 +40,15 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - [Security](#security)
 - [Contributing](#contributing)
 
-Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [React Query](docs/react-query.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover React with TanStack Query, a plain JavaScript Node.js project and custom plugins.
+Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [React Query](docs/react-query.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover React with TanStack Query, a plain JavaScript Node.js project and custom plugins. Plans for a [VS Code extension](extension.md) and a [docs website](website.md) are in the repository root.
 
 ## Supported specifications
 
-| Family  | Versions | Notes                                                                                                                                        |
-| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Swagger | 2.0      | `body`/`formData` parameters, `collectionFormat`, `consumes`/`produces`, `securityDefinitions`, `x-nullable`, `discriminator`                |
-| OpenAPI | 3.0.x    | `nullable`, `oneOf`/`anyOf`/`allOf`, discriminators, `content` parameters, `style`/`explode`, callbacks reported as skipped                  |
-| OpenAPI | 3.1.x    | JSON Schema 2020-12 types (`type: [..., "null"]`), `const`, `prefixItems`, `$ref` siblings, `$defs`, `$anchor`, webhooks reported as skipped |
+| Family  | Versions | Notes                                                                                                                                                                                         |
+| ------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Swagger | 2.0      | `body`/`formData` parameters, `collectionFormat`, `consumes`/`produces`, `securityDefinitions`, `x-nullable`, `discriminator`                                                                 |
+| OpenAPI | 3.0.x    | `nullable`, `oneOf`/`anyOf`/`allOf`, discriminators, `content` parameters, `style`/`explode`, callbacks, operation `servers`                                                                  |
+| OpenAPI | 3.1.x    | JSON Schema 2020-12 types (`type: [..., "null"]`), `const`, `prefixItems`, `$ref` siblings, `$defs`, `$anchor`, `$id` scopes, webhooks, `if`/`then`/`else` and `dependent*` (enforced by Zod) |
 
 The configured `spec.version` is enforced: a 3.0 document is rejected when the config says `'3.1'` instead of being reinterpreted. Each version has its own adapter; all of them produce the same normalized intermediate representation. Features that cannot be represented are reported as diagnostics — see [compatibility](docs/compatibility.md) for the full matrix.
 
@@ -69,7 +75,7 @@ The generated client needs no runtime dependency on `swaggerz`. Depending on the
 ## Quick start
 
 ```sh
-npx swaggerz init        # creates swaggerz.config.ts (detects your spec file and its version)
+npx swaggerz init        # creates swaggerz.config.ts (detects your spec file and its version; --format js|json|yaml)
 npx swaggerz generate    # writes the client to src/generated/api
 ```
 
@@ -116,7 +122,20 @@ try {
 
 ## Configuration
 
-`defineConfig()` gives full autocomplete and type checking. The config may also export a function `(env) => config` (sync or async), where `env.command` is the CLI command being run. All options are validated strictly — unknown keys are rejected with a "did you mean" hint.
+The config file can be TypeScript, JavaScript, JSON or YAML (`swaggerz.config.{ts,mts,cts,js,mjs,cjs,json,yaml,yml}`). JSON and YAML configs get completion and validation in editors from the bundled JSON Schema:
+
+```yaml
+# yaml-language-server: $schema=./node_modules/swaggerz/config.schema.json
+spec:
+  version: '3.1'
+  input: ./openapi.yaml
+features:
+  reactQuery: true
+plugins:
+  - ./plugins/drop-internal.mjs
+```
+
+In TypeScript and JavaScript, `defineConfig()` gives full autocomplete and type checking. The config may also export a function `(env) => config` (sync or async), where `env.command` is the CLI command being run. All options are validated strictly — unknown keys are rejected with a "did you mean" hint.
 
 | Option                                                          | Default                                        | Description                                                                                |
 | --------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -134,30 +153,35 @@ try {
 | `output.barrel`                                                 | `true`                                         | Emit `index` barrels                                                                       |
 | `output.groupBy`                                                | `'tag'`                                        | Operation directories by first tag, or `'none'`                                            |
 | `output.models`                                                 | `'all'`                                        | `'all'` or only `'used'` models                                                            |
+| `output.webhooks`                                               | `true`                                         | Payload and handler types for webhooks and callbacks                                       |
 | `output.banner`                                                 | —                                              | Extra header comment for every file                                                        |
 | `client.adapter`                                                | `'fetch'`                                      | `'fetch'` or `'axios'`                                                                     |
 | `client.baseUrl`                                                | first server                                   | Compiled default; change at runtime with `client.setConfig()`                              |
+| `client.operationServers`                                       | `true`                                         | Send operations with their own `servers` to that server                                    |
 | `client.headers`, `client.timeout`, `client.includeCredentials` | —                                              | Client defaults                                                                            |
 | `client.responseStyle`                                          | `'data'`                                       | `'data'` resolves with the body; `'full'` with `{ data, status, headers }`                 |
 | `features.reactQuery`                                           | `false`                                        | `true` or `{ queryMethods, infinite, invalidates }`                                        |
 | `features.validation`                                           | `false`                                        | `'zod'` or `{ library: 'zod', response, request }`                                         |
 | `features.jsdoc`                                                | `true`                                         | Generate documentation comments                                                            |
 | `naming.operations` / `models` / `files` / `parameters`         | camelCase / PascalCase / kebab-case / preserve | Naming conventions                                                                         |
+| `naming.inputSuffix`                                            | `'Input'`                                      | Suffix of request-side model variants (`PetInput`)                                         |
 | `types.enums`                                                   | `'union'`                                      | `'union'` literal types, or `'const'` objects as well                                      |
 | `types.readonlyProperties`                                      | `true`                                         | `readonly` for `readOnly` properties                                                       |
+| `types.readWrite`                                               | `'split'`                                      | Separate request (`…Input`) and response models, or `'merged'`                             |
+| `types.dates`                                                   | `'string'`                                     | `'Date'` types `date`/`date-time` as `Date` and converts at runtime                        |
 | `dashboard`                                                     | `127.0.0.1:4400`                               | `host`, `port`, `allowNetworkAccess`, `usage.include`/`exclude`                            |
-| `plugins`, `hooks`                                              | —                                              | See [plugins](#plugins-and-customization)                                                  |
+| `plugins`, `hooks`                                              | —                                              | Plugin objects or module references; see [plugins](#plugins-and-customization)             |
 
 Environment variables override the config file: `SWAGGERZ_SPEC_INPUT`, `SWAGGERZ_SPEC_VERSION`, `SWAGGERZ_OUTPUT_DIRECTORY`, `SWAGGERZ_OUTPUT_LANGUAGE`, `SWAGGERZ_CLIENT_ADAPTER`, `SWAGGERZ_CLIENT_BASE_URL`. The full reference is in [docs/configuration.md](docs/configuration.md).
 
-Config files are **trusted project code** and run with the permissions of the CLI. TypeScript configs are imported with Node's own loader (no `eval`), so they may only use erasable TypeScript syntax (no `enum`, `namespace` or parameter properties); relative imports need explicit extensions.
+Config files (and the plugins they reference) are **trusted project code** and run with the permissions of the CLI. TypeScript configs are imported with Node's own loader (no `eval`), so they may only use erasable TypeScript syntax (no `enum`, `namespace` or parameter properties); relative imports need explicit extensions.
 
 ## CLI
 
 ```
 swaggerz <command> [options]
 
-  init        Create a swaggerz.config.ts file for this project.
+  init        Create a config file for this project (TypeScript, JavaScript, JSON or YAML).
   generate    Generate the API client from the specification.  (alias: gen)
   validate    Validate config and spec and generate in memory, without writing files.
   inspect     Print a summary of the operations and models that would be generated.
@@ -166,20 +190,20 @@ swaggerz <command> [options]
   doctor      Check Node.js, config, spec, output directory and dependency versions.
 ```
 
-| Option                                                                                        | Commands            | Description                                                                               |
-| --------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------- |
-| `-c, --config <path>`                                                                         | all                 | Config file (default: `swaggerz.config.{ts,mts,cts,js,mjs,cjs}` in the working directory) |
-| `--cwd <dir>`                                                                                 | all                 | Working directory                                                                         |
-| `--json`                                                                                      | all                 | One machine-readable JSON document on stdout                                              |
-| `--verbose` / `-q, --quiet`                                                                   | all                 | Show notes and timings / only errors                                                      |
-| `--color` / `--no-color`                                                                      | all                 | Force or disable color (`NO_COLOR` is respected)                                          |
-| `-w, --watch`                                                                                 | `generate`          | Regenerate when the spec, any referenced file or the config changes                       |
-| `--dry-run`                                                                                   | `generate`, `clean` | Show changes without writing                                                              |
-| `--force`                                                                                     | `generate`, `clean` | Overwrite files the generator does not own; delete hand-edited generated files            |
-| `--no-clean`                                                                                  | `generate`          | Keep generated files that are no longer produced                                          |
-| `--operations`, `--models`, `--filter <text>`                                                 | `inspect`           | Narrow the listing                                                                        |
-| `--host`, `--port`, `--open`                                                                  | `dashboard`         | Bind address and browser opening                                                          |
-| `--spec`, `--spec-version`, `--output`, `--language`, `--adapter`, `--react-query`, `--force` | `init`              | Initial values                                                                            |
+| Option                                                                                                    | Commands            | Description                                                                                             |
+| --------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`                                                                                     | all                 | Config file (default: `swaggerz.config.{ts,mts,cts,js,mjs,cjs,json,yaml,yml}` in the working directory) |
+| `--cwd <dir>`                                                                                             | all                 | Working directory                                                                                       |
+| `--json`                                                                                                  | all                 | One machine-readable JSON document on stdout                                                            |
+| `--verbose` / `-q, --quiet`                                                                               | all                 | Show notes and timings / only errors                                                                    |
+| `--color` / `--no-color`                                                                                  | all                 | Force or disable color (`NO_COLOR` is respected)                                                        |
+| `-w, --watch`                                                                                             | `generate`          | Regenerate when the spec, any referenced file or the config changes                                     |
+| `--dry-run`                                                                                               | `generate`, `clean` | Show changes without writing                                                                            |
+| `--force`                                                                                                 | `generate`, `clean` | Overwrite files the generator does not own; delete hand-edited generated files                          |
+| `--no-clean`                                                                                              | `generate`          | Keep generated files that are no longer produced                                                        |
+| `--operations`, `--models`, `--filter <text>`                                                             | `inspect`           | Narrow the listing                                                                                      |
+| `--host`, `--port`, `--open`, `--no-watch`                                                                | `dashboard`         | Bind address, browser opening, live reload off                                                          |
+| `--spec`, `--spec-version`, `--output`, `--language`, `--adapter`, `--react-query`, `--format`, `--force` | `init`              | Initial values; `--format ts\|js\|json\|yaml` picks the config format                                   |
 
 Exit codes: `0` success · `1` failed checks, invalid specification or generation errors · `2` invalid usage or configuration · `3` internal error.
 
@@ -192,8 +216,9 @@ src/generated/api/
 ├── index.ts                 # optional barrel: client, runtime exports, every model and operation
 ├── client.ts                # the default client instance and RequestOptions
 ├── runtime/                 # transport contract, serialization, errors (emitted, no dependency)
-├── models/pet.ts            # one module per model
+├── models/pet.ts            # one module per model (plus pet-input.ts for readOnly/writeOnly)
 ├── pet/get-pet-by-id.ts     # one module per operation, grouped by tag
+├── webhooks/, callbacks/     # payload and handler types
 ├── react-query/             # only when enabled (separate barrel)
 ├── zod/                     # only when enabled (separate barrel)
 └── .swaggerz-manifest.json      # files owned by the generator (with content hashes)
@@ -254,8 +279,13 @@ Highlights (details in [docs/generated-code.md](docs/generated-code.md)):
 
 - **Parameters** of every location (path, query, header, cookie) and the request body are one `params` object. Optional parameters accept `undefined`. Property names keep wire names by default (`params['X-Request-ID']`); `naming.parameters: 'camelCase'` converts them. Name clashes between locations are resolved (`id` and `queryId`).
 - **Serialization** follows the spec: `form`/`simple`/`label`/`matrix`/`spaceDelimited`/`pipeDelimited`/`deepObject`, `explode`, `allowReserved`, JSON `content` parameters, JSON/urlencoded/multipart/binary/text bodies.
-- **Responses** are typed from the success (2xx) responses; bodiless responses resolve with `undefined`/`void`. Binary responses are `Blob`s.
-- **Errors**: non-2xx responses reject with `ApiError<Body>` (`status`, `body`, `headers`, `response`, `operationId`); network failures, timeouts, malformed JSON and validation failures reject with `RequestError` (`kind`). Aborting with an `AbortSignal` rethrows the original abort error.
+- **Request bodies** with several media types take a `contentType` discriminator (`{ contentType: 'application/x-www-form-urlencoded', body }`), each with its own body type; XML and other raw media types take an already serialized body.
+- **Read and write models**: request bodies use `…Input` variants without `readOnly` properties, responses leave out `writeOnly` properties (`types.readWrite`).
+- **Responses** are typed from the success (2xx) and declared 3xx responses; bodiless responses (`204`, `304`) resolve with `undefined`/`void`. Binary responses are `Blob`s.
+- **Dates**: with `types.dates: 'Date'`, `date` and `date-time` values are `Date` objects in both directions.
+- **Servers**: operations and paths with their own `servers` are sent there (`client.operationServers`).
+- **Webhooks and callbacks**: payload, request, response and handler types to annotate your own route handlers.
+- **Errors**: other responses reject with `ApiError<Body>` (`status`, `body`, `headers`, `response`, `operationId`); network failures, timeouts, malformed JSON and validation failures reject with `RequestError` (`kind`). Aborting with an `AbortSignal` rethrows the original abort error.
 - **Models** are type aliases with documentation from the spec, `readonly` for `readOnly`, discriminated unions (`oneOf` + `discriminator`), narrowed subtypes (allOf inheritance), nullable types, index signatures, tuples and recursion.
 - **Authentication**: `apiKey` (header/query/cookie), HTTP bearer/basic/other, OAuth 2 and OpenID Connect tokens. Requirements are alternatives — the first one whose credentials are all configured is applied.
 
@@ -354,7 +384,7 @@ Query keys contain a static prefix (tag, operation) and **all** request paramete
 features: { validation: { library: 'zod', response: true, request: true } },
 ```
 
-Generates `zod/<model>.ts` (`PetSchema`, …) and validates successful responses (and request bodies when `request: true`) in every operation. Failures reject with `RequestError` (`kind: 'validation'`, `cause` = `ZodError`); invalid request bodies are never sent. Unknown properties are preserved (`z.looseObject`); `additionalProperties: false` is enforced. Formats and patterns are documentation only and are not enforced. Recursive and mutually recursive schemas use Zod 4 getters. Zod is only imported by `zod/` modules and, when validation is enabled, by operations.
+Generates `zod/<model>.ts` (`PetSchema`, …) and validates successful responses (and request bodies when `request: true`) in every operation. Failures reject with `RequestError` (`kind: 'validation'`, `cause` = `ZodError`); invalid request bodies are never sent. Unknown properties are preserved (`z.looseObject`); `additionalProperties: false` is enforced, and so are `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` (which TypeScript types cannot express). Formats and patterns are documentation only, except `date`/`date-time` with `types.dates: 'Date'`, which are checked before conversion. Recursive and mutually recursive schemas use Zod 4 getters. Zod is only imported by `zod/` modules and, when validation is enabled, by operations.
 
 ## Tree-shaking
 
@@ -362,13 +392,13 @@ Each operation and model is its own ES module with no top-level side effects, im
 
 | Bundle                                              |     Size |
 | --------------------------------------------------- | -------: |
-| 1 operation (direct import, esbuild)                |  11.4 KB |
-| 3 operations via the barrel (esbuild)               |  11.8 KB |
-| 3 operations via the barrel (Vite production build) |  15.5 KB |
-| 1 React Query hook, excluding TanStack Query itself |  11.9 KB |
-| Entire client                                       | 214.8 KB |
+| 1 operation (direct import, esbuild)                |  11.9 KB |
+| 3 operations via the barrel (esbuild)               |  12.4 KB |
+| 3 operations via the barrel (Vite production build) |  16.1 KB |
+| 1 React Query hook, excluding TanStack Query itself |  12.5 KB |
+| Entire client                                       | 215.3 KB |
 
-The ~11 KB base is the shared runtime (serialization, errors, client, transport). The tests assert that only the imported operations remain in esbuild, Rollup and Vite bundles.
+The ~12 KB base is the shared runtime (serialization, errors, client, transport). The tests assert that only the imported operations remain in esbuild, Rollup and Vite bundles.
 
 - Importing from the barrel (`./generated/api`) is as tree-shakeable as importing modules directly in Rollup, Vite and esbuild (all three are covered by the bundle tests). webpack is not part of the automated tests: in production mode its `usedExports` analysis and minifier remove unused exports of these side-effect-free modules, and marking the generated directory side-effect free in your package.json (`"sideEffects"`) lets it skip unused modules entirely.
 - Model types cost nothing at runtime. Zod schemas and React Query hooks are separate modules and only bundled when imported.
@@ -411,8 +441,12 @@ npx swaggerz dashboard --open --port 0
 - **Operations** — search by name, operation id, path, description, tag or model; filter by method, tag and deprecation; parameters, bodies, responses, auth, examples, source location and generated code.
 - **Models** — properties, constraints, enums, unions, discriminators, recursion, relations, used-by operations, generated TypeScript/JavaScript/declarations.
 - **Dependencies** — an operation's transitive models with "why it is included" chains, unused, recursive and structurally duplicated models.
-- **Usage** — statically scans `dashboard.usage.include` (default `src`) with the TypeScript compiler API to find which generated operations, hooks and models your code imports. Dynamic imports and escaping namespace objects are reported as _undetermined_, never as unused. Requires `typescript` 5.x or 6.x in your project.
+- **Usage** — statically scans `dashboard.usage.include` (default `src`) with oxc to find which generated operations, hooks and models your code imports (TypeScript, JavaScript, JSX, `require()`, `tsconfig` paths). Dynamic imports and escaping namespace objects are reported as _undetermined_, never as unused. No TypeScript installation needed.
 - **Generate** — preview every create/update/delete with diffs, then write after confirmation.
+
+**Live reload**: while it runs, the dashboard watches the config, the specification (with every local file it references) and the output. Edit the spec or run `swaggerz generate` and open pages update in place, with **New** and **Updated** badges on the operations and models that changed since the dashboard started (they reset on restart). A change that does not parse keeps the last good version on screen with its diagnostics.
+
+Light and dark themes, a <kbd>⌘K</kbd> command palette and layouts down to phone width.
 
 The dashboard reads the same compiled representation as the CLI. It binds to `127.0.0.1` and requires the session token from the printed link for every API call; see [docs/dashboard.md](docs/dashboard.md) for its security model.
 
@@ -458,21 +492,20 @@ Hooks: `beforeParse`, `afterNormalize`, `operationName`, `modelName`, `jsdoc`, `
 | `output/user-file`                                          | A file you created sits where generated code goes; move it, change `output.directory` or pass `--force`                                             |
 | Imports like `./client.js` fail with webpack 4/CRA          | Set `output.importExtension: 'none'`                                                                                                                |
 | Running generated **TypeScript** directly with `node` fails | Node does not map `.js` imports to `.ts`; compile/bundle it, generate JavaScript, or use `importExtension: '.ts'` with `allowImportingTsExtensions` |
-| Usage scan says TypeScript is unavailable                   | Install `typescript` 5.x or 6.x (TypeScript 7 has no JavaScript compiler API)                                                                       |
+| Usage scan says the scanner is unavailable                  | Optional dependencies were skipped (`--omit=optional`, `--no-optional`) or the platform has no oxc binaries; reinstall with optional dependencies   |
 | Cookie parameters are not sent in browsers                  | Browsers forbid the `Cookie` header; the browser sends cookies itself (`includeCredentials: true`)                                                  |
 | `swaggerz doctor`                                           | Checks all of the above in one go                                                                                                                   |
 
 ## Known limitations
 
-- `readOnly`/`writeOnly` properties are not split into separate request and response types; a required `readOnly` property must also be provided in request bodies.
-- `format: date-time` and similar formats are typed as `string`; values are not converted to `Date`. `int64` maps to `number`.
-- `not`, `if`/`then`/`else`, `dependentSchemas` and `$dynamicRef` are ignored with a warning (types may be wider than the schema); validation-only keywords (`propertyNames`, `contains`, …) are noted.
-- Webhooks and callbacks are not generated. Operation- and path-level `servers` are not used for the base URL.
-- When a request body offers several media types, the client uses one (JSON first, then multipart, urlencoded, text, binary). XML bodies are not serialized — pass a string.
-- Only 2xx responses resolve; a declared `304` rejects with `ApiError`.
-- `$id`-based references are resolved for absolute ids; relative references inside nested `$id` scopes resolve against the document.
+- `int64` maps to `number`; values beyond 2^53 lose precision when the response JSON is parsed.
+- XML bodies are not serialized or parsed: requests take an already serialized string (or `Blob`/`ArrayBuffer`), responses return text.
+- `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are enforced by the generated Zod schemas but cannot be expressed in TypeScript types, which may be wider than the schema. `$dynamicRef` and `$recursiveRef` are ignored with a warning.
+- Webhooks and callbacks produce types only; no server or routing code is generated.
 - Watch mode recompiles the whole specification on change (only changed files are written).
-- Usage scanning is static and requires TypeScript 5.x/6.x.
+- Usage scanning is static: it reports what your code imports, not what runs.
+
+Earlier versions of this list included `readOnly`/`writeOnly` handling, `Date` conversion, multiple request media types, `304` responses, operation-level `servers`, webhooks and callbacks, and relative `$id` scopes. These are now supported; see [generated code](docs/generated-code.md).
 
 ## Security
 
@@ -486,7 +519,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `yarn install`, `yarn check` (types, lint, format, tests), add a changeset with `yarn changeset` for user-facing changes.
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `pnpm install`, `pnpm check` (types, oxlint, oxfmt, tests), and [Conventional Commits](https://www.conventionalcommits.org/) messages; releases are cut with release-it and published from CI.
 
 ## License
 

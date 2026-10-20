@@ -1,6 +1,6 @@
 # Configuration reference
 
-The config file is `swaggerz.config.ts` (also `.mts`, `.cts`, `.js`, `.mjs`, `.cjs`) in the working directory, or the file passed with `--config`. Relative paths are resolved from the config file's directory.
+The config file is `swaggerz.config.<ext>` in the working directory, or the file passed with `--config`. TypeScript (`.ts`, `.mts`, `.cts`), JavaScript (`.js`, `.mjs`, `.cjs`), JSON (`.json`) and YAML (`.yaml`, `.yml`) are supported; when several exist, the first in that order is used. `swaggerz init --format ts|js|json|yaml` creates one. Relative paths are resolved from the config file's directory.
 
 ```ts
 import { defineConfig } from 'swaggerz';
@@ -21,7 +21,34 @@ export default defineConfig(async ({ command }) => ({
 }));
 ```
 
-**Loading.** Config files are imported with Node's module loader; TypeScript configs use Node's built-in type stripping (Node.js ≥ 22.18). They are trusted code executed with the CLI's permissions. Only erasable TypeScript syntax is allowed (no `enum`, `namespace`, parameter properties) and relative imports need file extensions.
+## Formats
+
+TypeScript and JavaScript configs get type checking from `defineConfig` and can compute values, export a function and pass plugin objects. JSON and YAML configs hold the same options as plain data; editors validate and complete them through the JSON Schema shipped with the package (`swaggerz/config.schema.json`), which `swaggerz init` references:
+
+```json
+{
+  "$schema": "./node_modules/swaggerz/config.schema.json",
+  "spec": { "version": "3.1", "input": "./openapi.yaml" },
+  "output": { "directory": "./src/generated/api" },
+  "features": { "reactQuery": true },
+  "plugins": [["./plugins/drop-internal.mjs", { "extension": "x-internal" }]]
+}
+```
+
+```yaml
+# yaml-language-server: $schema=./node_modules/swaggerz/config.schema.json
+spec:
+  version: '3.1'
+  input: ./openapi.yaml
+output:
+  directory: ./src/generated/api
+plugins:
+  - ./plugins/add-metadata.mjs
+```
+
+Data configs cannot contain functions, so inline `hooks` are only available in TypeScript and JavaScript; plugins are referenced by module (see [`plugins`](#plugins-and-hooks)). Syntax and validation errors in JSON and YAML configs report the line and column.
+
+**Loading.** TypeScript and JavaScript config files are imported with Node's module loader; TypeScript configs use Node's built-in type stripping (Node.js ≥ 22.18). They are trusted code executed with the CLI's permissions. Only erasable TypeScript syntax is allowed (no `enum`, `namespace`, parameter properties) and relative imports need file extensions.
 
 **Precedence.** Defaults < config file < environment variables < CLI flags (`--no-clean`).
 
@@ -60,19 +87,21 @@ External `$ref`s are resolved according to a policy:
 | `barrel`          | `boolean`                      | `true`                  | `index`, `react-query/index`, `zod/index`.                                                                                                                         |
 | `groupBy`         | `'tag' \| 'none'`              | `'tag'`                 | Operation directories by first tag (`default` when untagged) or a single `operations/` directory.                                                                  |
 | `models`          | `'all' \| 'used'`              | `'all'`                 | `'used'` omits schemas no operation references.                                                                                                                    |
+| `webhooks`        | `boolean`                      | `true`                  | Payload, response and handler types for webhooks (`webhooks/`) and callbacks (`callbacks/`). See [generated code](generated-code.md#webhooks-and-callbacks).       |
 | `banner`          | `string`                       |                         | Additional `//` header lines.                                                                                                                                      |
 | `moduleFormat`    | `'esm'`                        | `'esm'`                 | Reserved.                                                                                                                                                          |
 
 ## `client`
 
-| Option               | Type                     | Default                                                |                                                                                                             |
-| -------------------- | ------------------------ | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| `adapter`            | `'fetch' \| 'axios'`     | `'fetch'`                                              |                                                                                                             |
-| `baseUrl`            | `string`                 | first `servers` entry (variables replaced by defaults) | Compiled into `client.ts`. For environment-specific URLs prefer `client.setConfig({ baseUrl })` at runtime. |
-| `headers`            | `Record<string, string>` | `{}`                                                   | Default headers.                                                                                            |
-| `timeout`            | `number` (ms)            | none                                                   | Default timeout.                                                                                            |
-| `includeCredentials` | `boolean`                | `false`                                                | `credentials: 'include'` (fetch) / `withCredentials` (axios).                                               |
-| `responseStyle`      | `'data' \| 'full'`       | `'data'`                                               | `'full'` resolves with `ApiResponse<Data, Status>` unions.                                                  |
+| Option               | Type                     | Default                                                |                                                                                                                                                        |
+| -------------------- | ------------------------ | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `adapter`            | `'fetch' \| 'axios'`     | `'fetch'`                                              |                                                                                                                                                        |
+| `baseUrl`            | `string`                 | first `servers` entry (variables replaced by defaults) | Compiled into `client.ts`. For environment-specific URLs prefer `client.setConfig({ baseUrl })` at runtime.                                            |
+| `operationServers`   | `boolean`                | `true`                                                 | Operations (or paths) that declare their own `servers` are sent to their first server instead of `baseUrl`. A `baseUrl` passed per request still wins. |
+| `headers`            | `Record<string, string>` | `{}`                                                   | Default headers.                                                                                                                                       |
+| `timeout`            | `number` (ms)            | none                                                   | Default timeout.                                                                                                                                       |
+| `includeCredentials` | `boolean`                | `false`                                                | `credentials: 'include'` (fetch) / `withCredentials` (axios).                                                                                          |
+| `responseStyle`      | `'data' \| 'full'`       | `'data'`                                               | `'full'` resolves with `ApiResponse<Data, Status>` unions.                                                                                             |
 
 ## `features`
 
@@ -84,21 +113,26 @@ External `$ref`s are resolved according to a policy:
 
 ## `naming`
 
-| Option       | Values                                                   | Default      |
-| ------------ | -------------------------------------------------------- | ------------ |
-| `operations` | `camelCase`, `PascalCase`, `snake_case`, `preserve`      | `camelCase`  |
-| `models`     | `PascalCase`, `camelCase`, `snake_case`, `preserve`      | `PascalCase` |
-| `files`      | `kebab-case`, `camelCase`, `PascalCase`, `snake_case`    | `kebab-case` |
-| `parameters` | `preserve` (wire names, quoted when needed), `camelCase` | `preserve`   |
+| Option        | Values                                                   | Default      |
+| ------------- | -------------------------------------------------------- | ------------ |
+| `operations`  | `camelCase`, `PascalCase`, `snake_case`, `preserve`      | `camelCase`  |
+| `models`      | `PascalCase`, `camelCase`, `snake_case`, `preserve`      | `PascalCase` |
+| `files`       | `kebab-case`, `camelCase`, `PascalCase`, `snake_case`    | `kebab-case` |
+| `parameters`  | `preserve` (wire names, quoted when needed), `camelCase` | `preserve`   |
+| `inputSuffix` | any non-empty string                                     | `Input`      |
+
+`inputSuffix` names the request-side variants created by `types.readWrite: 'split'` (`Pet` → `PetInput`).
 
 Operation names come from `operationId`, or from the method and path (`GET /pets/{id}` → `getPetsById`). Collisions get numeric suffixes and a `naming/collision` warning. Use the `operationName`/`modelName` plugin hooks for custom rules.
 
 ## `types`
 
-| Option               | Default   |                                                                                                                                                         |
-| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enums`              | `'union'` | `'const'` additionally emits `export const Status = { Active: 'active', … } as const` (member names from `x-enum-varnames`/`x-enumNames` when present). |
-| `readonlyProperties` | `true`    | `readonly` modifier for `readOnly` properties in response types.                                                                                        |
+| Option               | Default    |                                                                                                                                                                                                                                                                                              |
+| -------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enums`              | `'union'`  | `'const'` additionally emits `export const Status = { Active: 'active', … } as const` (member names from `x-enum-varnames`/`x-enumNames` when present).                                                                                                                                      |
+| `readonlyProperties` | `true`     | `readonly` modifier for `readOnly` properties in response types.                                                                                                                                                                                                                             |
+| `readWrite`          | `'split'`  | `'split'`: models that have `readOnly` or `writeOnly` properties (directly or through the models they contain) get a request variant without `readOnly` properties (`PetInput`), and response types leave out `writeOnly` properties. `'merged'`: one type for both, as in earlier versions. |
+| `dates`              | `'string'` | `'Date'` types `format: date` and `date-time` as `Date`: responses are converted after parsing, request bodies are converted back (`date` → `YYYY-MM-DD` in UTC) before sending. Date parameters (path, query, header, cookie) take `Date` values and are encoded the same way.              |
 
 ## `dashboard`
 
@@ -112,7 +146,11 @@ Operation names come from `operationId`, or from the method and path (`GET /pets
 
 ## `plugins` and `hooks`
 
-`plugins` is an array of [plugins](plugins.md); `hooks` accepts the same hooks inline (it behaves like a plugin named `config.hooks` that runs after the default plugin group).
+`plugins` is an array of [plugins](plugins.md). Each entry is a plugin object, a module reference (`'./plugins/my-plugin.mjs'` or a package name), or a tuple `[reference, options]`. A referenced module's default export is either a plugin object or a factory function called with the options. References are resolved from the config file's directory (relative paths, `file:` URLs and packages, including their `exports`); failures are reported as `config/plugin-load-failed`. `hooks` accepts the same hooks inline (it behaves like a plugin named `config.hooks` that runs after the default plugin group).
+
+## `$schema`
+
+Ignored by swaggerz; lets editors find the JSON Schema in JSON and YAML configs.
 
 ## Environment variables
 

@@ -32,6 +32,22 @@ export default defineConfig({
 });
 ```
 
+## Referencing plugins
+
+Plugins can also be referenced by module, which is the only way to use them from JSON and YAML configs:
+
+```ts
+export default defineConfig({
+  spec: { version: '3.1', input: './openapi.yaml' },
+  plugins: [
+    './plugins/add-operation-index.mjs', // relative to the config file
+    ['some-swaggerz-plugin', { prefix: 'api' }], // a package, with options
+  ],
+});
+```
+
+The module's default export is a plugin object, or a factory called with the options (`(options) => plugin`, possibly async); wrap the plugin object in `definePlugin` for type checking. References are resolved from the config file's directory: relative paths, `file:` URLs and packages (honoring their `exports`). Each loaded plugin is validated like an inline one; problems are reported as `config/plugin-load-failed` with the reference that failed.
+
 ## Hooks
 
 | Hook                                     | When                                                                     | Return                                    |

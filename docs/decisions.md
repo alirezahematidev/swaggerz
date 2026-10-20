@@ -47,7 +47,7 @@ Each entry records the context, the decision and its consequences. New decisions
 
 **Context.** Several TanStack Query types changed shape during v5 (`UseInfiniteQueryOptions` lost a type parameter, `DataTag` gained one, helper overload order changed).
 **Decision.** Hooks pass explicit generics to `useQuery`/`useMutation`/`useInfiniteQuery`; infinite option types are derived from `useInfiniteQuery`'s own parameters; option factories use the `queryOptions`/`infiniteQueryOptions` helpers and let TypeScript infer the tagged key; declaration files spell out a stable equivalent.
-**Consequences.** The same generated code type-checks with TanStack Query 5.0.0 and the latest 5.x (verified by `yarn compat`).
+**Consequences.** The same generated code type-checks with TanStack Query 5.0.0 and the latest 5.x (verified by `pnpm compat`).
 
 ## 9. Ownership is explicit
 
@@ -56,10 +56,25 @@ Each entry records the context, the decision and its consequences. New decisions
 
 ## 10. The dashboard is a local, token-protected tool
 
-**Decision.** A dependency-free `node:http` server bound to loopback, a random per-session token sent in an `Authorization` header, `Host`/`Origin` checks, a strict CSP and no inline scripts. The web client is pre-bundled (Preact) so users install no frontend dependencies.
+**Decision.** A dependency-free `node:http` server bound to loopback, a random per-session token sent in an `Authorization` header, `Host`/`Origin` checks, a strict CSP and no inline scripts. The web client (React with Radix primitives, Tailwind CSS and self-hosted fonts) is pre-bundled, so users install no frontend dependencies and the page makes no third-party requests. Component libraries that inject positioning styles get a per-response CSP nonce instead of `unsafe-inline`.
 **Consequences.** Browsing other sites cannot read or trigger the dashboard; exposing it on a network requires an explicit opt-in.
 
 ## 11. Usage scanning is static and honest
 
-**Decision.** Parse application sources with the project's own TypeScript compiler API and module resolution (so path aliases work). Imports that cannot be attributed statically (dynamic imports, escaping namespace objects, `export *`) mark the affected exports as _undetermined_.
-**Consequences.** No false "unused" claims; requires TypeScript 5.x/6.x because TypeScript 7 has no JavaScript compiler API.
+**Decision.** Parse application sources with oxc (`oxc-parser`) and resolve imports with `oxc-resolver`, honoring `tsconfig.json` paths. Both are optional native dependencies of swaggerz, so the scan does not depend on the project's TypeScript version. (The first implementation used the project's TypeScript compiler API; TypeScript 7 has no JavaScript compiler API, so it was replaced.) Imports that cannot be attributed statically (dynamic imports, escaping namespace objects, `export *`) mark the affected exports as _undetermined_.
+**Consequences.** No false "unused" claims; scanning works in JavaScript-only projects and with any TypeScript version. On platforms without oxc binaries, the usage view reports that the scanner is unavailable.
+
+## 12. Request and response models are split where the spec says they differ
+
+**Decision.** A pass between the IR and analysis (`src/analysis/read-write.ts`) creates a request-side variant (`PetInput`) of every model that has `readOnly` or `writeOnly` properties directly or through the models it contains, and only when the model is reachable from a request. Response types drop `writeOnly` properties. Webhook and callback payloads use the inverted directions. `types.readWrite: 'merged'` turns it off.
+**Consequences.** Request types no longer demand server-assigned fields such as `id`; models that do not need a variant are not duplicated, so most specs see no extra types.
+
+## 13. Dates stay strings unless asked for
+
+**Decision.** `types.dates` defaults to `'string'`. With `'Date'`, generated shape descriptors (`dates/<model>.ts`) tell a small runtime helper where dates sit; operations encode request bodies and parameters before validation and revive responses after it. Zod schemas validate the wire format (`z.iso.*`) rather than transforming, because transforms cannot be combined with Zod intersections.
+**Consequences.** The default output matches JSON exactly and costs nothing at runtime. Opting in adds one module per model that contains dates and a runtime helper of 1.2 KB minified, and validation errors point at the received strings.
+
+## 14. Assertions are enforced at runtime, not encoded in types
+
+**Decision.** `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are kept in the IR as assertions. Generated Zod schemas enforce them with refinements; TypeScript types ignore them, and an info diagnostic (`schema/assertion-keyword`) says so.
+**Consequences.** Types may be wider than the schema (TypeScript cannot express negation or conditionals over arbitrary schemas), but validation is complete when Zod is enabled.

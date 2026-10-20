@@ -4,13 +4,6 @@ assets/
 config.schema.json
 coverage/
 *.tgz
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-.pnp.*
 .DS_Store
 *.log
 .tmp/
@@ -19,3 +12,6 @@ tests/.output/
 examples/*/src/generated/
 examples/*/dist/
 .compat
+
+# Claude Code session state
+.claude/scheduled_tasks.lock

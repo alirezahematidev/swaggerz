@@ -76,25 +76,55 @@ export async function buildRuntimeTemplates(): Promise<string[]> {
   return files;
 }
 
+/**
+ * Bundles the dashboard (React, Radix primitives, Tailwind CSS) with Vite into fixed file names:
+ * `app.js`, `app.css`, `fonts/*.woff2` and `favicon.svg` (the brand mark). The server serves
+ * exactly these files.
+ */
 export async function buildDashboard(): Promise<void> {
-  const esbuild = await import('esbuild');
+  const [{ build }, { default: tailwind }] = await Promise.all([
+    import('vite'),
+    import('@tailwindcss/vite'),
+  ]);
   await rm(DASHBOARD_OUT, { recursive: true, force: true });
-  await esbuild.build({
-    entryPoints: [DASHBOARD_ENTRY],
-    bundle: true,
-    minify: true,
-    format: 'esm',
-    target: ['es2022'],
-    outfile: path.join(DASHBOARD_OUT, 'app.js'),
-    jsx: 'automatic',
-    jsxImportSource: 'preact',
-    legalComments: 'none',
-    logLevel: 'warning',
-    tsconfig: path.join(ROOT, 'src', 'dashboard', 'client', 'tsconfig.json'),
+  await build({
+    configFile: false,
+    root: path.dirname(DASHBOARD_ENTRY),
+    base: '/assets/',
+    logLevel: 'warn',
+    publicDir: false,
+    plugins: [tailwind()],
+    oxc: { jsx: { runtime: 'automatic' } },
+    define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    build: {
+      outDir: DASHBOARD_OUT,
+      emptyOutDir: true,
+      assetsDir: '',
+      cssCodeSplit: false,
+      sourcemap: false,
+      target: 'es2022',
+      reportCompressedSize: false,
+      // One bundle on purpose: the dashboard is served locally and loads once.
+      chunkSizeWarningLimit: 2048,
+      rolldownOptions: {
+        input: DASHBOARD_ENTRY,
+        output: {
+          entryFileNames: 'app.js',
+          chunkFileNames: 'chunks/[name].js',
+          assetFileNames: (asset) =>
+            asset.names.some((name) => name.endsWith('.css')) ? 'app.css' : 'fonts/[name][extname]',
+        },
+        onwarn(warning, warn) {
+          // Radix and cmdk mark their modules "use client" for React Server Components.
+          if (warning.code === 'MODULE_LEVEL_DIRECTIVE') return;
+          warn(warning);
+        },
+      },
+    },
   });
   await writeFile(
-    path.join(DASHBOARD_OUT, 'app.css'),
-    await readFile(path.join(ROOT, 'src', 'dashboard', 'client', 'styles.css'), 'utf8'),
+    path.join(DASHBOARD_OUT, 'favicon.svg'),
+    await readFile(path.join(ROOT, 'brand', 'mark.svg'), 'utf8'),
   );
 }
 

@@ -32,7 +32,7 @@ Protections for untrusted specifications:
 
 ## Dashboard
 
-`swaggerz dashboard` is a local development tool. It binds to `127.0.0.1` and refuses other interfaces unless `dashboard.allowNetworkAccess` is set. Every API request requires a random per-session token; `Host` and `Origin` headers are checked against DNS rebinding and cross-site requests; a strict Content Security Policy forbids inline and third-party scripts. Do not expose it to untrusted networks: anyone with the token can read the specification and trigger generation into the configured output directory.
+`swaggerz dashboard` is a local development tool. It binds to `127.0.0.1` and refuses other interfaces unless `dashboard.allowNetworkAccess` is set. Every API request requires a random per-session token; `Host` and `Origin` headers are checked against DNS rebinding and cross-site requests; a strict Content Security Policy forbids inline and third-party scripts and allows inline styles only with a per-response nonce. Do not expose it to untrusted networks: anyone with the token can read the specification and trigger generation into the configured output directory.
 
 ## Generated clients
 

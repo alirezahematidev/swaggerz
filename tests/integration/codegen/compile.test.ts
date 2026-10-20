@@ -65,7 +65,7 @@ describe.each(SPECS)('$name', (spec) => {
       const roots =
         spec.consumer === undefined ? files : [...files, await writeConsumer(name, spec.consumer)];
       expect(typecheck(roots, BROWSER)).toEqual([]);
-      await writeFile(path.join(OUTPUT_ROOT, 'package.json'), '{ "type": "module" }\n');
+      // tests/.output/package.json ("type": "module") is written once by the global setup.
       expect(typecheck(roots, NODE)).toEqual([]);
     });
 

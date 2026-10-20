@@ -7,6 +7,8 @@ import { planOperation } from '../codegen/operation-plan.ts';
 import { generateOperation } from '../codegen/operations.ts';
 import { generateReactQueryModule } from '../codegen/react-query.ts';
 import { loadConfig, type LoadedConfig } from '../config/load.ts';
+import { SwaggerzError } from '../diagnostics/bag.ts';
+import { MANIFEST_FILENAME } from '../meta.ts';
 import { describeSchema, inspectData } from '../analysis/describe.ts';
 import { locatePointer } from '../loader/locate.ts';
 import { diffHunks } from '../output/diff.ts';
@@ -16,6 +18,7 @@ import { runGeneration } from '../pipeline/generate.ts';
 import { versionLabel } from '../spec/detect.ts';
 import { compareStrings, pluralize } from '../utils/strings.ts';
 import type {
+  ChangedItem,
   CodeVariant,
   DiffResponse,
   GenerateResponse,
@@ -28,10 +31,24 @@ import type {
   OperationSummary,
   OverviewResponse,
   PreviewResponse,
+  ReloadDelta,
+  ReloadFailure,
+  ReloadTrigger,
+  SessionInfo,
   SourceInfo,
   UsageReport,
 } from './api-types.ts';
+import { ChangeTracker, snapshot } from './changes.ts';
 import { scanUsage } from './usage.ts';
+
+/** The result of a reload, as broadcast to connected clients. */
+export interface ReloadOutcome {
+  readonly revision: number;
+  readonly ok: boolean;
+  readonly files: readonly string[];
+  readonly delta?: ReloadDelta;
+  readonly error?: string;
+}
 
 export interface DashboardStateOptions {
   readonly cwd: string;
@@ -43,6 +60,10 @@ export interface DashboardStateOptions {
  * Holds the compiled project the dashboard shows. Everything is derived from the same compiler
  * pipeline (`compile()`) the CLI uses; the dashboard never parses specifications itself.
  */
+function changeOf(kind: ChangedItem['change'] | undefined): { change?: 'new' | 'updated' } {
+  return kind === 'new' || kind === 'updated' ? { change: kind } : {};
+}
+
 export class DashboardState {
   readonly #options: DashboardStateOptions;
   #loaded: LoadedConfig | undefined;
@@ -50,6 +71,12 @@ export class DashboardState {
   #preview: PlannedWrite | undefined;
   #status: GenerationStatus | undefined;
   #lastRun: GenerationStatus['lastRun'];
+  readonly #tracker = new ChangeTracker();
+  readonly #startedAt = new Date().toISOString();
+  #revision = 0;
+  #lastReload: SessionInfo['lastReload'];
+  #failure: ReloadFailure | undefined;
+  #watching: readonly string[] = [];
 
   constructor(options: DashboardStateOptions) {
     this.#options = options;
@@ -69,17 +96,112 @@ export class DashboardState {
     return this.#compiled?.project;
   }
 
-  /** Reloads the config file and recompiles the specification. */
-  async reload(): Promise<void> {
-    this.#loaded = await loadConfig({
-      cwd: this.#options.cwd,
-      command: 'dashboard',
-      env: this.#options.env,
-      ...(this.#options.configFile === undefined ? {} : { configFile: this.#options.configFile }),
-    });
-    this.#compiled = await compile({ config: this.#loaded.config, plugins: this.#loaded.plugins });
+  get revision(): number {
+    return this.#revision;
+  }
+
+  /**
+   * Reloads the config file and recompiles the specification. The first load throws on failure.
+   * Later loads that fail (an invalid config, a specification that cannot be parsed while it is
+   * being edited) keep the last version that loaded and record the failure instead.
+   */
+  async reload(
+    trigger: ReloadTrigger | 'start' = 'manual',
+    files: readonly string[] = [],
+  ): Promise<ReloadOutcome> {
+    const at = new Date().toISOString();
+    const changed = this.#loaded === undefined ? [] : files.map((file) => this.#relative(file));
+    const fail = (failure: Omit<ReloadFailure, 'at'>): ReloadOutcome => {
+      this.#failure = { at, ...failure };
+      this.#status = undefined;
+      this.#preview = undefined;
+      this.#revision++;
+      return { revision: this.#revision, ok: false, files: changed, error: failure.message };
+    };
+    let loaded: LoadedConfig;
+    let compiled: CompileResult;
+    try {
+      loaded = await loadConfig({
+        cwd: this.#options.cwd,
+        command: 'dashboard',
+        env: this.#options.env,
+        ...(this.#options.configFile === undefined ? {} : { configFile: this.#options.configFile }),
+      });
+      compiled = await compile({ config: loaded.config, plugins: loaded.plugins });
+    } catch (error) {
+      if (this.#compiled === undefined) throw error;
+      return fail(
+        error instanceof SwaggerzError
+          ? { message: error.message, diagnostics: error.diagnostics }
+          : { message: error instanceof Error ? error.message : String(error), diagnostics: [] },
+      );
+    }
+    if (compiled.project === undefined && this.#compiled?.project !== undefined) {
+      const errors = compiled.diagnostics.filter((d) => d.severity === 'error');
+      return fail({
+        message: 'The specification could not be compiled',
+        diagnostics: errors.length > 0 ? errors : compiled.diagnostics,
+      });
+    }
+    this.#loaded = loaded;
+    this.#compiled = compiled;
+    this.#failure = undefined;
     this.#preview = undefined;
     this.#status = undefined;
+    const delta =
+      compiled.project === undefined
+        ? undefined
+        : this.#tracker.update(snapshot(compiled.project, compiled.files));
+    if (trigger !== 'start') this.#lastReload = { at, trigger, files: changed };
+    this.#revision++;
+    return {
+      revision: this.#revision,
+      ok: true,
+      files: changed,
+      ...(delta === undefined ? {} : { delta }),
+    };
+  }
+
+  /** The output directory changed (a generation from the CLI or this dashboard). */
+  outputChanged(): number {
+    this.#status = undefined;
+    this.#preview = undefined;
+    return ++this.#revision;
+  }
+
+  /**
+   * Files whose changes should reload the dashboard: the config file, every local document of the
+   * specification, and the output manifest (for the generation status).
+   */
+  watchTargets(): { readonly sources: readonly string[]; readonly manifest: string } {
+    const { config, file } = this.loaded;
+    const sources = new Set<string>();
+    if (file !== undefined) sources.add(file);
+    if (!/^https?:/i.test(config.spec.input)) sources.add(config.spec.input);
+    for (const doc of this.#compiled?.store?.documents ?? []) {
+      if (doc.url.startsWith('file:')) sources.add(doc.location);
+    }
+    return {
+      sources: [...sources].sort(compareStrings),
+      manifest: path.join(config.output.directory, MANIFEST_FILENAME),
+    };
+  }
+
+  /** Records which files are watched, for display. */
+  setWatching(files: readonly string[]): void {
+    this.#watching = files.map((file) => this.#relative(file));
+  }
+
+  #session(): SessionInfo {
+    const changes = this.#tracker.changes;
+    return {
+      startedAt: this.#startedAt,
+      revision: this.#revision,
+      watching: this.#watching,
+      ...(this.#lastReload === undefined ? {} : { lastReload: this.#lastReload }),
+      changes: { operations: changes.operations, models: changes.models },
+      ...(this.#failure === undefined ? {} : { failure: this.#failure }),
+    };
   }
 
   #emit(): EmitContext | undefined {
@@ -108,7 +230,7 @@ export class DashboardState {
       ...(manifest === undefined ? {} : { generatorVersion: manifest.generator.version }),
       ...(this.#lastRun === undefined ? {} : { lastRun: this.#lastRun }),
     };
-    if (!this.compiled.ok) {
+    if (!this.compiled.ok || this.#failure !== undefined) {
       this.#status = { status: 'failed', staleFiles: 0, ...base };
     } else if (manifest === undefined) {
       this.#status = { status: 'never', staleFiles: this.compiled.files.length, ...base };
@@ -171,6 +293,7 @@ export class DashboardState {
       diagnostics: compiled.diagnostics,
       generation: await this.#generationStatus(),
       timings: compiled.timings,
+      session: this.#session(),
     };
   }
 
@@ -194,6 +317,7 @@ export class DashboardState {
       models: [...(this.project?.graph.operationClosure(symbol.key) ?? [])]
         .map((id) => this.project?.modelById.get(id)?.name ?? id)
         .sort(compareStrings),
+      ...changeOf(this.#tracker.operation(symbol.key)),
     };
   }
 
@@ -208,14 +332,17 @@ export class DashboardState {
   #codeVariants(
     module: string,
     generated: { ts: string; js: string; dts: string } | undefined,
+    prefix = '',
   ): CodeVariant[] {
+    const languageLabel = (file: string): string =>
+      file.endsWith('.d.ts') ? 'Declarations' : file.endsWith('.js') ? 'JavaScript' : 'TypeScript';
     const variants: CodeVariant[] = [];
     const files = this.compiled.files.filter(
       (f) => f.path.replace(/\.d\.ts$|\.(ts|js)$/, '') === module,
     );
     for (const file of files) {
       variants.push({
-        label: file.path.endsWith('.d.ts') ? 'Declarations' : 'Generated',
+        label: `${prefix}${languageLabel(file.path)}`,
         path: file.path,
         language: file.path.endsWith('.js') ? 'javascript' : 'typescript',
         content: file.content,
@@ -224,20 +351,20 @@ export class DashboardState {
     if (generated !== undefined) {
       if (this.loaded.config.output.language === 'typescript') {
         variants.push({
-          label: 'JavaScript preview',
+          label: 'JavaScript (preview)',
           path: `${module}.js`,
           language: 'javascript',
           content: generated.js,
         });
         variants.push({
-          label: 'Declarations preview',
+          label: 'Declarations (preview)',
           path: `${module}.d.ts`,
           language: 'typescript',
           content: generated.dts,
         });
       } else {
         variants.push({
-          label: 'TypeScript preview',
+          label: 'TypeScript (preview)',
           path: `${module}.ts`,
           language: 'typescript',
           content: generated.ts,
@@ -257,7 +384,8 @@ export class DashboardState {
     const code = this.#codeVariants(symbol.module, operationModule);
     const reactQuery =
       symbol.reactQuery === undefined ? undefined : generateReactQueryModule(plan, emit);
-    if (reactQuery !== undefined) code.push(...this.#codeVariants(reactQuery.module, undefined));
+    if (reactQuery !== undefined)
+      code.push(...this.#codeVariants(reactQuery.module, undefined, 'React Query · '));
     const op = symbol.operation;
     const schemeKeys = new Set(this.#operationSummary(symbol).auth);
     const dependencies = [...project.graph.operationClosure(key)]
@@ -303,6 +431,7 @@ export class DashboardState {
       usedBy: project.graph.operationsUsing(model.id).length,
       recursive: recursive.has(model.id),
       deprecated: model.definition.schema.deprecated === true,
+      ...changeOf(this.#tracker.model(model.id)),
     }));
   }
 
@@ -377,11 +506,11 @@ export class DashboardState {
 
   async preview(): Promise<PreviewResponse> {
     const { config } = this.loaded;
-    if (!this.compiled.ok) {
+    if (!this.compiled.ok || this.#failure !== undefined) {
       return {
         ok: false,
         directory: this.#relative(config.output.directory),
-        diagnostics: this.compiled.diagnostics,
+        diagnostics: this.#failure?.diagnostics ?? this.compiled.diagnostics,
         changes: [],
       };
     }

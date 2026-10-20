@@ -35,6 +35,74 @@ export interface GenerationStatus {
   readonly lastRun?: { readonly at: string; readonly ok: boolean; readonly summary: string };
 }
 
+/**
+ * How an operation or model differs from the version the dashboard loaded when it started:
+ * `new` did not exist then, `updated` changed (in the specification or in its generated code).
+ * Badges last until the dashboard is restarted.
+ */
+export type ChangeKind = 'new' | 'updated';
+
+export interface ChangedItem {
+  /** Operation key or model id. */
+  readonly id: string;
+  readonly name: string;
+  /** `GET /pets/{id}` for operations. */
+  readonly label?: string;
+  readonly change: ChangeKind | 'removed';
+}
+
+/** Counts of what one reload changed compared with the version before it. */
+export interface ReloadDelta {
+  readonly operations: { readonly new: number; readonly updated: number; readonly removed: number };
+  readonly models: { readonly new: number; readonly updated: number; readonly removed: number };
+}
+
+export type ReloadTrigger = 'watch' | 'manual';
+
+export interface ReloadFailure {
+  readonly at: string;
+  readonly message: string;
+  readonly diagnostics: readonly Diagnostic[];
+}
+
+/** The dashboard session: what it watches and what changed since it started. */
+export interface SessionInfo {
+  readonly startedAt: string;
+  /** Increases with every reload and output change. */
+  readonly revision: number;
+  /** Files watched for live reload, relative to the project root; empty when watching is off. */
+  readonly watching: readonly string[];
+  readonly lastReload?: {
+    readonly at: string;
+    readonly trigger: ReloadTrigger;
+    /** Changed files that triggered the reload, relative to the project root. */
+    readonly files: readonly string[];
+  };
+  readonly changes: {
+    readonly operations: readonly ChangedItem[];
+    readonly models: readonly ChangedItem[];
+  };
+  /**
+   * The latest reload failed (invalid config, unparsable specification); the dashboard keeps
+   * showing the last version that loaded.
+   */
+  readonly failure?: ReloadFailure;
+}
+
+/** Events streamed from `GET /api/events` (server-sent events). */
+export type ServerEvent =
+  | { readonly type: 'hello'; readonly revision: number }
+  | {
+      readonly type: 'reload';
+      readonly revision: number;
+      readonly trigger: ReloadTrigger;
+      readonly files: readonly string[];
+      readonly ok: boolean;
+      readonly delta?: ReloadDelta;
+      readonly error?: string;
+    }
+  | { readonly type: 'output'; readonly revision: number };
+
 export interface OverviewResponse {
   readonly title: string;
   readonly version: string;
@@ -66,6 +134,7 @@ export interface OverviewResponse {
   readonly diagnostics: readonly Diagnostic[];
   readonly generation: GenerationStatus;
   readonly timings: Readonly<Record<string, number>>;
+  readonly session: SessionInfo;
 }
 
 export interface OperationSummary {
@@ -83,6 +152,7 @@ export interface OperationSummary {
   readonly description?: string;
   /** Names of every model the operation depends on, for search. */
   readonly models: readonly string[];
+  readonly change?: ChangeKind;
 }
 
 export interface DependencyEntry extends Link {
@@ -113,6 +183,7 @@ export interface ModelSummary extends Link {
   readonly usedBy: number;
   readonly recursive: boolean;
   readonly deprecated: boolean;
+  readonly change?: ChangeKind;
 }
 
 export interface ModelDetail {

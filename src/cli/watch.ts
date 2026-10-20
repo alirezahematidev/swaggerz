@@ -1,6 +1,6 @@
-import { watch, type FSWatcher } from 'node:fs';
 import path from 'node:path';
 import { SwaggerzError } from '../diagnostics/bag.ts';
+import { FileWatcher } from '../utils/file-watcher.ts';
 import { generateOnce } from './commands/generate.ts';
 import { findConfigFile } from '../config/load.ts';
 import { EXIT, option, relative, type CommandContext } from './context.ts';
@@ -9,16 +9,10 @@ const DEBOUNCE_MS = 120;
 
 /**
  * Watches the config file and every local document of the specification (including external
- * `$ref` targets) and regenerates on change. Directories are watched rather than files so editors
- * that save by replacing files are handled. Failures are reported and watching continues.
+ * `$ref` targets) and regenerates on change. Failures are reported and watching continues.
  */
 export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
   const { reporter } = ctx;
-  const watchers = new Map<string, FSWatcher>();
-  let targets = new Set<string>();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let running: Promise<void> | undefined;
-  let pending = false;
 
   // The config file is watched even before it loads successfully, so fixing it recovers.
   const explicitConfig = option(ctx, 'config');
@@ -26,7 +20,7 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
     explicitConfig === undefined
       ? await findConfigFile(ctx.cwd)
       : path.resolve(ctx.cwd, explicitConfig);
-  if (configFile !== undefined) targets.add(configFile);
+  let targets = new Set<string>(configFile === undefined ? [] : [configFile]);
 
   const run = async (): Promise<void> => {
     try {
@@ -48,54 +42,21 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
         );
       }
     }
-    sync();
+    watcher.set(targets);
   };
 
-  const schedule = (): void => {
-    if (timer !== undefined) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = undefined;
-      if (running !== undefined) {
-        pending = true;
-        return;
-      }
+  const watcher = new FileWatcher({
+    debounceMs: DEBOUNCE_MS,
+    onChange: async () => {
       reporter.log(reporter.paint('Change detected, regenerating…', 'dim'));
-      running = run().finally(() => {
-        running = undefined;
-        if (pending) {
-          pending = false;
-          schedule();
-        }
-      });
-    }, DEBOUNCE_MS);
-  };
-
-  const sync = (): void => {
-    const directories = new Set([...targets].map((file) => path.dirname(file)));
-    for (const [directory, watcher] of watchers) {
-      if (!directories.has(directory)) {
-        watcher.close();
-        watchers.delete(directory);
-      }
-    }
-    for (const directory of directories) {
-      if (watchers.has(directory)) continue;
-      try {
-        const watcher = watch(directory, (_event, name) => {
-          if (name !== null && targets.has(path.join(directory, name))) schedule();
-        });
-        watcher.on('error', () => {
-          watcher.close();
-          watchers.delete(directory);
-        });
-        watchers.set(directory, watcher);
-      } catch (error) {
-        reporter.warn(
-          `Cannot watch ${relative(ctx, directory)}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-  };
+      await run();
+    },
+    onError: (directory, error) => {
+      reporter.warn(
+        `Cannot watch ${relative(ctx, directory)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    },
+  });
 
   await run();
   if (targets.size === 0) {
@@ -119,8 +80,6 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       { once: true },
     );
   });
-  if (timer !== undefined) clearTimeout(timer);
-  for (const watcher of watchers.values()) watcher.close();
-  await running;
+  await watcher.close();
   return EXIT.OK;
 }

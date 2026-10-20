@@ -120,8 +120,12 @@ try {
     (await readFile(path.join(project, `${bin}.config.ts`), 'utf8')).includes(`from '${pkg.name}'`),
     'init writes a typed config importing the package',
   );
-  npx('generate');
-  check(npx('generate').includes('32 unchanged'), 'regeneration is a no-op');
+  const generated = /Generated (\d+) files/.exec(npx('generate'))?.[1];
+  check(
+    generated !== undefined &&
+      npx('generate').includes(`(0 created, 0 updated, 0 deleted, ${generated} unchanged)`),
+    'regeneration is a no-op',
+  );
   const validation = JSON.parse(npx('validate', '--json')) as { ok: boolean; operations: number };
   check(validation.ok && validation.operations === 15, 'validate succeeds');
   await writeFile(

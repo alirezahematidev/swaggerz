@@ -40,7 +40,7 @@ The tests assert which operations remain in each bundle (only the imported ones)
 ## Reproducing
 
 ```sh
-yarn bench                     # compiler benchmarks (default sizes 20, 100, 500, 2000 resource groups)
+pnpm bench                     # compiler benchmarks (default sizes 20, 100, 500, 2000 resource groups)
 node --expose-gc scripts/bench.ts 50 400
-yarn vitest run tests/integration/treeshake   # writes tests/.output/treeshake/sizes.json
+pnpm vitest run tests/integration/treeshake   # writes tests/.output/treeshake/sizes.json
 ```

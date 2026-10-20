@@ -1,9 +1,11 @@
 # Publishing happens only here, never from a developer machine. See CONTRIBUTING.md#releases.
+# `pnpm release` (release-it) bumps the version, updates CHANGELOG.md and pushes a `v*` tag; this
+# workflow verifies the tagged commit, publishes it to npm and creates the GitHub release.
 name: Release
 
 on:
   push:
-    branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
 
 permissions:
   contents: read
@@ -13,34 +15,61 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    # Replace with the real repository; this also keeps forks from attempting releases.
-    if: github.repository == 'your-org/swaggerz'
+  publish:
+    # Keeps forks from attempting releases.
+    if: github.repository == 'alirezahematidev/swaggerz'
     runs-on: ubuntu-latest
     # Configure required reviewers for this environment to approve each publish.
     environment: npm
     permissions:
-      contents: write # version commits and tags
-      pull-requests: write # the "Version Packages" pull request
+      contents: write # the GitHub release
       id-token: write # npm trusted publishing (OIDC) and provenance
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm 11.5.1 or later.
+          cache: pnpm
+      # Trusted publishing needs npm 11.5.1 or later; npm publishes, pnpm builds and checks.
       - run: npm install --global npm@^11.5.1
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn check
-      - run: yarn build
-      - name: Open the version pull request or publish
-        uses: changesets/action@v1
-        with:
-          version: yarn version-packages
-          publish: yarn release
-          commit: 'chore: release'
-          title: 'chore: release'
+      - run: pnpm install --frozen-lockfile
+      - name: Check that the tag matches package.json and is on main
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the package.json version $version."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME does not point to a commit on main."
+            exit 1
+          fi
+      - run: pnpm build
+      - run: pnpm check
+      - run: pnpm test:pack
+      # Pre-releases (v1.2.0-beta.0) go to the `next` dist-tag so `latest` stays stable. A version
+      # that is already on npm (a re-run, or a first version published by hand) is skipped.
+      - name: Publish to npm
+        run: |
+          name="$(node -p 'require("./package.json").name')"
+          if [ -n "$(npm view "$name@${GITHUB_REF_NAME#v}" version 2>/dev/null)" ]; then
+            echo "$name@${GITHUB_REF_NAME#v} is already on npm; skipping the publish."
+            exit 0
+          fi
+          case "$GITHUB_REF_NAME" in
+            *-*) npm publish --tag next ;;
+            *) npm publish ;;
+          esac
+      - name: Create the GitHub release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-notes.ts "$GITHUB_REF_NAME" > "$RUNNER_TEMP/notes.md"
+          flags=()
+          case "$GITHUB_REF_NAME" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"

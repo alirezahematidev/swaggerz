@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/your-org/swaggerz/security/advisories/new
+    url: https://github.com/alirezahematidev/swaggerz/security/advisories/new
     about: Report vulnerabilities privately, never in a public issue.
   - name: Documentation
-    url: https://github.com/your-org/swaggerz#readme
+    url: https://github.com/alirezahematidev/swaggerz#readme
     about: Configuration, generated code, React Query, plugins and the dashboard.

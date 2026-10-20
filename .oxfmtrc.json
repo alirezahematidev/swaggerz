@@ -8,18 +8,16 @@
     "dist",
     "assets",
     "coverage",
-    ".yarn",
-    "yarn.lock",
     "fixtures",
     "tests/.output",
     "tests/**/__snapshots__",
     "examples/**/src/generated",
     "examples/**/dist",
     "CHANGELOG.md",
-    ".changeset/*.md",
     ".tmp",
     ".bench",
     ".compat",
-    "config.schema.json"
+    "config.schema.json",
+    "pnpm-lock.yaml"
   ]
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ModelSummary, OperationSummary } from '../../../src/dashboard/api-types.ts';
 import { filterModels, filterOperations, tokenize } from '../../../src/dashboard/client/filters.ts';
-import { href, parseRoute } from '../../../src/dashboard/client/router.ts';
+import { href, parseRoute } from '../../../src/dashboard/client/routes.ts';
 
 const op = (overrides: Partial<OperationSummary>): OperationSummary => ({
   key: 'get /x',

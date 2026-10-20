@@ -1,4 +1,4 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,10 +10,12 @@ import type {
   OperationSummary,
   OverviewResponse,
   PreviewResponse,
+  ServerEvent,
   UsageReport,
 } from '../../../src/dashboard/api-types.ts';
 import { startDashboard, type DashboardServer } from '../../../src/dashboard/server.ts';
 import { SwaggerzError } from '../../../src/diagnostics/bag.ts';
+import { fixture } from '../../helpers.ts';
 import { createProject } from '../../support/project.ts';
 
 let dashboard: DashboardServer;
@@ -32,7 +34,17 @@ function raw(
   headers: Record<string, string> = {},
   body?: string,
 ): Promise<RawResponse> {
-  const url = new URL(pathname, dashboard.origin);
+  return rawTo(dashboard, method, pathname, headers, body);
+}
+
+function rawTo(
+  server: DashboardServer,
+  method: string,
+  pathname: string,
+  headers: Record<string, string> = {},
+  body?: string,
+): Promise<RawResponse> {
+  const url = new URL(pathname, server.origin);
   return new Promise((resolve, reject) => {
     const req = request(
       { method, hostname: url.hostname, port: url.port, path: url.pathname + url.search, headers },
@@ -49,12 +61,18 @@ function raw(
   });
 }
 
-async function api<T>(pathname: string, method = 'GET', body?: unknown): Promise<T> {
-  const response = await raw(
+async function api<T>(
+  pathname: string,
+  method = 'GET',
+  body?: unknown,
+  server: DashboardServer = dashboard,
+): Promise<T> {
+  const response = await rawTo(
+    server,
     method,
     pathname,
     {
-      authorization: `Bearer ${dashboard.token}`,
+      authorization: `Bearer ${server.token}`,
       ...(method === 'POST' ? { 'content-type': 'application/json' } : {}),
     },
     method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
@@ -93,7 +111,8 @@ beforeAll(async () => {
       ].join('\n'),
     },
   });
-  dashboard = await startDashboard({ cwd: project, env: {}, port: 0 });
+  // Live reload is tested separately; here files change only when a test says so.
+  dashboard = await startDashboard({ cwd: project, env: {}, port: 0, watch: false });
 });
 
 afterAll(async () => {
@@ -112,6 +131,28 @@ describe('dashboard security', () => {
     expect(page.body).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(page.body).not.toContain('Petstore');
     expect((await raw('GET', '/assets/app.js')).status).toBe(200);
+  });
+
+  it('allows inline styles only with a fresh per-response nonce and serves only built assets', async () => {
+    const page = await raw('GET', '/');
+    const csp = String(page.headers['content-security-policy']);
+    const nonce = /'nonce-([^']+)'/.exec(csp)?.[1];
+    expect(nonce).toMatch(/^[A-Za-z0-9+/=]{20,}$/);
+    expect(csp).toContain(`style-src 'self' 'nonce-${nonce ?? ''}'`);
+    expect(page.body).toContain(`<meta name="csp-nonce" content="${nonce ?? ''}" />`);
+    expect((await raw('GET', '/')).headers['content-security-policy']).not.toBe(csp);
+
+    const favicon = await raw('GET', '/assets/favicon.svg');
+    expect([favicon.status, favicon.headers['content-type']]).toEqual([200, 'image/svg+xml']);
+    const font = await raw('GET', '/assets/fonts/geist-latin-wght-normal.woff2');
+    expect([font.status, font.headers['content-type']]).toEqual([200, 'font/woff2']);
+    for (const probe of [
+      '/assets/../package.json',
+      '/assets/%2e%2e/package.json',
+      '/assets/nope.js',
+    ]) {
+      expect((await raw('GET', probe)).status).toBe(404);
+    }
   });
 
   it('requires the session token for every API call', async () => {
@@ -170,6 +211,12 @@ describe('dashboard API', () => {
       config: { output: 'src/generated/api', language: 'typescript', adapter: 'fetch' },
     });
     expect(overview.methods).toEqual({ PUT: 1, POST: 3, GET: 9, DELETE: 2 });
+    expect(overview.session).toMatchObject({
+      revision: 1,
+      watching: [],
+      changes: { operations: [], models: [] },
+    });
+    expect(overview.session.lastReload).toBeUndefined();
   });
 
   it('lists and details operations from the shared IR', async () => {
@@ -197,9 +244,9 @@ describe('dashboard API', () => {
       'Tag',
     ]);
     expect(detail.code.map((c) => c.label)).toEqual([
-      'Generated',
-      'JavaScript preview',
-      'Declarations preview',
+      'TypeScript',
+      'JavaScript (preview)',
+      'Declarations (preview)',
     ]);
     expect(detail.code[0]?.content).toContain('export function getPetById(');
     expect(detail.source).toMatchObject({ file: 'petstore-3.0.yaml', line: 143 });
@@ -296,5 +343,202 @@ describe('dashboard API', () => {
     const overview = await api<OverviewResponse>('/api/reload', 'POST');
     expect(overview.title).toBe('Multi-file API');
     expect(overview.generation.status).toBe('stale');
+  });
+});
+
+/** Reads the server-sent event stream of a dashboard. */
+function subscribe(server: DashboardServer): {
+  next: (match: (event: ServerEvent) => boolean) => Promise<ServerEvent>;
+  close: () => void;
+} {
+  const controller = new AbortController();
+  const queue: ServerEvent[] = [];
+  const waiting = new Set<() => void>();
+  void (async () => {
+    const response = await fetch(`${server.origin}/api/events`, {
+      headers: { authorization: `Bearer ${server.token}` },
+      signal: controller.signal,
+    });
+    const reader = response.body?.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
+    for (;;) {
+      const chunk = await reader?.read();
+      if (chunk === undefined || chunk.done) break;
+      buffer += chunk.value;
+      let end = buffer.indexOf('\n\n');
+      while (end !== -1) {
+        const data = buffer
+          .slice(0, end)
+          .split('\n')
+          .find((line) => line.startsWith('data:'));
+        buffer = buffer.slice(end + 2);
+        if (data !== undefined) queue.push(JSON.parse(data.slice(5)) as ServerEvent);
+        for (const wake of waiting) wake();
+        end = buffer.indexOf('\n\n');
+      }
+    }
+  })().catch(() => undefined);
+  return {
+    next: (match) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          waiting.delete(check);
+          reject(new Error(`No matching event; received ${JSON.stringify(queue)}`));
+        }, 15_000);
+        function check(): void {
+          const index = queue.findIndex(match);
+          if (index === -1) return;
+          const [event] = queue.splice(index, 1);
+          clearTimeout(timer);
+          waiting.delete(check);
+          if (event !== undefined) resolve(event);
+        }
+        waiting.add(check);
+        check();
+      }),
+    close: () => {
+      controller.abort();
+    },
+  };
+}
+
+describe('dashboard live reload', () => {
+  let live: DashboardServer;
+  let directory: string;
+  let original: string;
+  let events: ReturnType<typeof subscribe>;
+  const spec = (): string => path.join(directory, 'openapi.yaml');
+  const edit = async (change: (text: string) => string): Promise<void> => {
+    await writeFile(spec(), change(original));
+  };
+
+  beforeAll(async () => {
+    original = await readFile(fixture('petstore-3.0.yaml'), 'utf8');
+    directory = await createProject('dashboard-live', {
+      config: { spec: { version: '3.0', input: './openapi.yaml' } },
+      files: { 'openapi.yaml': original },
+    });
+    live = await startDashboard({ cwd: directory, env: {}, port: 0 });
+    events = subscribe(live);
+    await events.next((event) => event.type === 'hello');
+  });
+
+  afterAll(async () => {
+    events.close();
+    await live.close();
+  });
+
+  it('requires the session token for the event stream', async () => {
+    expect((await rawTo(live, 'GET', '/api/events')).status).toBe(401);
+  });
+
+  it('watches the config and every local document of the specification', async () => {
+    const overview = await api<OverviewResponse>('/api/overview', 'GET', undefined, live);
+    expect(overview.session.watching).toEqual(['openapi.yaml', 'swaggerz.config.mjs']);
+  });
+
+  it('reloads on change and marks new and updated operations until restart', async () => {
+    await edit((text) =>
+      text
+        .replace('summary: Find pet by ID.', 'summary: Find a pet by its ID.')
+        .replace(
+          'paths:\n',
+          [
+            'paths:',
+            '  /health:',
+            '    get:',
+            '      operationId: getHealth',
+            '      responses:',
+            "        '204':",
+            '          description: Healthy.',
+            '',
+          ].join('\n'),
+        ),
+    );
+    const event = await events.next(
+      (e) => e.type === 'reload' && e.ok && e.delta?.operations.new === 1,
+    );
+    expect(event).toMatchObject({
+      type: 'reload',
+      trigger: 'watch',
+      ok: true,
+      files: ['openapi.yaml'],
+      delta: {
+        operations: { new: 1, updated: 1, removed: 0 },
+        models: { new: 0, updated: 0, removed: 0 },
+      },
+    });
+
+    const operations = await api<OperationSummary[]>('/api/operations', 'GET', undefined, live);
+    const change = new Map(operations.map((op) => [op.name, op.change]));
+    expect(change.get('getHealth')).toBe('new');
+    expect(change.get('getPetById')).toBe('updated');
+    expect(change.get('addPet')).toBeUndefined();
+    const detail = await api<OperationDetail>(
+      `/api/operation?key=${encodeURIComponent('get /health')}`,
+      'GET',
+      undefined,
+      live,
+    );
+    expect(detail.summary.change).toBe('new');
+
+    const overview = await api<OverviewResponse>('/api/overview', 'GET', undefined, live);
+    expect(overview.session.lastReload).toMatchObject({
+      trigger: 'watch',
+      files: ['openapi.yaml'],
+    });
+    expect(overview.session.changes.operations.map((item) => [item.name, item.change])).toEqual([
+      ['getHealth', 'new'],
+      ['getPetById', 'updated'],
+    ]);
+  });
+
+  it('keeps the last version that loaded when a change does not parse', async () => {
+    await edit((text) => `${text}\n  /broken: [unclosed\n`);
+    const event = await events.next((e) => e.type === 'reload' && !e.ok);
+    expect(event).toMatchObject({ trigger: 'watch', files: ['openapi.yaml'] });
+    const overview = await api<OverviewResponse>('/api/overview', 'GET', undefined, live);
+    expect(overview.session.failure?.diagnostics[0]?.code).toBe('spec/parse-error');
+    // The last version that loaded (with getHealth) stays visible.
+    expect(overview.counts.operations).toBe(16);
+    expect(overview.generation.status).toBe('failed');
+    const preview = await api<PreviewResponse>('/api/preview', 'POST', undefined, live);
+    expect(preview).toMatchObject({ ok: false, changes: [] });
+  });
+
+  it('recovers, reports removed operations and returns to the baseline', async () => {
+    await edit((text) => text.replace(/  \/user\/logout:\n(?: {4}.*\n)+/, ''));
+    const event = await events.next(
+      (e) => e.type === 'reload' && e.ok && (e.delta?.operations.removed ?? 0) > 0,
+    );
+    // Compared with the last version that loaded: getHealth and logoutUser are gone and
+    // getPetById is back to its original summary.
+    expect(event).toMatchObject({ delta: { operations: { new: 0, updated: 1, removed: 2 } } });
+    const overview = await api<OverviewResponse>('/api/overview', 'GET', undefined, live);
+    expect(overview.session.failure).toBeUndefined();
+    expect(overview.session.changes.operations).toEqual([
+      { id: 'get /user/logout', name: 'logoutUser', label: 'GET /user/logout', change: 'removed' },
+    ]);
+    expect(
+      (
+        await rawTo(live, 'GET', `/api/operation?key=${encodeURIComponent('get /user/logout')}`, {
+          authorization: `Bearer ${live.token}`,
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it('refreshes the generation status when the output changes', async () => {
+    await edit((text) => text);
+    await events.next((e) => e.type === 'reload' && e.ok && e.delta?.operations.new === 1);
+    expect(
+      (await api<OverviewResponse>('/api/overview', 'GET', undefined, live)).generation.status,
+    ).toBe('never');
+    // Generated outside the dashboard (the CLI) or from it: only the manifest changes.
+    await api('/api/generate', 'POST', { confirm: true }, live);
+    expect(await events.next((e) => e.type === 'output')).toMatchObject({ type: 'output' });
+    expect(
+      (await api<OverviewResponse>('/api/overview', 'GET', undefined, live)).generation.status,
+    ).toBe('up-to-date');
   });
 });

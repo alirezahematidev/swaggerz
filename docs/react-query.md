@@ -10,7 +10,7 @@ features: {
 },
 ```
 
-Supported versions: `@tanstack/react-query` **5.0.0 and later 5.x** (both ends are type-checked by `yarn compat`; the hook tests run against the latest 5.x). When the feature is disabled nothing React-related is generated or imported.
+Supported versions: `@tanstack/react-query` **5.0.0 and later 5.x** (both ends are type-checked by `pnpm compat`; the hook tests run against the latest 5.x). When the feature is disabled nothing React-related is generated or imported.
 
 ## Query operations
 
@@ -35,6 +35,7 @@ export function useGetShape<TData = GetShapeResponse>(
 - **Keys** are the operation's group (first tag), its name and the full params object, so every parameter participates in caching. Operations without parameters have no params element. Plugins can change the static prefix with the `queryKey` hook.
 - **Cancellation**: the `signal` React Query passes to the query function is combined with `options.request.signal` and forwarded to the HTTP request.
 - **Typing**: `TData` is inferred from `select`; `error` is `GetShapeError` (`ApiError<ErrorBody> | RequestError`).
+- **Bodiless responses**: TanStack Query v5 does not allow `undefined` as query data, so query hooks and option factories resolve bodiless responses (`204`, `304`, …) with `null`: an operation returning `Account | undefined` has query data `Account | null`. Calling the operation directly still returns `undefined`. Mutations are unaffected.
 - **Imperative use**: `queryClient.fetchQuery(getShapeQueryOptions(params))`, `prefetchQuery`, `ensureQueryData`. The options carry a tagged query key, so `queryClient.getQueryData(getShapeQueryOptions(params).queryKey)` is typed.
 - **Key factories**: one module per tag, e.g. `shapesKeys = { all: ['Shapes'], getShape: getShapeQueryKey, … }`, for invalidation (`queryClient.invalidateQueries({ queryKey: shapesKeys.all })`).
 

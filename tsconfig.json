@@ -27,7 +27,7 @@
     "src/dashboard/client",
     "tests/.output",
     "tests/fixtures-app",
-    "tests/integration/dashboard/ui.test.ts",
+    "tests/integration/dashboard/ui.test.tsx",
     "node_modules",
     "dist"
   ]

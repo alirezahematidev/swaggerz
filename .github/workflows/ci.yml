@@ -27,18 +27,20 @@ jobs:
           - { os: windows-latest, node: 24, lint: false }
     steps:
       - uses: actions/checkout@v5
+      # pnpm's version comes from `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn typecheck
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
       - if: matrix.lint
-        run: yarn lint
+        run: pnpm lint
       - if: matrix.lint
-        run: yarn format:check
-      - run: yarn build
-      - run: yarn test
+        run: pnpm format:check
+      - run: pnpm build
+      - run: pnpm test
 
   runtime:
     name: Generated client on Node ${{ matrix.node }}
@@ -49,12 +51,13 @@ jobs:
         node: [18, 20, 22, 24]
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn build
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - run: node dist/cli/bin.js generate --config tests/smoke/swaggerz.config.mjs
       # The generator needs Node 22.18+, the generated client does not.
       - uses: actions/setup-node@v5
@@ -67,13 +70,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn build
-      - run: yarn compat
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm compat
 
   package:
     name: Packed package (Node ${{ matrix.node }})
@@ -84,21 +88,24 @@ jobs:
         node: [22.18.0, 24]
     steps:
       - uses: actions/checkout@v5
+      # pnpm's version comes from `packageManager` in package.json.
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-      - run: corepack enable
-      - run: yarn install --immutable
-      - run: yarn test:pack
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:pack
 
   examples:
     name: Examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: corepack enable
-      - run: yarn install --immutable
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: node scripts/verify-examples.ts
