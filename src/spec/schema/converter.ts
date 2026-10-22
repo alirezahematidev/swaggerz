@@ -667,10 +667,11 @@ export class SchemaConverter {
       const patterns = entries(child(cursor, 'patternProperties')).map(([, value]) =>
         this.convert(value),
       );
-      const variants = [
-        ...(additionalProperties === undefined || additionalProperties === false
-          ? []
-          : [additionalProperties]),
+      // Keys that match no pattern are additional properties: anything, unless
+      // `additionalProperties` says otherwise. (An open object stays open: its pattern schemas
+      // only describe some of its keys.)
+      const variants: SchemaIR[] = [
+        ...(additionalProperties === false ? [] : [additionalProperties ?? { kind: 'unknown' }]),
         ...patterns,
       ];
       additionalProperties =

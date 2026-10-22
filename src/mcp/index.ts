@@ -14,7 +14,8 @@ export interface McpOptions {
   /** Reload when the config, the specification or the output changes (default `true`). */
   readonly watch?: boolean;
   readonly input: NodeJS.ReadableStream;
-  readonly output: NodeJS.WritableStream;
+  /** Where protocol messages are written, one JSON document per line. */
+  readonly output: { write(chunk: string): unknown };
   /** Logging (stderr): the output stream carries protocol messages only. */
   readonly log: (message: string) => void;
 }
@@ -52,8 +53,10 @@ export async function startMcpServer(options: McpOptions): Promise<RunningMcpSer
     {
       log: options.log,
       onSubscribe: (uri) => {
+        // Always the content at subscription time: a hash kept from an earlier subscription is
+        // outdated when the resource changed while nobody was subscribed.
         void current(uri).then((value) => {
-          if (!hashes.has(uri)) hashes.set(uri, value);
+          hashes.set(uri, value);
         });
       },
     },
@@ -74,6 +77,19 @@ export async function startMcpServer(options: McpOptions): Promise<RunningMcpSer
             ? `Reloaded the project (revision ${outcome.revision}).`
             : `Reload failed: ${outcome.error ?? 'unknown error'}; serving the last version that loaded.`,
         );
+      })();
+    },
+    // A generation or `clean` outside the server: the generation status (in the overview) changed,
+    // the list of resources did not.
+    outputChanged: () => {
+      void (async () => {
+        const updated = new Set<string>();
+        for (const uri of server.subscribedUris()) {
+          const next = await current(uri);
+          if (hashes.get(uri) !== next) updated.add(uri);
+          hashes.set(uri, next);
+        }
+        if (updated.size > 0) server.resourcesChanged(updated, { listChanged: false });
       })();
     },
   });

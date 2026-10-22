@@ -135,7 +135,7 @@ async function runChecks(ctx: CommandContext): Promise<Check[]> {
     });
   }
 
-  const unsafe = checkOutputDirectory(config);
+  const unsafe = await checkOutputDirectory(config);
   const output = relative(ctx, config.output.directory);
   if (unsafe !== undefined) {
     checks.push({ name: 'Output directory', status: 'fail', detail: unsafe.message });

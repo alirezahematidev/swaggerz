@@ -3,8 +3,7 @@ import { lintProject, LINT_RULES, ruleSeverities } from '../../lint/lint.ts';
 import { TOOL_NAME } from '../../meta.ts';
 import { compile } from '../../pipeline/compile.ts';
 import { pluralize } from '../../utils/strings.ts';
-import { UsageError } from '../args.ts';
-import { EXIT, flag, loadCliConfig, option, type Command } from '../context.ts';
+import { EXIT, flag, integerOption, loadCliConfig, type Command } from '../context.ts';
 
 export const lintCommand: Command = {
   spec: {
@@ -23,10 +22,7 @@ export const lintCommand: Command = {
   },
   async run(ctx) {
     const { reporter } = ctx;
-    const limitOption = option(ctx, 'max-warnings');
-    const limit = limitOption === undefined ? undefined : Number(limitOption);
-    if (limit !== undefined && (!Number.isInteger(limit) || limit < 0))
-      throw new UsageError('--max-warnings must be a non-negative integer.');
+    const limit = integerOption(ctx, 'max-warnings');
     const loaded = await loadCliConfig(ctx, 'lint');
 
     if (flag(ctx, 'rules')) {

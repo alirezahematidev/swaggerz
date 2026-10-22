@@ -5,14 +5,22 @@ import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager } from '../imports.ts';
 import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
-import { wireType, type Validator } from './shared.ts';
+import {
+  acceptsAnything,
+  intersectionMembers,
+  isInheritedOptional,
+  ownPropertiesFunction,
+  wireType,
+  type Validator,
+} from './shared.ts';
 
 /**
  * Valibot (v1) schema generation, mirroring the Zod schemas:
  *
  * - Objects are `v.looseObject`, so unknown properties are kept; `additionalProperties: false`
  *   becomes `v.strictObject` and typed additional properties `v.objectWithRest`. Optional
- *   properties are `v.exactOptional`, matching `exactOptionalPropertyTypes`.
+ *   properties are `v.exactOptional`, matching `exactOptionalPropertyTypes` (the client removes
+ *   `undefined` properties from request bodies before validating them).
  * - Inside schema modules every reference is `v.lazy` with an explicitly typed getter, so modules
  *   can refer to each other in any order and recursively without TypeScript inferring a type from
  *   its own initializer. Each schema is typed as `v.GenericSchema<Model>`.
@@ -124,11 +132,19 @@ function valibotBase(
       const format = vc.ctx.config.types.dates === 'Date' ? dateFormat(schema) : undefined;
       if (format === 'date') return `${n}.pipe(${n}.string(), ${n}.isoDate())`;
       if (format === 'date-time') return `${n}.pipe(${n}.string(), ${n}.isoTimestamp())`;
+      // JSON Schema counts characters (code points), `v.minLength` UTF-16 code units: a string is
+      // only counted when its code units could exceed the bound.
       const actions: string[] = [];
-      if (schema.constraints?.minLength !== undefined)
-        actions.push(`${n}.minLength(${schema.constraints.minLength})`);
-      if (schema.constraints?.maxLength !== undefined)
-        actions.push(`${n}.maxLength(${schema.constraints.maxLength})`);
+      const min = schema.constraints?.minLength;
+      const max = schema.constraints?.maxLength;
+      if (min !== undefined)
+        actions.push(
+          `${n}.check((value) => value.length >= ${2 * min} || [...value].length >= ${min}, ${quote(`Must have at least ${min} characters.`)})`,
+        );
+      if (max !== undefined)
+        actions.push(
+          `${n}.check((value) => value.length <= ${max} || [...value].length <= ${max}, ${quote(`Must have at most ${max} characters.`)})`,
+        );
       return pipe(n, `${n}.string()`, actions);
     }
     case 'number':
@@ -139,7 +155,15 @@ function valibotBase(
       if (c?.maximum !== undefined) actions.push(`${n}.maxValue(${c.maximum})`);
       if (c?.exclusiveMinimum !== undefined) actions.push(`${n}.gtValue(${c.exclusiveMinimum})`);
       if (c?.exclusiveMaximum !== undefined) actions.push(`${n}.ltValue(${c.exclusiveMaximum})`);
-      if (c?.multipleOf !== undefined) actions.push(`${n}.multipleOf(${c.multipleOf})`);
+      if (c?.multipleOf !== undefined) {
+        // `v.multipleOf` uses `%`, which rejects decimal multiples such as 19.99 of 0.01.
+        const m = c.multipleOf;
+        actions.push(
+          Number.isInteger(m)
+            ? `${n}.multipleOf(${m})`
+            : `${n}.check((value) => Math.abs(value / ${m} - Math.round(value / ${m})) < 1e-9, ${quote(`Must be a multiple of ${m}.`)})`,
+        );
+      }
       return pipe(n, `${n}.number()`, actions);
     }
     case 'boolean':
@@ -196,10 +220,12 @@ function valibotBase(
       return union(n, variants);
     }
     case 'intersection': {
-      const members = schema.members.map((member) => valibotExpression(member, vc));
-      return members.length === 1
-        ? (members[0] ?? `${n}.unknown()`)
-        : `${n}.intersect([${members.join(', ')}])`;
+      const { relaxed, closedKeys } = intersectionMembers(schema.members, vc.ctx);
+      const members = relaxed.map((member) => valibotExpression(member, vc));
+      if (members.length === 1) return members[0] ?? `${n}.unknown()`;
+      const intersection = `${n}.intersect([${members.join(', ')}])`;
+      if (closedKeys === undefined) return intersection;
+      return `${n}.pipe(${intersection}, ${n}.check((value) => Object.keys(Object(value)).every((key) => [${closedKeys.map(quote).join(', ')}].includes(key)), 'Must not have properties that no member of allOf declares.'))`;
     }
   }
 }
@@ -209,7 +235,12 @@ function valibotObject(
   vc: ValibotContext,
   n: string,
 ): string {
-  const additional = schema.additionalProperties;
+  const declared = schema.additionalProperties;
+  // Additional properties that accept anything are the same as undeclared ones.
+  const additional =
+    declared !== false && declared !== undefined && acceptsAnything(declared)
+      ? undefined
+      : declared;
   if (schema.properties.length === 0) {
     if (additional === false) return `${n}.strictObject({})`;
     return `${n}.record(${n}.string(), ${additional === undefined ? `${n}.unknown()` : valibotExpression(additional, vc)})`;
@@ -219,10 +250,16 @@ function valibotObject(
     return `${propertyKey(property.name)}: ${property.required ? value : `${n}.exactOptional(${value})`}`;
   });
   const shape = `{\n${entries.map((entry) => `  ${entry.replace(/\n/g, '\n  ')},`).join('\n')}\n}`;
-  if (additional === false) return `${n}.strictObject(${shape})`;
-  if (additional !== undefined && additional.kind !== 'unknown')
-    return `${n}.objectWithRest(${shape}, ${valibotExpression(additional, vc)})`;
-  return `${n}.looseObject(${shape})`;
+  const object =
+    additional === false
+      ? `${n}.strictObject(${shape})`
+      : additional !== undefined
+        ? `${n}.objectWithRest(${shape}, ${valibotExpression(additional, vc)})`
+        : `${n}.looseObject(${shape})`;
+  // Valibot looks properties up with `in`: optional properties named like `Object.prototype`
+  // members (`constructor`) are checked on a copy that has only the object's own properties.
+  if (!schema.properties.some(isInheritedOptional)) return object;
+  return `${n}.pipe(\n  ${n}.unknown(),\n  ${n}.transform(${ownPropertiesFunction(vc.imports.lang).replace(/\n/g, '\n  ')}),\n  ${object.replace(/\n/g, '\n  ')},\n)`;
 }
 
 /** A Valibot module per model: `valibot/<model>` exporting `<Model>Schema`. */

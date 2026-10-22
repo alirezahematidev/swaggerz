@@ -6,9 +6,11 @@ import {
   type OperationIR,
   type ParameterLocation,
   type SchemaDefinition,
+  type SchemaIR,
   type WebhookIR,
 } from '../ir/types.ts';
 import { compareStrings } from '../utils/strings.ts';
+import { groupKey, linkDataFetching, type MemberKey } from './data-fetching.ts';
 import { definitionsWithDates } from './dates.ts';
 import { DependencyGraph } from './graph.ts';
 import {
@@ -94,6 +96,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
   const tagParents = new Map(
     ir.tags.flatMap((tag) => (tag.parent === undefined ? [] : [[tag.name, tag.parent] as const])),
   );
+  const directories = groupDirectories(ir.operations, config, tagParents);
   const used = graph.usedSchemas();
   const withDates = config.types.dates === 'Date' ? definitionsWithDates(ir) : new Set<string>();
 
@@ -172,11 +175,11 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
         message: `Operation name "${preferred}" (${wireMethod(operation.method)} ${operation.path}) is already taken; it is exported as "${name}".`,
       });
     }
-    const group = groupFor(operation, config, tagParents);
+    const group = groupFor(operation, config, tagParents, directories);
     const fileName = toFileName(name, fileStyle);
     const module = modules.claim(`${group}/${fileName}`, '-');
-    const pascal = applyCase(name, 'PascalCase');
-    const camel = applyCase(name, 'camelCase');
+    const pascal = derivedBase(name, 'PascalCase');
+    const camel = derivedBase(name, 'camelCase');
     const typeNames = {
       params: exports.claim(`${pascal}Params`),
       body: exports.claim(`${pascal}Body`),
@@ -268,12 +271,15 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     // Every group with operations, and the groups of their parent tags (OpenAPI 3.2), whose
     // `all` key matches the queries of every nested group.
     const prefixes = new Map<string, readonly string[]>();
+    const memberKeys = new Map<string, MemberKey[]>();
     for (const symbol of operations) {
       const tags = tagPath(symbol.operation.tags[0] ?? 'default', tagParents);
+      const member = { key: symbol.query?.keyPrefix ?? [], base: [...tags, symbol.name] };
       tags.forEach((_, index) => {
         const prefix = tags.slice(0, index + 1);
-        const group = groupPath(prefix, config);
+        const group = directories(prefix);
         if (!prefixes.has(group)) prefixes.set(group, prefix);
+        memberKeys.set(group, [...(memberKeys.get(group) ?? []), member]);
       });
     }
     for (const [group, prefix] of [...prefixes].sort(([a], [b]) => compareStrings(a, b))) {
@@ -282,9 +288,21 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
         module: modules.claim(`${fetching.library}/${group}/keys`, '-'),
         // A valid identifier even for groups such as `1-click-applications`.
         name: exports.claim(toIdentifier(`${group} keys`, 'camelCase')),
-        prefix,
+        tags: prefix,
+        prefix: groupKey(prefix, memberKeys.get(group) ?? []),
       });
     }
+  }
+  if (fetching !== undefined) {
+    linkDataFetching({
+      operations,
+      groups: queryGroups,
+      tags: ir.tags.map((tag) => tag.name),
+      parents: tagParents,
+      options: fetching.options,
+      option: fetching.library === 'swr' ? 'features.swr' : 'features.query',
+      diagnostics,
+    });
   }
 
   // Webhooks and callbacks ------------------------------------------------------------------
@@ -323,7 +341,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     }
     for (const symbol of operations) {
       for (const callback of symbol.operation.callbacks ?? []) {
-        const base = `${applyCase(symbol.name, 'PascalCase')}${toIdentifier(callback.name, 'PascalCase')}`;
+        const base = `${derivedBase(symbol.name, 'PascalCase')}${toIdentifier(callback.name, 'PascalCase')}`;
         add(
           'callback',
           callback,
@@ -333,6 +351,21 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
         );
       }
     }
+  }
+
+  // JavaScript output: a JSDoc typedef cannot refer to itself through an array (TypeScript defers
+  // only arrays that are a whole typedef), so the top-level arrays of recursive models become
+  // helper typedefs. Their names are claimed last, after every other export.
+  if (config.output.language === 'javascript') {
+    const recursive = graph.recursiveSchemas();
+    models.forEach((model, index) => {
+      const count = recursive.has(model.id) ? topLevelArrays(model.definition.schema) : 0;
+      if (count === 0) return;
+      models[index] = {
+        ...model,
+        arrayTypedefs: Array.from({ length: count }, () => exports.claim(`${model.name}Array`)),
+      };
+    });
   }
 
   return {
@@ -345,6 +378,37 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     operationByKey: new Map(operations.map((op) => [op.key, op])),
     modelById: new Map(models.map((model) => [model.id, model])),
   };
+}
+
+/**
+ * An identifier in a case style that names can be derived from by appending (`PetParams`) or
+ * prepending (`usePet`): never empty, and `_`-prefixed when it would start with a digit
+ * (`_123startParams`, not `123startParams`).
+ */
+function derivedBase(name: string, style: 'PascalCase' | 'camelCase'): string {
+  const cased = applyCase(name, style);
+  if (cased === '') return style === 'PascalCase' ? 'Unnamed' : 'unnamed';
+  return /^\d/.test(cased) ? `_${cased}` : cased;
+}
+
+/**
+ * Array and tuple types of a schema that are not nested in an object or another array: the ones
+ * the type printer hoists into helper typedefs (`TypeContext.hoistArray`).
+ */
+function topLevelArrays(schema: SchemaIR): number {
+  switch (schema.kind) {
+    case 'array':
+      return 1;
+    case 'union':
+      // The printer prints a union with an `unknown` member as `unknown`.
+      return schema.variants.some((variant) => variant.kind === 'unknown')
+        ? 0
+        : schema.variants.reduce((sum, variant) => sum + topLevelArrays(variant), 0);
+    case 'intersection':
+      return schema.members.reduce((sum, member) => sum + topLevelArrays(member), 0);
+    default:
+      return 0;
+  }
 }
 
 /** The first tag preceded by its ancestors (OpenAPI 3.2 `parent`), root first. */
@@ -375,8 +439,38 @@ function groupKeyPrefix(
 function groupPath(tags: readonly string[], config: ResolvedConfig): string {
   const segments = tags.map((tag) => toFileName(tag, config.naming.files));
   const first = segments[0] ?? 'default';
-  if (RESERVED_MODULE_ROOTS.includes(first)) segments[0] = `${first}-api`;
+  if (RESERVED_MODULE_ROOTS.includes(first.toLowerCase())) segments[0] = `${first}-api`;
   return segments.join('/');
+}
+
+/**
+ * Group directories of tag paths ({@link groupPath}). Directories whose spellings differ only in
+ * case (tags `userData` and `userdata`) are one directory on macOS and Windows, so they share the
+ * spelling that sorts first, segment by segment; the result does not depend on operation order.
+ */
+function groupDirectories(
+  operations: readonly OperationIR[],
+  config: ResolvedConfig,
+  parents: ReadonlyMap<string, string>,
+): (tags: readonly string[]) => string {
+  const spellings = new Map<string, string>();
+  const canonical = (directory: string): string => {
+    let result = '';
+    for (const segment of directory.split('/')) {
+      const candidate = result === '' ? segment : `${result}/${segment}`;
+      const key = candidate.toLowerCase();
+      const existing = spellings.get(key);
+      if (existing === undefined) spellings.set(key, candidate);
+      result = existing ?? candidate;
+    }
+    return result;
+  };
+  const directories = operations.flatMap((operation) => {
+    const tags = tagPath(operation.tags[0] ?? 'default', parents);
+    return tags.map((_, index) => groupPath(tags.slice(0, index + 1), config));
+  });
+  for (const directory of [...new Set(directories)].sort(compareStrings)) canonical(directory);
+  return (tags) => canonical(groupPath(tags, config));
 }
 
 /** Validates the configured page parameter of an infinite query. */
@@ -406,9 +500,10 @@ function groupFor(
   operation: OperationIR,
   config: ResolvedConfig,
   parents: ReadonlyMap<string, string>,
+  directories: (tags: readonly string[]) => string,
 ): string {
   if (config.output.groupBy === 'none') return 'operations';
-  return groupPath(tagPath(operation.tags[0] ?? 'default', parents), config);
+  return directories(tagPath(operation.tags[0] ?? 'default', parents));
 }
 
 const LOCATION_PRIORITY: Record<ParameterLocation, number> = {

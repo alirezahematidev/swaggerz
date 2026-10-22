@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { SwaggerzError } from '../diagnostics/bag.ts';
+import { printable } from '../diagnostics/format.ts';
 import { PACKAGE_NAME, PACKAGE_VERSION, TOOL_ALIASES, TOOL_NAME } from '../meta.ts';
 import { suggest } from '../utils/strings.ts';
-import { commandHelp, parseCommandArgs, UsageError } from './args.ts';
+import { commandHelp, parseCommandArgs, UsageError, type ParsedArgs } from './args.ts';
 import { cleanCommand } from './commands/clean.ts';
 import { dashboardCommand } from './commands/dashboard.ts';
 import { doctorCommand } from './commands/doctor.ts';
@@ -32,8 +33,23 @@ export interface CliIO {
   readonly stderr: NodeJS.WritableStream;
   readonly env: NodeJS.ProcessEnv;
   readonly cwd: string;
-  /** Aborts long-running commands (watch mode, dashboard). */
+  /** Aborts long-running commands (watch mode, dashboard, MCP server). */
   readonly signal: AbortSignal;
+  /**
+   * Called before a command that runs until it is interrupted starts (`generate --watch`,
+   * `dashboard`, `mcp`), so the caller can turn Ctrl+C into {@link signal} for a graceful stop.
+   * Other commands are not told: an interrupt ends them right away.
+   */
+  readonly onLongRunning?: () => void;
+}
+
+/** Commands that run until interrupted and stop gracefully when {@link CliIO.signal} aborts. */
+function isLongRunning(command: Command, args: ParsedArgs): boolean {
+  return (
+    command.spec.name === 'dashboard' ||
+    command.spec.name === 'mcp' ||
+    (command.spec.name === 'generate' && args.values.watch === true)
+  );
 }
 
 function generalHelp(): string {
@@ -84,7 +100,7 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
       COMMANDS.flatMap((c) => [c.spec.name, ...(c.spec.aliases ?? [])]),
     );
     io.stderr.write(
-      `Unknown command "${first}".${guess === undefined ? '' : ` Did you mean "${guess}"?`}\n\n${generalHelp()}`,
+      `Unknown command "${printable(first)}".${guess === undefined ? '' : ` Did you mean "${guess}"?`}\n\n${generalHelp()}`,
     );
     return EXIT.USAGE;
   }
@@ -112,10 +128,13 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
       stdout: io.stdout,
       stderr: io.stderr,
     });
+    if (isLongRunning(command, args)) io.onLongRunning?.();
     return await command.run({ args, reporter, cwd, env: io.env, signal: io.signal });
   } catch (error) {
     if (error instanceof UsageError) {
-      io.stderr.write(`${error.message}\n${error.hint === undefined ? '' : `${error.hint}\n`}`);
+      io.stderr.write(
+        printable(`${error.message}\n${error.hint === undefined ? '' : `${error.hint}\n`}`),
+      );
       return EXIT.USAGE;
     }
     if (error instanceof SwaggerzError) {
@@ -143,7 +162,7 @@ export async function main(argv: readonly string[], io: CliIO): Promise<number> 
           : error.message
         : String(error);
     io.stderr.write(
-      `Internal error: ${message}\nPlease report this at the project's issue tracker${reporter?.options.verbose === true ? '' : ' (rerun with --verbose for a stack trace)'}.\n`,
+      `Internal error: ${printable(message)}\nPlease report this at the project's issue tracker${reporter?.options.verbose === true ? '' : ' (rerun with --verbose for a stack trace)'}.\n`,
     );
     return EXIT.INTERNAL;
   }

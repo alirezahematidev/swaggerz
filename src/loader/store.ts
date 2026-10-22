@@ -11,7 +11,13 @@ import {
   parseDocumentText,
   type DocumentFormat,
 } from './parse.ts';
-import { appendPointer, getAtPointer, parsePointer } from './pointer.ts';
+import {
+  appendPointer,
+  decodeFragment,
+  getAtPointer,
+  parseFragment,
+  parsePointer,
+} from './pointer.ts';
 import { collectRefs } from './refs.ts';
 
 export interface LoadedDocument {
@@ -26,6 +32,11 @@ export interface LoadedDocument {
   readonly data: unknown;
   /** Remote documents: HTTP cache validators, used when polling for changes. */
   readonly validators?: Validators;
+  /**
+   * Arrays of `data` that an overlay removed elements from: their elements no longer line up with
+   * `text`, so positions are not looked up inside them.
+   */
+  readonly shifted?: WeakSet<object>;
 }
 
 export interface ResolvedRef {
@@ -55,17 +66,21 @@ export interface DocumentStoreOptions {
 
 /**
  * Fetch options for a remote document under the store's policy. Configured headers (which may
- * carry credentials) only go to the origin of the root document; the root may redirect anywhere,
- * other documents only to their own origin or an allowed host.
+ * carry credentials) only go to the origin of the configured input (`origin`; for the root
+ * document it defaults to the origin of `url`, which must then be the configured input), never to
+ * the origin a request was redirected to. The root may redirect anywhere, other documents only to
+ * their own origin or an allowed host.
  */
 export function documentFetchOptions(
   options: Pick<DocumentStoreOptions, 'fetch' | 'policy'>,
   url: URL,
-  root: { readonly isRoot: true } | { readonly isRoot: false; readonly origin: string | undefined },
+  root:
+    | { readonly isRoot: true; readonly origin?: string | undefined }
+    | { readonly isRoot: false; readonly origin: string | undefined },
 ): FetchTextOptions {
   return {
     ...options.fetch,
-    credentialOrigin: root.isRoot ? url.origin : root.origin,
+    credentialOrigin: root.isRoot && !('origin' in root) ? url.origin : root.origin,
     checkRedirect: (next) => {
       if (next.protocol !== 'https:' && next.protocol !== 'http:') return 'unsupported protocol';
       if (root.isRoot || next.origin === url.origin) return undefined;
@@ -111,8 +126,11 @@ export class DocumentStore {
   readonly #options: DocumentStoreOptions;
   readonly #documents = new Map<string, LoadedDocument>();
   readonly #failed = new Set<string>();
+  /** Per document: `<pointer of the schema resource>#<anchor>` → pointer of the anchored schema. */
   readonly #anchors = new Map<string, Map<string, string>>();
   readonly #ids = new Map<string, { doc: LoadedDocument; pointer: string }>();
+  /** Whether the `$id`s of the root document are in {@link #ids}. */
+  #rootIndexed = false;
   /** Per document: pointer of each schema with an `$id` → its resolved base URI. */
   readonly #bases = new Map<string, Map<string, string>>();
   /** OpenAPI 3.2 `$self`: document URL → the base URI it declares. */
@@ -121,8 +139,14 @@ export class DocumentStore {
   readonly #aliases = new Map<string, LoadedDocument>();
   #schemaIds = false;
   #self = false;
+  #swagger2 = false;
   #root: LoadedDocument | undefined;
   #rootBase = '';
+  /**
+   * Origin of the configured input when it is a URL: the only origin that receives configured
+   * headers, also when the root document was redirected elsewhere.
+   */
+  #inputOrigin: string | undefined;
   #allowedRealDirs: string[] | undefined;
 
   constructor(options: DocumentStoreOptions) {
@@ -150,6 +174,7 @@ export class DocumentStore {
   async loadRoot(input: string): Promise<LoadedDocument> {
     const url = /^https?:\/\//i.test(input) ? new URL(input) : pathToFileURL(path.resolve(input));
     this.#rootBase = url.protocol === 'file:' ? path.dirname(fileURLToPath(url)) : url.href;
+    this.#inputOrigin = url.protocol === 'file:' ? undefined : url.origin;
     try {
       const doc = await this.#read(url, true);
       this.#root = doc;
@@ -169,7 +194,17 @@ export class DocumentStore {
   enableSchemaIds(): void {
     this.#schemaIds = true;
     this.#ids.clear();
+    this.#rootIndexed = false;
     this.#bases.clear();
+    this.#anchors.clear();
+  }
+
+  /**
+   * Swagger 2.0: the `examples` of a Response Object map media types to literal payloads, so
+   * nothing inside them is a reference.
+   */
+  enableSwagger2(): void {
+    this.#swagger2 = true;
   }
 
   /**
@@ -215,15 +250,24 @@ export class DocumentStore {
     return new URL(target.href.slice(directory.length), new URL('.', from.url));
   }
 
-  /** Replaces the parsed root data (used by `beforeParse` plugin hooks). */
-  replaceRootData(data: unknown): void {
+  /**
+   * Replaces the parsed root data (with the result of overlays or `beforeParse` plugin hooks).
+   * `shifted` lists arrays whose elements no longer line up with the text (see
+   * {@link LoadedDocument.shifted}).
+   */
+  replaceRootData(data: unknown, shifted?: WeakSet<object>): void {
     const root = this.root;
-    const updated: LoadedDocument = { ...root, data };
+    const updated: LoadedDocument = {
+      ...root,
+      data,
+      ...(shifted === undefined ? {} : { shifted }),
+    };
     this.#root = updated;
     this.#documents.set(root.url, updated);
     this.#anchors.delete(root.url);
     this.#bases.delete(root.url);
     this.#ids.clear();
+    this.#rootIndexed = false;
   }
 
   /**
@@ -238,7 +282,7 @@ export class DocumentStore {
     while (level.length > 0) {
       const pending = new Map<string, { from: LoadedDocument; pointer: string; target: URL }>();
       for (const doc of level) {
-        for (const occurrence of collectRefs(doc.data)) {
+        for (const occurrence of collectRefs(doc.data, { swagger2: this.#swagger2 })) {
           const target = this.#parseRef(occurrence.ref, doc, occurrence.pointer);
           if (target === undefined) continue;
           const docUrl = stripHash(target);
@@ -295,7 +339,7 @@ export class DocumentStore {
     }
     // Report every broken reference target once, even for parts of the spec no operation uses.
     for (const doc of this.documents) {
-      for (const occurrence of collectRefs(doc.data)) {
+      for (const occurrence of collectRefs(doc.data, { swagger2: this.#swagger2 })) {
         if (occurrence.mapping === true) continue;
         this.resolve(occurrence.ref, doc, occurrence.pointer);
       }
@@ -329,24 +373,32 @@ export class DocumentStore {
     const fragment = target.hash.startsWith('#') ? target.hash.slice(1) : target.hash;
     let pointer: string | undefined;
     if (fragment === '' || fragment.startsWith('/') || fragment.startsWith('%2F')) {
-      const segments = parsePointer(fragment);
+      const segments = parseFragment(fragment);
       if (segments === undefined) {
         this.#reportInvalid(ref, from, refPointer, 'the fragment is not a valid JSON pointer');
         return undefined;
       }
       pointer = appendPointer(basePointer, ...segments);
     } else {
-      pointer = this.#anchorIndex(doc).get(decodeURIComponent(fragment));
+      const anchor = decodeFragment(fragment);
+      if (anchor === undefined) {
+        this.#reportInvalid(ref, from, refPointer, 'the fragment has a malformed percent-escape');
+        return undefined;
+      }
+      // An anchor belongs to the schema resource (`$id`) around it; the URI names the resource.
+      pointer = this.#anchorIndex(doc).get(`${basePointer}#${anchor}`);
       if (pointer === undefined) {
         this.#options.diagnostics.error({
           code: 'ref/missing-target',
-          message: `$ref "${ref}" points to anchor "${fragment}", which does not exist in ${doc.display}.`,
+          message: `$ref "${ref}" points to anchor "${anchor}", which does not exist in ${basePointer === '' ? doc.display : `the schema resource at ${basePointer} of ${doc.display}`}.`,
           location: { file: from.location, pointer: refPointer },
         });
         return undefined;
       }
     }
-    const lookup = getAtPointer(doc.data, parsePointer(pointer) ?? []);
+    const segments = parsePointer(pointer);
+    const lookup =
+      segments === undefined ? { found: false as const } : getAtPointer(doc.data, segments);
     if (!lookup.found) {
       this.#options.diagnostics.error({
         code: 'ref/missing-target',
@@ -468,7 +520,9 @@ export class DocumentStore {
       }
       return undefined;
     }
-    if (rootOrigin(this.root) === target.origin) return undefined;
+    // The configured input's origin, and the one its document was served from after redirects.
+    if (target.origin === this.#inputOrigin || target.origin === rootOrigin(this.root))
+      return undefined;
     if (policy.external !== 'remote') {
       return {
         reason: 'remote references are disabled (spec.refs.external = "local").',
@@ -536,12 +590,12 @@ export class DocumentStore {
     url: URL,
     isRoot = this.#root === undefined || stripHash(url) === this.#root.url,
   ): FetchTextOptions {
+    // Never the origin of the root document: it may have been redirected to another origin.
+    const origin = this.#inputOrigin;
     return documentFetchOptions(
       this.#options,
       url,
-      isRoot
-        ? { isRoot: true }
-        : { isRoot: false, origin: this.#root === undefined ? undefined : rootOrigin(this.#root) },
+      isRoot ? { isRoot: true, origin } : { isRoot: false, origin },
     );
   }
 
@@ -552,15 +606,31 @@ export class DocumentStore {
     return stripHash(url);
   }
 
+  /**
+   * Anchors (`$anchor`, and `$dynamicAnchor`, which `$ref` can name too) by the schema resource
+   * they belong to: `<pointer of the nearest enclosing schema with an $id, or "">#<name>`. Two
+   * resources may use the same anchor name.
+   */
   #anchorIndex(doc: LoadedDocument): Map<string, string> {
     let index = this.#anchors.get(doc.url);
-    if (index === undefined) {
-      index = new Map();
-      walkSchemas(doc.data, '', (node, pointer) => {
-        if (typeof node.$anchor === 'string') index?.set(node.$anchor, pointer);
-      });
-      this.#anchors.set(doc.url, index);
-    }
+    if (index !== undefined) return index;
+    const anchors = new Map<string, string>();
+    const dynamic = new Map<string, string>();
+    const bases = this.#schemaIds ? this.#baseIndex(doc) : undefined;
+    walkSchemas(doc.data, '', (node, pointer, enclosing) => {
+      const isResource =
+        bases === undefined
+          ? typeof node.$id === 'string' && URL.canParse(node.$id, doc.url)
+          : bases.has(pointer);
+      const resource = isResource ? pointer : enclosing;
+      if (typeof node.$anchor === 'string') anchors.set(`${resource}#${node.$anchor}`, pointer);
+      if (typeof node.$dynamicAnchor === 'string')
+        dynamic.set(`${resource}#${node.$dynamicAnchor}`, pointer);
+      return resource;
+    });
+    for (const [key, pointer] of dynamic) if (!anchors.has(key)) anchors.set(key, pointer);
+    index = anchors;
+    this.#anchors.set(doc.url, index);
     return index;
   }
 
@@ -569,29 +639,17 @@ export class DocumentStore {
     let index = this.#bases.get(doc.url);
     if (index !== undefined) return index;
     const bases = new Map<string, string>();
-    const visit = (node: unknown, pointer: string, base: string): void => {
-      if (Array.isArray(node)) {
-        node.forEach((child, i) => {
-          visit(child, appendPointer(pointer, i), base);
-        });
-        return;
+    walkSchemas(doc.data, this.#documentBase(doc), (node, pointer, base) => {
+      if (typeof node.$id !== 'string') return base;
+      try {
+        const current = new URL(node.$id, base).href;
+        bases.set(pointer, current);
+        return current;
+      } catch {
+        // Ignore invalid $id values; they cannot be referenced.
+        return base;
       }
-      if (!isRecord(node)) return;
-      let current = base;
-      if (typeof node.$id === 'string') {
-        try {
-          current = new URL(node.$id, base).href;
-          bases.set(pointer, current);
-        } catch {
-          // Ignore invalid $id values; they cannot be referenced.
-        }
-      }
-      for (const [key, child] of Object.entries(node)) {
-        if (SCHEMA_DATA_KEYS.has(key)) continue;
-        visit(child, appendPointer(pointer, key), current);
-      }
-    };
-    visit(doc.data, '', this.#documentBase(doc));
+    });
     index = bases;
     this.#bases.set(doc.url, index);
     return index;
@@ -616,19 +674,24 @@ export class DocumentStore {
       }
       return;
     }
-    walkSchemas(doc.data, '', (node, pointer) => {
-      if (typeof node.$id !== 'string') return;
+    walkSchemas(doc.data, undefined, (node, pointer) => {
+      if (typeof node.$id !== 'string') return undefined;
       try {
         const id = stripHash(new URL(node.$id, doc.url));
         if (!this.#ids.has(id)) this.#ids.set(id, { doc, pointer });
       } catch {
         // Ignore invalid $id values; they cannot be referenced.
       }
+      return undefined;
     });
   }
 
   #findById(url: string): { doc: LoadedDocument; pointer: string } | undefined {
-    if (this.#ids.size === 0 && this.#root !== undefined) this.#indexIds(this.#root);
+    // Indexed once: a root without any `$id` would otherwise be walked again on every lookup.
+    if (!this.#rootIndexed && this.#root !== undefined) {
+      this.#rootIndexed = true;
+      this.#indexIds(this.#root);
+    }
     return this.#ids.get(url);
   }
 }
@@ -652,22 +715,35 @@ const SCHEMA_DATA_KEYS: ReadonlySet<string> = new Set([
   'const',
 ]);
 
-function walkSchemas(
-  node: unknown,
-  pointer: string,
-  visit: (node: Record<string, unknown>, pointer: string) => void,
+/**
+ * Visits the objects of a document in document order, skipping instance data, without recursion.
+ * `enter` returns the state the object's children inherit (a base URI, a resource pointer).
+ */
+function walkSchemas<S>(
+  root: unknown,
+  initial: S,
+  enter: (node: Record<string, unknown>, pointer: string, inherited: S) => S,
 ): void {
-  if (Array.isArray(node)) {
-    node.forEach((child, index) => {
-      walkSchemas(child, appendPointer(pointer, index), visit);
-    });
-    return;
-  }
-  if (!isRecord(node)) return;
-  visit(node, pointer);
-  for (const [key, child] of Object.entries(node)) {
-    if (SCHEMA_DATA_KEYS.has(key)) continue;
-    walkSchemas(child, appendPointer(pointer, key), visit);
+  const stack: { node: unknown; pointer: string; state: S }[] = [
+    { node: root, pointer: '', state: initial },
+  ];
+  for (let entry = stack.pop(); entry !== undefined; entry = stack.pop()) {
+    const { node, pointer, state } = entry;
+    const children: [string | number, unknown][] = [];
+    let next = state;
+    if (Array.isArray(node)) {
+      node.forEach((child, index) => children.push([index, child]));
+    } else if (isRecord(node)) {
+      next = enter(node, pointer, state);
+      for (const [key, child] of Object.entries(node))
+        if (!SCHEMA_DATA_KEYS.has(key)) children.push([key, child]);
+    }
+    // Reversed, so that the first child is visited first.
+    for (let index = children.length - 1; index >= 0; index--) {
+      const [key, child] = children[index] ?? [0, undefined];
+      if (typeof child === 'object' && child !== null)
+        stack.push({ node: child, pointer: appendPointer(pointer, key), state: next });
+    }
   }
 }
 

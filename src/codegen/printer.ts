@@ -35,8 +35,13 @@ export function quote(value: string): string {
   return `${result}'`;
 }
 
-/** Renders an object key, quoting it when it is not a valid identifier. */
+/**
+ * Renders an object key, quoting it when it is not a valid identifier. `__proto__` becomes the
+ * computed key `['__proto__']`: in an object literal, `__proto__: x` (or `'__proto__': x`) sets the
+ * prototype instead of creating a property. The computed form is also valid in type literals.
+ */
 export function propertyKey(name: string): string {
+  if (name === '__proto__') return `[${quote(name)}]`;
   return isPropertyIdentifier(name) ? name : quote(name);
 }
 
@@ -69,11 +74,15 @@ export function escapeComment(text: string): string {
     .replace(/[\u2028\u2029]/g, '\n');
 }
 
-/** Escapes text for a JSDoc description: lines may not start a tag accidentally. */
+/**
+ * Escapes text for a JSDoc comment so it cannot start a tag: TypeScript starts one at an `@` at
+ * the beginning of a line or after whitespace, also in the middle of a line or of a tag's text.
+ * Inline tags (`{@link X}`) are kept.
+ */
 function escapeDocText(text: string): string {
   return escapeComment(text)
     .split('\n')
-    .map((line) => line.replace(/^(\s*)@/, '$1\\@').trimEnd())
+    .map((line) => line.replace(/(^|\s)@/g, '$1\\@').trimEnd())
     .join('\n');
 }
 
@@ -91,10 +100,10 @@ export function renderJsDoc(block: JsDocBlock | undefined, indent = ''): string 
   }
   if (block.tags.length > 0 && lines.length > 0) lines.push('');
   for (const tag of block.tags) {
-    const text = tag.text === undefined ? '' : escapeComment(tag.text).trim();
+    const text = tag.text === undefined ? '' : escapeDocText(tag.text.trim());
     const [first = '', ...rest] = text.split('\n');
     lines.push(`@${tag.tag}${first === '' ? '' : ` ${first}`}`.trimEnd());
-    for (const line of rest) lines.push(line.trimEnd());
+    for (const line of rest) lines.push(line);
   }
   // Collapse runs of blank lines.
   const compact = lines.filter((line, index) => !(line === '' && lines[index - 1] === ''));

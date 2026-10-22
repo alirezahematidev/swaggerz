@@ -251,9 +251,22 @@ export interface PreviewChange {
 
 export interface PreviewResponse {
   readonly ok: boolean;
+  /**
+   * Identifies the exact plan: every file with its content before and after, and the manifest.
+   * Generating requires it and writes this plan only while the output directory still matches
+   * it. Present when `ok`.
+   */
+  readonly id?: string;
   readonly directory: string;
   readonly diagnostics: readonly Diagnostic[];
   readonly changes: readonly PreviewChange[];
+}
+
+/** Body of `POST /api/generate`. */
+export interface GenerateRequest {
+  readonly confirm: true;
+  /** The `id` of the preview the user reviewed. */
+  readonly preview: string;
 }
 
 export interface DiffResponse {
@@ -266,6 +279,11 @@ export interface GenerateResponse {
   readonly ok: boolean;
   readonly diagnostics: readonly Diagnostic[];
   readonly write?: WriteResult;
+  /**
+   * Nothing was written because the changes differ from the preview that was confirmed (the
+   * specification, the config or the output directory changed meanwhile): preview again.
+   */
+  readonly outdated?: true;
 }
 
 export interface UsageLocation {

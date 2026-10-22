@@ -5,7 +5,13 @@ import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager, Lang } from '../imports.ts';
 import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
-import { wireType, type Validator } from './shared.ts';
+import {
+  acceptsAnything,
+  intersectionMembers,
+  isInheritedOptional,
+  wireType,
+  type Validator,
+} from './shared.ts';
 
 /**
  * ArkType (v2) schema generation, mirroring the Zod schemas:
@@ -130,11 +136,15 @@ function arkBase(schema: Exclude<SchemaIR, { kind: 'ref' }>, ac: ArkContext): st
       const format = ac.ctx.config.types.dates === 'Date' ? dateFormat(schema) : undefined;
       if (format === 'date') return `${t()}('string.date.iso').and(/^\\d{4}-\\d{2}-\\d{2}$/)`;
       if (format === 'date-time') return `${t()}('string.date.iso').and(/^\\d{4}-\\d{2}-\\d{2}T/)`;
+      // JSON Schema counts characters (code points), ArkType's length UTF-16 code units: a string
+      // is only counted when its code units could exceed the bound.
       let expression = `${t()}.string`;
-      if (schema.constraints?.minLength !== undefined)
-        expression += `.atLeastLength(${schema.constraints.minLength})`;
-      if (schema.constraints?.maxLength !== undefined)
-        expression += `.atMostLength(${schema.constraints.maxLength})`;
+      const min = schema.constraints?.minLength;
+      const max = schema.constraints?.maxLength;
+      if (min !== undefined)
+        expression += `.narrow((value, ctx) => value.length >= ${2 * min} || [...value].length >= ${min} || ctx.mustBe(${quote(`at least ${min} characters long`)}))`;
+      if (max !== undefined)
+        expression += `.narrow((value, ctx) => value.length <= ${max} || [...value].length <= ${max} || ctx.mustBe(${quote(`at most ${max} characters long`)}))`;
       return expression;
     }
     case 'number':
@@ -202,7 +212,12 @@ function arkBase(schema: Exclude<SchemaIR, { kind: 'ref' }>, ac: ArkContext): st
       return union(t, variants);
     }
     case 'intersection': {
-      const members = schema.members.map((member) => arkExpression(member, ac));
+      const { relaxed, closedKeys } = intersectionMembers(schema.members, ac.ctx);
+      const members = relaxed.map((member) => arkExpression(member, ac));
+      if (closedKeys !== undefined)
+        members.push(
+          `${t()}.unknown.narrow((value, ctx) => Object.keys(Object(value)).every((key) => [${closedKeys.map(quote).join(', ')}].includes(key)) || ctx.mustBe('an object without properties that no member of allOf declares'))`,
+        );
       return members.length === 1
         ? (members[0] ?? `${t()}.unknown`)
         : `${support(ac.imports, 'allOf')}(${members.join(', ')})`;
@@ -212,20 +227,44 @@ function arkBase(schema: Exclude<SchemaIR, { kind: 'ref' }>, ac: ArkContext): st
 
 function arkObject(schema: Extract<SchemaIR, { kind: 'object' }>, ac: ArkContext): string {
   const t = (): string => type(ac.imports);
-  const additional = schema.additionalProperties;
+  const declared = schema.additionalProperties;
+  // Additional properties that accept anything are the same as undeclared ones.
+  const additional =
+    declared !== false && declared !== undefined && acceptsAnything(declared)
+      ? undefined
+      : declared;
   if (schema.properties.length === 0) {
     if (additional === false) return `${t()}({}).onUndeclaredKey('reject')`;
     return `${t()}.Record(${t()}.string, ${additional === undefined ? `${t()}.unknown` : arkExpression(additional, ac)})`;
   }
-  const entries = schema.properties.map(
-    (property) =>
-      `${arkKey(property.name, !property.required)}: ${arkExpression(property.schema, ac)}`,
-  );
-  const object = `${t()}({\n${entries.map((entry) => `  ${entry.replace(/\n/g, '\n  ')},`).join('\n')}\n})`;
-  if (additional === false) return `${object}.onUndeclaredKey('reject')`;
-  if (additional !== undefined && additional.kind !== 'unknown') {
-    const known = schema.properties.map((property) => quote(property.name)).join(', ');
-    return `${support(ac.imports, 'rest')}(${object}, [${known}], ${arkExpression(additional, ac)})`;
+  // ArkType looks optional properties up with `in`, which finds `Object.prototype` members such as
+  // `constructor` on every object: those are checked as own properties instead.
+  const inherited = schema.properties.filter(isInheritedOptional);
+  const entries = schema.properties
+    .filter((property) => !isInheritedOptional(property))
+    .map(
+      (property) =>
+        `${arkKey(property.name, !property.required)}: ${arkExpression(property.schema, ac)}`,
+    );
+  let object = `${t()}({\n${entries.map((entry) => `  ${entry.replace(/\n/g, '\n  ')},`).join('\n')}\n})`;
+  const names = schema.properties.map((property) => quote(property.name)).join(', ');
+  if (additional === false) {
+    object =
+      inherited.length === 0
+        ? `${object}.onUndeclaredKey('reject')`
+        : `${object}.and(${t()}.unknown.narrow((value, ctx) => Object.keys(Object(value)).every((key) => [${names}].includes(key)) || ctx.mustBe('an object without undeclared properties')))`;
+  } else if (additional !== undefined) {
+    object = `${support(ac.imports, 'rest')}(${object}, [${names}], ${arkExpression(additional, ac)})`;
+  }
+  // Evaluated inside the callbacks, so references need no `lazy()`.
+  const inner: ArkContext = { ...ac, deferred: true };
+  for (const property of inherited) {
+    const key = quote(property.name);
+    const read =
+      ac.imports.lang === 'js'
+        ? `/** @type {Record<string, unknown>} */ (value)[${key}]`
+        : `(value as Record<string, unknown>)[${key}]`;
+    object += `.and(${t()}.unknown.narrow((value, ctx) => !Object.prototype.hasOwnProperty.call(value, ${key}) || ${read} === undefined || ${arkExpression(property.schema, inner)}.allows(${read}) || ctx.mustBe(${quote(`an object whose \`${property.name}\` matches its schema`)})))`;
   }
   return object;
 }

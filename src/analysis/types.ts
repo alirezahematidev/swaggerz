@@ -54,7 +54,12 @@ export interface QueryGroup {
   readonly module: string;
   /** Exported key factory name, e.g. `petKeys`. */
   readonly name: string;
-  /** Root key shared by every query of the group, e.g. `['pet']`. */
+  /** The group's tag after the tags it is nested under (OpenAPI 3.2), e.g. `['pets', 'cats']`. */
+  readonly tags: readonly string[];
+  /**
+   * Root key shared by every query of the group (its `all` key): the tag path, e.g. `['pet']`, or
+   * the prefix the group's keys share when a `queryKey` hook moved them away from it.
+   */
   readonly prefix: readonly string[];
 }
 
@@ -106,6 +111,8 @@ export interface OperationSymbol {
     /** Wire name of the query parameter that receives the page parameter. */
     readonly pageParam?: string;
     readonly mutationOptions?: string;
+    /** Mutations: key prefixes of the queries invalidated on success (`invalidates` option). */
+    readonly invalidates?: readonly (readonly string[])[];
   };
 }
 
@@ -127,4 +134,9 @@ export interface ModelSymbol {
   /** `types.dates: 'Date'`: name and module of the model's date shape, if it contains dates. */
   readonly datesName?: string;
   readonly datesModule?: string;
+  /**
+   * JavaScript output of recursive models: names of the helper typedefs that hold the model's
+   * top-level array types (`JsonValueArray`), which a JSDoc typedef cannot refer to itself through.
+   */
+  readonly arrayTypedefs?: readonly string[];
 }

@@ -4,7 +4,7 @@ import { compile } from '../../pipeline/compile.ts';
 import { checkOutputDirectory } from '../../pipeline/generate.ts';
 import { versionLabel } from '../../spec/detect.ts';
 import { pluralize } from '../../utils/strings.ts';
-import { EXIT, loadCliConfig, type Command } from '../context.ts';
+import { EXIT, failureCode, loadCliConfig, type Command } from '../context.ts';
 
 export const validateCommand: Command = {
   spec: {
@@ -17,7 +17,7 @@ export const validateCommand: Command = {
   async run(ctx) {
     const loaded = await loadCliConfig(ctx, 'validate');
     const result = await compile({ config: loaded.config, plugins: loaded.plugins });
-    const unsafe = checkOutputDirectory(loaded.config);
+    const unsafe = await checkOutputDirectory(loaded.config);
     const diagnostics = unsafe === undefined ? result.diagnostics : [...result.diagnostics, unsafe];
     const ok = !hasErrors(diagnostics);
     const { reporter } = ctx;
@@ -37,7 +37,7 @@ export const validateCommand: Command = {
     });
     if (!ok || result.ir === undefined) {
       reporter.error(`Validation failed: ${reporter.summary(diagnostics)}.`);
-      return EXIT.FAILED;
+      return failureCode(diagnostics);
     }
     const { ir } = result;
     reporter.success(

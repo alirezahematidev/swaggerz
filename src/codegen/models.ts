@@ -5,7 +5,7 @@ import { applyJsDocHook, renderAll, type EmitContext, type ModuleOutput } from '
 import type { ImportManager, Lang } from './imports.ts';
 import { schemaDoc } from './jsdoc.ts';
 import { literal, propertyKey, quote, renderJsDoc } from './printer.ts';
-import { printType, wrapType, type TypeContext } from './type-printer.ts';
+import { printType, printTypeNode, wrapType, type TypeContext } from './type-printer.ts';
 import type { GeneratedExport, JsDocBlock, JsDocTag } from './types.ts';
 
 function discriminatorOf(schema: SchemaIR | undefined): DiscriminatorIR | undefined {
@@ -107,13 +107,49 @@ export function jsTypedef(
       });
     }
   } else {
-    const type = printType(schema, typeCtx);
+    const type = printTypeNode(schema, typeCtx);
     tags.push({
       tag: 'typedef',
-      text: `{${extraType === undefined ? type : `${wrapType(type, 'intersection')} & ${extraType}`}} ${name}`,
+      text: `{${extraType === undefined ? type.text : `${wrapType(type, 'intersection')} & ${extraType}`}} ${name}`,
     });
   }
   return renderJsDoc({ ...doc, tags });
+}
+
+/**
+ * A type context that moves top-level array types into the model's helper typedefs
+ * (`ModelSymbol.arrayTypedefs`): `@typedef {string | JsonValue[]} JsonValue` is a circularity
+ * error, `@typedef {JsonValue[]} JsonValueArray` with `@typedef {string | JsonValueArray}
+ * JsonValue` is not. Returns the context and a function rendering the helper typedefs.
+ */
+function hoistingContext(
+  model: ModelSymbol,
+  typeCtx: TypeContext,
+  ctx: EmitContext,
+): { typeCtx: TypeContext; helpers: () => string } {
+  const names = model.arrayTypedefs ?? [];
+  if (names.length === 0) return { typeCtx, helpers: () => '' };
+  const hoisted = new Map<string, string>();
+  const hoistArray = (type: string): string => {
+    const existing = hoisted.get(type);
+    if (existing !== undefined) return existing;
+    const name = names[hoisted.size];
+    if (name === undefined) return type;
+    hoisted.set(type, name);
+    return name;
+  };
+  const helpers = (): string =>
+    [...hoisted]
+      .map(([type, name]) =>
+        renderJsDoc({
+          ...(ctx.config.features.jsdoc
+            ? { summary: `An array type of {@link ${model.name}}.` }
+            : {}),
+          tags: [{ tag: 'typedef', text: `{${type}} ${name}` }],
+        }),
+      )
+      .join('\n');
+  return { typeCtx: { ...typeCtx, hoistArray }, helpers };
 }
 
 export function generateModel(model: ModelSymbol, ctx: EmitContext): ModuleOutput {
@@ -127,10 +163,8 @@ export function generateModel(model: ModelSymbol, ctx: EmitContext): ModuleOutpu
   ];
 
   const body = (imports: ImportManager, lang: Lang): string => {
-    imports.declare(model.name);
-    model.aliases.forEach((alias) => {
-      imports.declare(alias);
-    });
+    for (const name of [model.name, ...model.aliases, ...(model.arrayTypedefs ?? [])])
+      imports.declare(name);
     const typeCtx: TypeContext = {
       imports,
       project: ctx.project,
@@ -175,10 +209,14 @@ export function generateModel(model: ModelSymbol, ctx: EmitContext): ModuleOutpu
         );
       }
     } else if (lang === 'js') {
-      parts.push(jsTypedef(model.name, schema, doc, typeCtx, extra));
+      const hoisting = hoistingContext(model, typeCtx, ctx);
+      const typedef = jsTypedef(model.name, schema, doc, hoisting.typeCtx, extra);
+      const helpers = hoisting.helpers();
+      if (helpers !== '') parts.push(helpers);
+      parts.push(typedef);
     } else {
-      const type = printType(schema, typeCtx);
-      const full = extra === undefined ? type : `${wrapType(type, 'intersection')} & ${extra}`;
+      const type = printTypeNode(schema, typeCtx);
+      const full = extra === undefined ? type.text : `${wrapType(type, 'intersection')} & ${extra}`;
       parts.push(`${renderJsDoc(doc)}export type ${model.name} = ${full};\n`);
     }
 

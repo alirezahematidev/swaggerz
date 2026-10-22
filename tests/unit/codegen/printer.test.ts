@@ -26,6 +26,11 @@ describe('property keys', () => {
     expect(propertyAccess('params', 'a-b', true)).toBe("params?.['a-b']");
   });
 
+  it('renders __proto__ as a computed key, which creates a property instead of a prototype', () => {
+    expect(propertyKey('__proto__')).toBe("['__proto__']");
+    expect(literal(JSON.parse('{"__proto__":1,"a":2}'))).toBe("{ ['__proto__']: 1, a: 2 }");
+  });
+
   it('renders JSON literals', () => {
     expect(literal({ a: [1, 'x', null, true], 'b-c': {} })).toBe(
       "{ a: [1, 'x', null, true], 'b-c': {} }",
@@ -49,6 +54,30 @@ describe('renderJsDoc', () => {
         ' * normal line',
         ' *',
         ' * @deprecated',
+        ' */',
+        '',
+      ].join('\n'),
+    );
+  });
+
+  it('escapes tags in the middle of lines and in every line of tag text', () => {
+    const doc = renderJsDoc({
+      summary: 'Use the @deprecated endpoint; mail admin@example.com',
+      tags: [
+        { tag: 'property', text: '{number} [limit] - Max items @property {number} evil' },
+        { tag: 'see', text: 'https://example.com docs\n@returns {Promise<number>} x' },
+        { tag: 'returns', text: 'See {@link Pet}.' },
+      ],
+    });
+    expect(doc).toBe(
+      [
+        '/**',
+        ' * Use the \\@deprecated endpoint; mail admin@example.com',
+        ' *',
+        ' * @property {number} [limit] - Max items \\@property {number} evil',
+        ' * @see https://example.com docs',
+        ' * \\@returns {Promise<number>} x',
+        ' * @returns See {@link Pet}.',
         ' */',
         '',
       ].join('\n'),

@@ -2,11 +2,13 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { hostname, networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SwaggerzError } from '../diagnostics/bag.ts';
 import { TOOL_NAME } from '../meta.ts';
 import { isLoopback } from '../utils/net.ts';
+import { isRecord } from '../utils/object.ts';
 import type { ServerEvent } from '../service/types.ts';
 import { ProjectService } from '../service/project.ts';
 import { ProjectWatcher } from '../service/watch.ts';
@@ -163,6 +165,50 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+/** `host:port` as in a `Host` header, lowercased, with the default port made explicit. */
+function hostKey(value: string): string {
+  const lower = value.trim().toLowerCase();
+  return /:\d+$/.test(lower) && !lower.endsWith(']') ? lower : `${lower}:80`;
+}
+
+/** An address as it appears in a URL or a `Host` header: IPv6 addresses in brackets. */
+function urlHost(address: string): string {
+  return address.includes(':') && !address.startsWith('[') ? `[${address.split('%')[0]}]` : address;
+}
+
+/**
+ * The `Host` header values that address this server (anything else may be a DNS-rebinding attack):
+ * the bound address, the loopback names and, when it listens on every interface (`0.0.0.0`, `::`),
+ * the addresses of the machine's network interfaces and its host name.
+ */
+function allowedHostsFor(address: AddressInfo, host: string): Set<string> {
+  const names = new Set([
+    'localhost',
+    '127.0.0.1',
+    '[::1]',
+    urlHost(address.address),
+    urlHost(host),
+  ]);
+  if (address.address === '0.0.0.0' || address.address === '::') {
+    for (const entries of Object.values(networkInterfaces()))
+      for (const entry of entries ?? []) names.add(urlHost(entry.address));
+    const name = hostname().toLowerCase();
+    names.add(name);
+    if (!name.includes('.')) names.add(`${name}.local`);
+  }
+  return new Set([...names].map((name) => hostKey(`${name}:${address.port}`)));
+}
+
+/** The `host:port` of an `Origin` header (`http://localhost:4400`), or `undefined`. */
+function originHost(origin: string): string | undefined {
+  try {
+    const url = new URL(origin);
+    return url.protocol === 'http:' ? hostKey(url.host) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function tokenMatches(expected: string, header: string | undefined): boolean {
   const provided = header?.startsWith('Bearer ') === true ? header.slice('Bearer '.length) : '';
   const a = Buffer.from(expected);
@@ -237,14 +283,21 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     },
     'POST /api/generate': async (req) => {
       const body = await readBody(req);
-      if (
-        typeof body !== 'object' ||
-        body === null ||
-        (body as { confirm?: unknown }).confirm !== true
-      ) {
-        throw new HttpError(400, 'Generation must be confirmed with { "confirm": true }');
+      const request = isRecord(body) ? body : {};
+      if (request.confirm !== true || typeof request.preview !== 'string') {
+        throw new HttpError(
+          400,
+          'Generation must be confirmed with { "confirm": true, "preview": "<id of the preview>" }',
+        );
       }
-      return state.generate();
+      // Only the reviewed changes are written; anything else is asked again.
+      const result = await state.generate(request.preview);
+      if (result.outdated === true)
+        throw new HttpError(
+          409,
+          'The changes differ from the preview (the specification, the config or the output changed). Nothing was written; review the new preview.',
+        );
+      return result;
     },
     'POST /api/reload': async () => {
       await watcher.reload('manual');
@@ -255,7 +308,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   const assets = assetIndex();
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // DNS-rebinding protection: only answer requests addressed to this server.
-    if (!allowedHosts.has((req.headers.host ?? '').toLowerCase()))
+    if (!allowedHosts.has(hostKey(req.headers.host ?? '')))
       throw new HttpError(421, 'Unexpected Host header');
     const url = new URL(req.url ?? '/', origin);
     const method = req.method ?? 'GET';
@@ -282,9 +335,13 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       if (!tokenMatches(token, req.headers.authorization))
         throw new HttpError(401, 'Missing or invalid session token');
       if (method !== 'GET') {
+        // A page of this server, whichever of its addresses it was opened with (CSRF protection).
         const requestOrigin = req.headers.origin;
-        if (requestOrigin !== undefined && requestOrigin !== origin)
-          throw new HttpError(403, 'Cross-origin request rejected');
+        if (requestOrigin !== undefined) {
+          const from = originHost(requestOrigin);
+          if (from === undefined || !allowedHosts.has(from))
+            throw new HttpError(403, 'Cross-origin request rejected');
+        }
         if (!(req.headers['content-type'] ?? '').startsWith('application/json'))
           throw new HttpError(415, 'Expected application/json');
       }
@@ -347,17 +404,8 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
   }
 
   const address = server.address() as AddressInfo;
-  const urlHost = address.family === 'IPv6' ? `[${address.address}]` : address.address;
-  origin = `http://${urlHost}:${address.port}`;
-  allowedHosts = new Set(
-    [
-      `${urlHost}:${address.port}`,
-      `localhost:${address.port}`,
-      `127.0.0.1:${address.port}`,
-      `[::1]:${address.port}`,
-      `${host}:${address.port}`,
-    ].map((h) => h.toLowerCase()),
-  );
+  origin = `http://${urlHost(address.address)}:${address.port}`;
+  allowedHosts = allowedHostsFor(address, host);
 
   // Started once the server listens, so a failed start leaves nothing running.
   const heartbeat = setInterval(() => {

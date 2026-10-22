@@ -10,12 +10,16 @@ process.on('warning', (warning) => {
   process.stderr.write(`${warning.name}: ${warning.message}\n`);
 });
 
+// Long-running commands (watch mode, dashboard, MCP server) stop gracefully on the first Ctrl+C;
+// a second one ends the process. Other commands keep Node's default: Ctrl+C ends them at once.
 const controller = new AbortController();
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.once(signal, () => {
-    controller.abort();
-  });
-}
+const stopGracefully = (): void => {
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.once(signal, () => {
+      controller.abort();
+    });
+  }
+};
 
 process.exitCode = await main(process.argv.slice(2), {
   stdout: process.stdout,
@@ -23,4 +27,5 @@ process.exitCode = await main(process.argv.slice(2), {
   env: process.env,
   cwd: process.cwd(),
   signal: controller.signal,
+  onLongRunning: stopGracefully,
 });

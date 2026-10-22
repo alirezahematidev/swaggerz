@@ -46,7 +46,7 @@ Every action has a `target`, an [RFC 9535](https://www.rfc-editor.org/rfc/rfc953
 | `copy`         | (Overlay 1.1) A JSONPath query selecting exactly one node of the document being patched; its value is merged like `update`.                                                                                                                                                                                                |
 | `remove: true` | The node is removed from its object or array.                                                                                                                                                                                                                                                                              |
 
-`remove` wins over `update`, and `update` over `copy`. A target that selects nothing changes nothing.
+`remove` wins over `update`, and `update` over `copy`. A target that selects nothing changes nothing, and a node selected through several paths is changed once.
 
 ### Reusable actions (Overlay 1.2)
 
@@ -79,7 +79,7 @@ $.components.schemas[?@.type == 'object' && !@.required]
 $..parameters[?match(@.name, 'X-.*')]
 ```
 
-The implementation passes the [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite). Non-standard extensions that some tools accept (`in`, `=~`, script expressions) are syntax errors: they would not be portable.
+The implementation passes the [JSONPath Compliance Test Suite](https://github.com/jsonpath-standard/jsonpath-compliance-test-suite). Non-standard extensions that some tools accept (`in`, `=~`, script expressions) are syntax errors: they would not be portable. `match()` and `search()` take [I-Regexp](https://www.rfc-editor.org/rfc/rfc9485) patterns; a pattern outside that grammar (lookarounds, backreferences, lazy quantifiers, `\d`) matches nothing, as RFC 9535 requires.
 
 ## Versions and scope
 

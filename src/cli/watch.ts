@@ -3,13 +3,13 @@ import { SwaggerzError } from '../diagnostics/bag.ts';
 import { polledDocuments, RemoteWatcher, type PolledDocument } from '../loader/remote-watcher.ts';
 import { FileWatcher } from '../utils/file-watcher.ts';
 import { generateOnce } from './commands/generate.ts';
-import { findConfigFile } from '../config/load.ts';
+import { configNotFound, findConfigFile } from '../config/load.ts';
 import { EXIT, option, relative, type CommandContext } from './context.ts';
 
 const DEBOUNCE_MS = 120;
 
 /**
- * Watches the config file, every local document of the specification (including external
+ * Watches the config file, local plugin modules, every local document of the specification (including external
  * `$ref` targets) and local overlays, polls remote documents (`spec.fetch.poll`), and regenerates
  * on change.
  * Failures are reported and watching continues.
@@ -23,7 +23,9 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
     explicitConfig === undefined
       ? await findConfigFile(ctx.cwd)
       : path.resolve(ctx.cwd, explicitConfig);
-  let targets = new Set<string>(configFile === undefined ? [] : [configFile]);
+  // Without a config file there is nothing to watch: fail like a one-shot run (exit code 2).
+  if (configFile === undefined) throw configNotFound(ctx.cwd);
+  let targets = new Set<string>([configFile]);
   let remoteTargets: readonly PolledDocument[] = [];
   let interval = 0;
   let unpolledInput: string | undefined;
@@ -31,8 +33,10 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
   const run = async (): Promise<void> => {
     try {
       const { result, loaded } = await generateOnce(ctx);
-      const files = new Set<string>(configFile === undefined ? [] : [configFile]);
+      const files = new Set<string>([configFile]);
       if (loaded.file !== undefined) files.add(loaded.file);
+      // Local plugin modules; the next run imports them again when they changed.
+      for (const file of loaded.watchFiles) files.add(file);
       if (!/^https?:/i.test(loaded.config.spec.input)) files.add(loaded.config.spec.input);
       for (const overlay of loaded.config.spec.overlays)
         if (!/^https?:/i.test(overlay)) files.add(overlay);
@@ -99,12 +103,11 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       `${unpolledInput} is not polled for changes; set spec.fetch.poll to true or an interval to poll it.`,
     );
   }
-  if (watched.length === 0) {
-    reporter.warn('Nothing to watch.');
-  } else {
-    reporter.log(reporter.paint(`Watching ${watched.join(', ')}. Press Ctrl+C to stop.`, 'dim'));
-  }
+  reporter.log(reporter.paint(`Watching ${watched.join(', ')}. Press Ctrl+C to stop.`, 'dim'));
 
+  // Signal listeners do not keep Node.js running; this timer does, even while no directory can be
+  // watched (the next change to a watched file or a remote document recovers).
+  const keepAlive = setInterval(() => undefined, 1 << 30);
   await new Promise<void>((resolve) => {
     if (ctx.signal.aborted) resolve();
     ctx.signal.addEventListener(
@@ -115,6 +118,7 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       { once: true },
     );
   });
+  clearInterval(keepAlive);
   await Promise.all([watcher.close(), remote.close()]);
   return EXIT.OK;
 }

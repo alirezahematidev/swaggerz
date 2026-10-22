@@ -98,12 +98,15 @@ const FUNCTION_PARAMETERS: Readonly<Record<FunctionName, readonly ('value' | 'no
 };
 
 const MAX_SAFE = Number.MAX_SAFE_INTEGER;
+/** Nesting of filters, parentheses and function calls; deeper expressions are rejected. */
+const MAX_NESTING = 100;
 
 // Parser ------------------------------------------------------------------------------------
 
 class Parser {
   readonly #text: string;
   #position = 0;
+  #nesting = 0;
 
   constructor(text: string) {
     this.#text = text;
@@ -301,7 +304,22 @@ class Parser {
     return String.fromCharCode(high);
   }
 
+  /** Runs a nested rule, refusing expressions nested deeper than {@link MAX_NESTING}. */
+  #nested<T>(rule: () => T): T {
+    if (this.#nesting >= MAX_NESTING) this.#fail(`Nested more than ${MAX_NESTING} levels deep`);
+    this.#nesting++;
+    try {
+      return rule();
+    } finally {
+      this.#nesting--;
+    }
+  }
+
   #logicalOr(): LogicalExpr {
+    return this.#nested(() => this.#logicalOrUnchecked());
+  }
+
+  #logicalOrUnchecked(): LogicalExpr {
     const operands = [this.#logicalAnd()];
     for (;;) {
       this.#skipSpace();
@@ -408,7 +426,8 @@ class Parser {
       }
     }
     const name = /^[a-z][a-z0-9_]*/.exec(this.#text.slice(this.#position))?.[0];
-    if (name !== undefined && this.#peek(name.length) === '(') return this.#function(name);
+    if (name !== undefined && this.#peek(name.length) === '(')
+      return this.#nested(() => this.#function(name));
     this.#fail('Expected a query, a literal or a function');
   }
 
@@ -515,9 +534,18 @@ function children(node: JsonPathNode): JsonPathNode[] {
   return [];
 }
 
+/** The node and its descendants in document order (each node before its children), iteratively. */
 function descendantsOrSelf(node: JsonPathNode): JsonPathNode[] {
-  const result: JsonPathNode[] = [node];
-  for (const child of children(node)) result.push(...descendantsOrSelf(child));
+  const result: JsonPathNode[] = [];
+  const stack: JsonPathNode[] = [node];
+  for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
+    result.push(current);
+    const next = children(current);
+    for (let index = next.length - 1; index >= 0; index--) {
+      const child = next[index];
+      if (child !== undefined) stack.push(child);
+    }
+  }
   return result;
 }
 
@@ -657,40 +685,181 @@ function callFunction(call: FunctionCall, current: unknown, root: unknown): Valu
 }
 
 const regexpCache = new Map<string, RegExp | undefined>();
+/** Patterns may come from the document (`match(@, $.regex)`), so the cache is bounded. */
+const REGEXP_CACHE_SIZE = 1000;
 
 /**
- * Translates an I-Regexp to a JavaScript regular expression: `.` matches any character but line
- * feed and carriage return (JavaScript also excludes U+2028 and U+2029). Invalid patterns yield
- * `undefined`, and the function then returns false as RFC 9535 requires.
+ * Translates an I-Regexp (RFC 9485) to a JavaScript regular expression. Patterns that are not
+ * I-Regexps (lookarounds, backreferences, lazy quantifiers, `\d` and other multi-character escapes,
+ * unbalanced parentheses) yield `undefined`, and the function then returns false as RFC 9535
+ * requires; without that check, a pattern such as `a)|(b` would escape the anchoring of `match()`.
+ * The translation follows RFC 9485, section 5.3: `.` matches any character but line feed and
+ * carriage return (JavaScript also excludes U+2028 and U+2029), and `match()` is anchored by
+ * enveloping the pattern in `^(?:` and `)$`. Like that mapping and the JSONPath Compliance Test
+ * Suite, an explicit `^` or `$` acts as an anchor.
  */
 function iRegexp(pattern: string, anchored: boolean): RegExp | undefined {
   const key = `${anchored ? 'm' : 's'}:${pattern}`;
   if (regexpCache.has(key)) return regexpCache.get(key);
-  let source = '';
-  let inClass = false;
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i] ?? '';
-    if (char === '\\') {
-      source += char + (pattern[i + 1] ?? '');
-      i++;
-    } else if (inClass) {
-      if (char === ']') inClass = false;
-      source += char;
-    } else if (char === '[') {
-      inClass = true;
-      source += char;
-    } else {
-      source += char === '.' ? '[^\\n\\r]' : char;
-    }
-  }
+  const source = translateIRegexp(pattern);
   let regexp: RegExp | undefined;
   try {
-    regexp = new RegExp(anchored ? `^(?:${source})$` : source, 'u');
+    regexp =
+      source === undefined ? undefined : new RegExp(anchored ? `^(?:${source})$` : source, 'u');
   } catch {
+    // For example a range quantifier with min > max, or out-of-order class ranges.
     regexp = undefined;
   }
+  if (regexpCache.size >= REGEXP_CACHE_SIZE) regexpCache.clear();
   regexpCache.set(key, regexp);
   return regexp;
+}
+
+/** The characters of I-Regexp single-character escapes (`\(`, `\n`, …). */
+const SINGLE_CHAR_ESCAPES: ReadonlySet<string> = new Set('()*+-.?[\\]^nrt{|}');
+/** `\p{…}` and `\P{…}`: Unicode general categories, the only properties I-Regexp allows. */
+const CATEGORY_ESCAPE =
+  /^\\[pP]\{(?:L[lmotu]?|M[cen]?|N[dlo]?|P[c-fios]?|Z[lps]?|S[ckmo]?|C[cfno]?)\}/;
+const RANGE_QUANTIFIER = /^\{[0-9]+(?:,[0-9]*)?\}/;
+/** Characters that are not a NormalChar outside classes. */
+const SPECIAL: ReadonlySet<string> = new Set('()*+.?[\\]{|}');
+
+/**
+ * Checks a pattern against the I-Regexp grammar (RFC 9485, section 3) and returns its JavaScript
+ * translation, or `undefined` when it is not an I-Regexp. One pass, without recursion.
+ */
+function translateIRegexp(pattern: string): string | undefined {
+  let out = '';
+  let depth = 0;
+  /** Whether the previous piece is an atom that a quantifier may follow. */
+  let atom = false;
+  let i = 0;
+  while (i < pattern.length) {
+    const char = pattern[i] ?? '';
+    const code = pattern.codePointAt(i) ?? 0;
+    if (code >= 0xd800 && code <= 0xdfff) return undefined;
+    if (char === '(') {
+      depth++;
+      out += '(';
+      atom = false;
+      i++;
+    } else if (char === ')') {
+      if (depth === 0) return undefined;
+      depth--;
+      out += ')';
+      atom = true;
+      i++;
+    } else if (char === '|') {
+      out += '|';
+      atom = false;
+      i++;
+    } else if (char === '*' || char === '+' || char === '?') {
+      // Also rejects `(?`, lazy (`*?`) and possessive (`*+`) quantifiers.
+      if (!atom) return undefined;
+      out += char;
+      atom = false;
+      i++;
+    } else if (char === '{') {
+      const quantifier = RANGE_QUANTIFIER.exec(pattern.slice(i))?.[0];
+      if (!atom || quantifier === undefined) return undefined;
+      out += quantifier;
+      atom = false;
+      i += quantifier.length;
+    } else if (char === '.') {
+      out += '[^\\n\\r]';
+      atom = true;
+      i++;
+    } else if (char === '\\') {
+      const escape = escapeAt(pattern, i);
+      if (escape === undefined) return undefined;
+      // JavaScript's Unicode mode only allows `\-` inside classes.
+      out += escape.text === '\\-' ? '-' : escape.text;
+      atom = true;
+      i += escape.length;
+    } else if (char === '[') {
+      const charClass = classAt(pattern, i);
+      if (charClass === undefined) return undefined;
+      out += charClass.text;
+      atom = true;
+      i += charClass.length;
+    } else if (SPECIAL.has(char)) {
+      return undefined;
+    } else {
+      const literal = String.fromCodePoint(code);
+      out += literal;
+      atom = true;
+      i += literal.length;
+    }
+  }
+  return depth === 0 ? out : undefined;
+}
+
+/** A single-character or category escape at `start`, in its JavaScript class form. */
+function escapeAt(pattern: string, start: number): { text: string; length: number } | undefined {
+  const next = pattern[start + 1] ?? '';
+  if (next === 'p' || next === 'P') {
+    const category = CATEGORY_ESCAPE.exec(pattern.slice(start))?.[0];
+    return category === undefined ? undefined : { text: category, length: category.length };
+  }
+  return SINGLE_CHAR_ESCAPES.has(next) ? { text: `\\${next}`, length: 2 } : undefined;
+}
+
+/** A character class (`charClassExpr`) at `start`. */
+function classAt(pattern: string, start: number): { text: string; length: number } | undefined {
+  let i = start + 1;
+  let out = '[';
+  if (pattern[i] === '^') {
+    out += '^';
+    i++;
+  }
+  /** A CCchar: a character other than `-`, `[`, `\` and `]`, or a single-character escape. */
+  const classChar = (): string | undefined => {
+    const char = pattern[i] ?? '';
+    if (char === '\\') {
+      const escape = escapeAt(pattern, i);
+      if (escape === undefined || escape.text.length !== 2) return undefined;
+      i += 2;
+      return escape.text;
+    }
+    const code = pattern.codePointAt(i);
+    if (code === undefined || char === '-' || char === '[' || char === ']') return undefined;
+    if (code >= 0xd800 && code <= 0xdfff) return undefined;
+    const literal = String.fromCodePoint(code);
+    i += literal.length;
+    return literal;
+  };
+  let elements = 0;
+  for (;;) {
+    const char = pattern[i];
+    if (char === undefined) return undefined;
+    if (char === ']') {
+      // `[]` and `[^]` are not character classes.
+      if (elements === 0) return undefined;
+      return { text: `${out}]`, length: i + 1 - start };
+    }
+    if (char === '-') {
+      // A literal `-` only comes first or last.
+      if (elements > 0 && pattern[i + 1] !== ']') return undefined;
+      out += '\\-';
+      i++;
+    } else if (char === '\\' && (pattern[i + 1] === 'p' || pattern[i + 1] === 'P')) {
+      const escape = escapeAt(pattern, i);
+      if (escape === undefined) return undefined;
+      out += escape.text;
+      i += escape.length;
+    } else {
+      const low = classChar();
+      if (low === undefined) return undefined;
+      out += low;
+      if (pattern[i] === '-' && pattern[i + 1] !== ']') {
+        i++;
+        const high = classChar();
+        if (high === undefined) return undefined;
+        out += `-${high}`;
+      }
+    }
+    elements++;
+  }
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {

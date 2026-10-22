@@ -35,12 +35,14 @@ export async function fetchText(url: URL, options: FetchTextOptions): Promise<Fe
 
 /**
  * Like {@link fetchText}, but sends `If-None-Match`/`If-Modified-Since` from `validators` and
- * resolves with `undefined` when the server answers `304 Not Modified`.
+ * resolves with `undefined` when the server answers `304 Not Modified`. `signal` cancels the
+ * request (and reading its body) in addition to the timeout.
  */
 export async function fetchTextIfModified(
   url: URL,
   options: FetchTextOptions,
   validators: Validators,
+  signal?: AbortSignal,
 ): Promise<FetchedText | undefined> {
   let current = url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -58,7 +60,10 @@ export async function fetchTextIfModified(
     const response = await fetch(current, {
       headers,
       redirect: 'manual',
-      signal: AbortSignal.timeout(options.timeout),
+      signal:
+        signal === undefined
+          ? AbortSignal.timeout(options.timeout)
+          : AbortSignal.any([AbortSignal.timeout(options.timeout), signal]),
     });
     if (response.status === 304) {
       await response.body?.cancel();

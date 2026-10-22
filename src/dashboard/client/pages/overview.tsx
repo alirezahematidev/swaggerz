@@ -17,7 +17,7 @@ const STATUS: Record<OverviewResponse['generation']['status'], { tone: BadgeTone
     never: { tone: 'warning', label: 'Not generated yet' },
     'up-to-date': { tone: 'success', label: 'Up to date' },
     stale: { tone: 'warning', label: 'Out of date' },
-    failed: { tone: 'danger', label: 'Compilation failed' },
+    failed: { tone: 'danger', label: 'Cannot generate' },
   };
 
 function StatCard({

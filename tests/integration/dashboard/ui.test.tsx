@@ -376,4 +376,82 @@ describe('dashboard app shell', () => {
     expect(await screen.findByText('/health')).toBeDefined();
     expect(screen.getAllByText('New').length).toBeGreaterThan(0);
   });
+
+  it('drops a preview the project changed since, and writes the one it shows', async () => {
+    let emit: ((event: object) => void) | undefined;
+    let previews = 0;
+    const generated: unknown[] = [];
+    vi.stubGlobal('fetch', async (input: string, init: RequestInit = {}) => {
+      if (input === '/api/events') {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const encoder = new TextEncoder();
+            emit = (event) => {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+            };
+            emit({ type: 'hello', revision: 1 });
+          },
+        });
+        return new Response(stream, { headers: { 'content-type': 'text/event-stream' } });
+      }
+      if (input === '/api/generate' && typeof init.body === 'string')
+        generated.push(JSON.parse(init.body));
+      if (input === '/api/preview') previews++;
+      const body = {
+        '/api/overview': overview,
+        '/api/operations': [operation],
+        '/api/models': [model],
+        '/api/preview': {
+          ok: true,
+          id: `plan-${previews}`,
+          directory: 'src/api',
+          diagnostics: [],
+          changes: [{ path: 'pets/get-pet.ts', kind: 'update', additions: 1, deletions: 1 }],
+        },
+        '/api/generate': {
+          ok: true,
+          diagnostics: [],
+          write: {
+            directory: 'src/api',
+            created: [],
+            updated: ['pets/get-pet.ts'],
+            deleted: [],
+            unchanged: [],
+            dryRun: false,
+          },
+        },
+      }[input];
+      return new Response(JSON.stringify(body ?? { error: 'not found' }), {
+        status: body === undefined ? 404 : 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    sessionStorage.setItem('swaggerz-dashboard-token', 'secret');
+    const { initToken } = await import('../../../src/dashboard/client/api.ts');
+    initToken();
+    location.hash = '#/generate';
+
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText('Live reload')).toBeDefined();
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Compute preview' }));
+    expect(await screen.findByRole('button', { name: 'Write 1 change' })).toBeDefined();
+
+    // The specification changed: the preview no longer describes what would be written.
+    await act(async () => {
+      emit?.({ type: 'reload', revision: 2, trigger: 'watch', files: ['openapi.yaml'], ok: true });
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Write 1 change' })).toBeNull();
+    });
+    expect(screen.getByText(/changed since the preview/)).toBeDefined();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Compute preview' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Write 1 change' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Write files' }));
+    await waitFor(() => {
+      expect(generated).toEqual([{ confirm: true, preview: 'plan-2' }]);
+    });
+  });
 });

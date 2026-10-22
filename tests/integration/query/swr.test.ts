@@ -140,6 +140,28 @@ describe('generated SWR hooks', () => {
     expect(server.requests.map((r) => r.rawQuery)).toContain('cursor=page2&limit=1');
   });
 
+  it('ends an infinite list after a page without data', async () => {
+    // A `null` page has no cursor to continue from: it must not repeat the first page.
+    server.respond(() => ({ body: null }));
+    const { result } = hook(
+      () =>
+        call(
+          'useListShapesInfinite',
+          { 'X-Request-ID': 'r4', limit: 1 },
+          { initialPageParam: undefined, getNextPageParam: () => 'next' },
+        ) as SwrResult & { size: number; setSize(size: number): Promise<unknown> },
+    );
+    await waitFor(() => {
+      expect(result.current.data).toEqual([null]);
+    });
+    await act(() => result.current.setSize(2));
+    await waitFor(() => {
+      expect(result.current.size).toBe(2);
+    });
+    expect(result.current.data).toEqual([null]);
+    expect(server.requests).toHaveLength(1);
+  });
+
   it('revalidates every loaded page of infinite lists after a mutation', async () => {
     // Pages reflect a version that the mutation bumps, so stale pages are visible.
     let version = 1;

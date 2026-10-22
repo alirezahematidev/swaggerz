@@ -14,7 +14,7 @@ import {
 } from './jsonpath.ts';
 import { locatePointer } from './locate.ts';
 import { DocumentParseError, detectFormat, parseDocumentText } from './parse.ts';
-import { parsePointer } from './pointer.ts';
+import { parseFragment } from './pointer.ts';
 import type { LoadedDocument } from './store.ts';
 
 /**
@@ -36,6 +36,11 @@ export interface OverlayOptions {
   /** Origin of a remote specification: configured headers are only sent there. */
   readonly credentialOrigin?: string;
   readonly diagnostics: DiagnosticBag;
+  /**
+   * Receives every array of the result that elements were removed from: positions inside it no
+   * longer match the text of the document.
+   */
+  readonly shifted?: WeakSet<object>;
 }
 
 /** The newest Overlay Specification minor version whose features are implemented. */
@@ -47,9 +52,11 @@ const SUPPORTED_MINOR = 2;
  */
 export async function applyOverlays(document: unknown, options: OverlayOptions): Promise<unknown> {
   let result = structuredClone(document);
+  const shifted = options.shifted ?? new WeakSet<object>();
   for (const location of options.overlays) {
     const overlay = await loadOverlay(location, options);
-    if (overlay !== undefined) result = new OverlayRun(overlay, options.diagnostics).apply(result);
+    if (overlay !== undefined)
+      result = new OverlayRun(overlay, options.diagnostics, shifted).apply(result);
   }
   return result;
 }
@@ -128,10 +135,12 @@ class MergeError extends Error {}
 class OverlayRun {
   readonly #overlay: LoadedDocument;
   readonly #diagnostics: DiagnosticBag;
+  readonly #shifted: WeakSet<object>;
 
-  constructor(overlay: LoadedDocument, diagnostics: DiagnosticBag) {
+  constructor(overlay: LoadedDocument, diagnostics: DiagnosticBag, shifted: WeakSet<object>) {
     this.#overlay = overlay;
     this.#diagnostics = diagnostics;
+    this.#shifted = shifted;
   }
 
   #report(
@@ -271,8 +280,7 @@ class OverlayRun {
         );
         return false;
       }
-      // Later array elements first, so earlier indices stay valid.
-      for (const node of [...targets].sort(compareForRemoval)) removeAt(holder, node.path);
+      this.#remove(holder, targets);
       return true;
     }
     let value: unknown;
@@ -304,13 +312,40 @@ class OverlayRun {
       return false;
     }
     try {
-      for (const node of targets) mergeAt(holder, node, structuredClone(value));
+      for (const node of distinctTargets(holder, targets))
+        mergeAt(holder, node, structuredClone(value));
     } catch (error) {
       if (!(error instanceof MergeError)) throw error;
       this.#report('error', 'overlay/incompatible-update', error.message, source);
       return false;
     }
     return true;
+  }
+
+  /**
+   * Removes the selected nodes. Every parent is looked up before anything is removed, each member
+   * is removed once even when several paths lead to it, and array elements from the last, so the
+   * indices of the others stay valid.
+   */
+  #remove(holder: { root: unknown }, targets: readonly JsonPathNode[]): void {
+    const removals = new Map<object, Set<string | number>>();
+    for (const node of targets) {
+      const { parent, key } = parentOf(holder, node.path);
+      if (!Array.isArray(parent) && !isRecord(parent)) continue;
+      const keys = removals.get(parent) ?? new Set<string | number>();
+      keys.add(key);
+      removals.set(parent, keys);
+    }
+    for (const [parent, keys] of removals) {
+      if (Array.isArray(parent)) {
+        const indices = [...keys].filter((key) => typeof key === 'number').sort((a, b) => b - a);
+        for (const index of indices) parent.splice(index, 1);
+        // Positions of the remaining elements in the document's text are no longer valid.
+        if (indices.length > 0) this.#shifted.add(parent);
+      } else if (isRecord(parent)) {
+        for (const key of keys) if (typeof key === 'string') delete parent[key];
+      }
+    }
   }
 
   /** Overlay 1.2 Reusable Action Reference Objects: `{ $ref: '#/components/actions/x', target }`. */
@@ -320,12 +355,17 @@ class OverlayRun {
     components: Record<string, unknown>,
   ): Record<string, unknown> | undefined {
     if (entry.$ref === undefined) return entry;
-    const segments = typeof entry.$ref === 'string' ? parsePointer(entry.$ref) : undefined;
+    const segments =
+      typeof entry.$ref === 'string' && entry.$ref.startsWith('#')
+        ? parseFragment(entry.$ref)
+        : undefined;
     const name =
       segments?.length === 3 && segments[0] === 'components' && segments[1] === 'actions'
         ? segments[2]
         : undefined;
-    const reusable = name === undefined ? undefined : components[name];
+    // Own entries only: `#/components/actions/__proto__` must not reach Object.prototype.
+    const reusable =
+      name === undefined || !Object.hasOwn(components, name) ? undefined : components[name];
     if (!isRecord(reusable)) {
       this.#report(
         'error',
@@ -366,15 +406,29 @@ class OverlayRun {
   }
 }
 
-function compareForRemoval(a: JsonPathNode, b: JsonPathNode): number {
-  for (let i = 0; i < Math.min(a.path.length, b.path.length); i++) {
-    const x = a.path[i];
-    const y = b.path[i];
-    if (x === y) continue;
-    if (typeof x === 'number' && typeof y === 'number') return y - x;
-    return 0;
-  }
-  return b.path.length - a.path.length;
+/**
+ * The selected nodes, each once: an object or array reached through several paths is merged into
+ * once, and so is a primitive in the same member of the same parent.
+ */
+function distinctTargets(
+  holder: { root: unknown },
+  targets: readonly JsonPathNode[],
+): JsonPathNode[] {
+  const containers = new Set<object>();
+  const slots = new Map<unknown, Set<string | number>>();
+  return targets.filter((node) => {
+    if (typeof node.value === 'object' && node.value !== null) {
+      if (containers.has(node.value)) return false;
+      containers.add(node.value);
+      return true;
+    }
+    const { parent, key } = parentOf(holder, node.path);
+    const keys = slots.get(parent) ?? new Set<string | number>();
+    if (keys.has(key)) return false;
+    keys.add(key);
+    slots.set(parent, keys);
+    return true;
+  });
 }
 
 const isPrimitive = (value: unknown): boolean => value === null || typeof value !== 'object';
@@ -403,12 +457,6 @@ function parentOf(
     key = segment;
   }
   return { parent, key };
-}
-
-function removeAt(holder: { root: unknown }, trail: Path): void {
-  const { parent, key } = parentOf(holder, trail);
-  if (Array.isArray(parent) && typeof key === 'number') parent.splice(key, 1);
-  else if (isRecord(parent) && typeof key === 'string') delete parent[key];
 }
 
 function describe(value: unknown): string {

@@ -68,7 +68,7 @@ const GENERATION: Record<
   never: { tone: 'warning', label: 'Not generated' },
   'up-to-date': { tone: 'success', label: 'Output up to date' },
   stale: { tone: 'warning', label: 'Output out of date' },
-  failed: { tone: 'danger', label: 'Compilation failed' },
+  failed: { tone: 'danger', label: 'Cannot generate' },
 };
 
 const LIVE: Record<LiveState | 'off', { tone: BadgeTone; label: string }> = {
@@ -586,6 +586,7 @@ export function App() {
     case 'generate':
       page = (
         <GeneratePage
+          version={version}
           onGenerated={() => {
             setVersion((v) => v + 1);
           }}

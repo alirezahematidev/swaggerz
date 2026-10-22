@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { access, copyFile, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, copyFile, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -349,7 +349,163 @@ describe('commands on a project', () => {
   });
 });
 
+describe('hostile input and failures', () => {
+  it('prints untrusted text without terminal control sequences', async () => {
+    const spec = {
+      openapi: '3.0.3',
+      info: {
+        title: 'Pets\u001b[2J\u001b]0;pwned\u0007\u001b]52;c;cHduZWQ=\u0007\u009b2J',
+        version: '1',
+      },
+      paths: {
+        '/pets\u001b[2K': {
+          get: { operationId: 'list\u001b[2KPets', responses: { '200': { description: 'ok' } } },
+        },
+      },
+    };
+    const project = await createProject('cli-escapes', {
+      files: { 'spec.json': JSON.stringify(spec) },
+      config: { spec: { version: '3.0', input: './spec.json' } },
+    });
+    const outputs: string[] = [];
+    for (const args of [['validate'], ['inspect'], ['lint'], ['lint', '--color']]) {
+      const result = await run(args, project);
+      outputs.push(result.stdout + result.stderr);
+    }
+    const all = outputs.join('\n');
+    expect(all).toContain('Pets\\x1b[2J\\x1b]0;pwned\\x07');
+    expect(all).toContain('/pets\\x1b[2K');
+    expect(all).toContain('operationId "list\\x1b[2KPets"');
+    // Only the CLI's own colors remain.
+    expect(all).toContain(`${String.fromCharCode(27)}[32m✔`);
+    const controls: string[] = [];
+    for (let index = 0; index < all.length; index++) {
+      const code = all.charCodeAt(index);
+      if (code === 27 && /^\[\d+m/.test(all.slice(index + 1, index + 6))) continue;
+      if ((code < 0x20 && code !== 0x09 && code !== 0x0a) || (code >= 0x7f && code <= 0x9f))
+        controls.push(code.toString(16));
+    }
+    expect(controls).toEqual([]);
+  });
+
+  it('exits with 2 when the output directory is not safe', async () => {
+    const project = await createProject('cli-unsafe', { config: { output: { directory: '.' } } });
+    for (const args of [['generate'], ['generate', '--check'], ['validate'], ['clean']]) {
+      const result = await run(args, project);
+      expect(result.code, args.join(' ')).toBe(2);
+      expect(result.stderr).toContain('config/unsafe-output');
+    }
+  });
+
+  it('rejects numeric options that are not plain non-negative integers', async () => {
+    const project = await createProject('cli-numbers');
+    for (const value of ['', '0x2', '1e1', '-1', '1.5'])
+      expect((await run(['lint', '--max-warnings', value], project)).code, value).toBe(2);
+    for (const value of ['', '0x10', '70000'])
+      expect((await run(['dashboard', '--port', value], project)).code, value).toBe(2);
+  });
+
+  it('generate --watch without a config file fails with a usage error', async () => {
+    const project = await createProject('cli-watch-no-config');
+    await rm(path.join(project, 'swaggerz.config.mjs'));
+    const result = await run(['generate', '--watch'], project);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('config/not-found');
+  });
+
+  it('clean checks every file first and deletes nothing through a symbolic link', async () => {
+    const project = await createProject('cli-clean-symlink');
+    expect((await run(['generate'], project)).code).toBe(0);
+    const output = path.join(project, 'src/generated/api');
+    const outside = path.join(project, 'outside');
+    // The generated `store/` directory now lives elsewhere and is linked back.
+    await rename(path.join(output, 'store'), outside);
+    await symlink(outside, path.join(output, 'store'), 'dir');
+    const result = await run(['clean'], project);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('output/write-failed');
+    expect(result.stderr).toContain('Refusing to delete store/');
+    expect(await exists(path.join(output, 'client.ts'))).toBe(true);
+    expect(await exists(path.join(output, 'index.ts'))).toBe(true);
+    const json = JSON.parse((await run(['clean', '--json'], project)).stdout) as {
+      ok: boolean;
+      diagnostics: { code: string }[];
+    };
+    expect(json.ok).toBe(false);
+    expect(json.diagnostics.map((d) => d.code)).toEqual(['output/write-failed']);
+  });
+
+  it('reports a dashboard port that is in use as a usage error', async () => {
+    const server = createServer();
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const project = await createProject('cli-dashboard-port');
+      const port = String((server.address() as AddressInfo).port);
+      const result = await run(['dashboard', '--port', port], project);
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain(`127.0.0.1:${port}: the port is already in use`);
+      expect(result.stderr).not.toContain('Internal error');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'ends a one-shot command on the first Ctrl+C',
+    async () => {
+      let requested: () => void = () => undefined;
+      const request = new Promise<void>((resolve) => {
+        requested = resolve;
+      });
+      // A server that never answers: `validate` waits for the 30 s fetch timeout otherwise.
+      const server = createServer(() => {
+        requested();
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/openapi.json`;
+      const project = await createProject('cli-interrupt', {
+        config: { spec: { version: '3.0', input: url } },
+      });
+      const child = start(['validate'], project);
+      try {
+        await request;
+        const started = Date.now();
+        child.kill('SIGINT');
+        await exited(child);
+        expect(child.signalCode ?? child.exitCode).toBe('SIGINT');
+        expect(Date.now() - started).toBeLessThan(5_000);
+      } finally {
+        child.kill('SIGKILL');
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
+    },
+  );
+});
+
 describe('long-running commands', () => {
+  it('reloads changed local plugins in watch mode', async () => {
+    const plugin = (version: string): string =>
+      `export default { name: 'version', transformFile: (file) => file.path === 'index.ts' ? { ...file, content: '// ${version}\\n' + file.content } : undefined };\n`;
+    const project = await createProject('cli-watch-plugin', {
+      config: { plugins: ['./plugin.mjs'] },
+      files: { 'plugin.mjs': plugin('V1') },
+    });
+    const index = path.join(project, 'src/generated/api/index.ts');
+    const child = start(['generate', '--watch'], project);
+    try {
+      const watching = await waitForOutput(child, (out) => out.includes('Watching'));
+      expect(watching).toContain('plugin.mjs');
+      expect(await readFile(index, 'utf8')).toMatch(/^\/\/ V1\n/);
+      await writeFile(path.join(project, 'plugin.mjs'), plugin('V2'));
+      await waitForOutput(child, (out) => /Change detected[\s\S]*Generated/.test(out));
+      expect(await readFile(index, 'utf8')).toMatch(/^\/\/ V2\n/);
+    } finally {
+      child.kill('SIGINT');
+    }
+    expect(await exited(child)).toBe(INTERRUPTED);
+  });
+
   it('regenerates in watch mode when the specification changes', async () => {
     const project = await createProject('cli-watch');
     const spec = path.join(project, 'openapi.yaml');

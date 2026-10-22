@@ -5,6 +5,7 @@ import { pluralize } from '../../utils/strings.ts';
 import { UsageError } from '../args.ts';
 import {
   EXIT,
+  failureCode,
   flag,
   loadCliConfig,
   relative,
@@ -23,13 +24,20 @@ function reportResult(ctx: CommandContext, result: GenerationResult, elapsed: nu
     ...(write === undefined ? {} : { write }),
     timings: result.timings,
   });
-  if (!result.ok || write === undefined) {
+  if (write === undefined) {
     reporter.error(
       `Generation failed: ${reporter.summary(result.diagnostics)}. No files were written.`,
     );
-    return EXIT.FAILED;
+    return failureCode(result.diagnostics);
   }
   const directory = relative(ctx, write.directory);
+  if (!result.ok) {
+    // A plugin's afterWrite hook reported errors (or threw) after the files were written.
+    reporter.error(
+      `The files in ${directory} were written, but errors were reported afterwards: ${reporter.summary(result.diagnostics)}.`,
+    );
+    return failureCode(result.diagnostics);
+  }
   const changes = [
     `${write.created.length} created`,
     `${write.updated.length} updated`,
@@ -70,7 +78,7 @@ function reportCheck(ctx: CommandContext, result: GenerationResult): number {
     reporter.error(
       `Check failed: the client cannot be generated (${reporter.summary(result.diagnostics)}).`,
     );
-    return EXIT.FAILED;
+    return failureCode(result.diagnostics);
   }
   const manifest = result.manifestChange ?? 'unchanged';
   const changed = write.created.length + write.updated.length + write.deleted.length;

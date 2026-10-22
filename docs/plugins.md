@@ -48,6 +48,8 @@ export default defineConfig({
 
 The module's default export is a plugin object, or a factory called with the options (`(options) => plugin`, possibly async); wrap the plugin object in `definePlugin` for type checking. References are resolved from the config file's directory: relative paths, `file:` URLs and packages (honoring their `exports`). Each loaded plugin is validated like an inline one; problems are reported as `config/plugin-load-failed` with the reference that failed.
 
+`generate --watch` watches plugin modules referenced by path and loads a changed one again on the next run (the programmatic `loadConfig` lists them in `watchFiles`). Node.js caches the modules that a plugin or the config file imports for as long as the process runs, so a change to one of those, or to a plugin package, needs a restart of the watcher, dashboard or MCP server.
+
 ## Hooks
 
 | Hook                                     | When                                                                     | Return                                    |
@@ -63,18 +65,18 @@ The module's default export is a plugin object, or a factory called with the opt
 | `generate(ctx)`                          | After the built-in generators                                            | Additional files                          |
 | `transformFile(file, ctx)`               | For every file (built-in and added)                                      | A new file, `null` to drop it, or nothing |
 | `afterGenerate(files, ctx)`              | All files are final                                                      | —                                         |
-| `beforeWrite(plan, ctx)`                 | The write plan is known (also in dry runs)                               | — (throw to abort)                        |
+| `beforeWrite(plan, ctx)`                 | The write plan is known (also in dry runs)                               | — (throw or report an error to abort)     |
 | `afterWrite(result, ctx)`                | Files were written                                                       | —                                         |
 
 Contexts include `config` (resolved, read-only), `report(diagnostic)` to add diagnostics attributed to the plugin, and, from `beforeGenerate` on, `project` — the IR plus names, module paths and the dependency graph.
 
 ## Order and errors
 
-Plugins run sequentially: `enforce: 'pre'` plugins, then default plugins, then `hooks`, then `enforce: 'post'` plugins, each group in array order. Hooks that transform a value receive the previous plugin's result. If a hook throws, the run stops with a `plugin/hook-failed` diagnostic naming the plugin and the hook, and nothing is written. Error diagnostics reported with `report()` also prevent writing.
+Plugins run sequentially: `enforce: 'pre'` plugins, then default plugins, then `hooks`, then `enforce: 'post'` plugins, each group in array order. Hooks that transform a value receive the previous plugin's result. If a hook throws, the run stops with a `plugin/hook-failed` diagnostic naming the plugin and the hook, and nothing is written. Error diagnostics reported with `report()` also prevent writing, including errors reported in `beforeWrite`. `afterWrite` runs once the files are written: an error it reports (or a throw) is part of the result and fails the run (exit code `1`), but the files stay written.
 
 ## Generated files
 
-Files returned by `generate` need a `path` relative to the output directory (normalized, without `..`), `content` and `origin` (overwritten with `plugin:<name>`). Paths are checked for collisions (case-insensitively) with every other generated file. Plugin files are owned by the generator like built-in files: they appear in the manifest and are cleaned up when a later run stops producing them.
+Files returned by `generate` need a `path` relative to the output directory (`/`-separated and normalized: no empty, `.` or `..` segments, no trailing `/`, `\` or `:`), `content` and `origin` (overwritten with `plugin:<name>`). Paths are checked for collisions (case-insensitively) with every other generated file. Plugin files are owned by the generator like built-in files: they appear in the manifest and are cleaned up when a later run stops producing them.
 
 ## Stability
 

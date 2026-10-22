@@ -1,12 +1,13 @@
 import { ChevronRight, FileDiff, RefreshCw, Save } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   DiffResponse,
+  GenerateRequest,
   GenerateResponse,
   PreviewChange,
   PreviewResponse,
 } from '../../../service/types.ts';
-import { api, useResource } from '../api.ts';
+import { api, ApiRequestError, useResource } from '../api.ts';
 import { Async } from '../components/async.tsx';
 import { DiagnosticsList } from '../components/diagnostics.tsx';
 import { Mono, PageHeader, Stat } from '../components/page.tsx';
@@ -133,13 +134,35 @@ function FileRow({ change }: { change: PreviewChange }) {
   );
 }
 
-export function GeneratePage({ onGenerated }: { onGenerated: () => void }) {
+export function GeneratePage({
+  version,
+  onGenerated,
+}: {
+  /** Changes with every reload and output change: a preview from before is outdated. */
+  version: number;
+  onGenerated: () => void;
+}) {
   const [preview, setPreview] = useState<PreviewResponse | undefined>();
   const [busy, setBusy] = useState<'preview' | 'write' | undefined>();
   const [error, setError] = useState<Error | undefined>();
   const [confirming, setConfirming] = useState(false);
   const [result, setResult] = useState<GenerateResponse | undefined>();
   const [showUnchanged, setShowUnchanged] = useState(false);
+  // The project changed after the preview was computed: it is dropped and must be computed again.
+  const [outdated, setOutdated] = useState(false);
+  const [seenVersion, setSeenVersion] = useState(version);
+  const currentVersion = useRef(version);
+  useEffect(() => {
+    currentVersion.current = version;
+  }, [version]);
+  if (version !== seenVersion) {
+    setSeenVersion(version);
+    if (preview !== undefined) {
+      setPreview(undefined);
+      setConfirming(false);
+      setOutdated(true);
+    }
+  }
 
   const run = <T,>(
     kind: 'preview' | 'write',
@@ -161,18 +184,43 @@ export function GeneratePage({ onGenerated }: { onGenerated: () => void }) {
 
   const computePreview = (): void => {
     setResult(undefined);
-    run('preview', () => api<PreviewResponse>('/api/preview', { method: 'POST' }), setPreview);
+    const requested = version;
+    run(
+      'preview',
+      () => api<PreviewResponse>('/api/preview', { method: 'POST' }),
+      (value) => {
+        // A reload arrived while it was computed: it may describe the previous version.
+        if (currentVersion.current !== requested) {
+          setOutdated(true);
+          return;
+        }
+        setOutdated(false);
+        setPreview(value);
+      },
+    );
   };
 
   const pending = preview?.changes.filter((c) => c.kind !== 'unchanged') ?? [];
   const write = (): void => {
     setConfirming(false);
+    const id = preview?.id;
+    if (id === undefined) return;
+    const body: GenerateRequest = { confirm: true, preview: id };
     run(
       'write',
-      () => api<GenerateResponse>('/api/generate', { method: 'POST', body: { confirm: true } }),
+      () =>
+        api<GenerateResponse>('/api/generate', { method: 'POST', body }).catch((e: unknown) => {
+          // The changes differ from the preview: nothing was written; show the new state.
+          if (e instanceof ApiRequestError && e.status === 409) {
+            setPreview(undefined);
+            setOutdated(true);
+          }
+          throw e;
+        }),
       (value) => {
         setResult(value);
         setPreview(undefined);
+        setOutdated(false);
         onGenerated();
       },
     );
@@ -199,7 +247,7 @@ export function GeneratePage({ onGenerated }: { onGenerated: () => void }) {
                   ? 'Compute preview'
                   : 'Refresh preview'}
             </Button>
-            {preview !== undefined && preview.ok && pending.length > 0 ? (
+            {preview?.id !== undefined && preview.ok && pending.length > 0 ? (
               <Button
                 variant="primary"
                 disabled={busy !== undefined}
@@ -263,7 +311,9 @@ export function GeneratePage({ onGenerated }: { onGenerated: () => void }) {
         result === undefined && busy !== 'preview' ? (
           <Card>
             <Empty icon={<FileDiff />} className="py-14">
-              Compute a preview to see new, changed and removed files with their diffs.
+              {outdated
+                ? 'The specification, the config or the output changed since the preview. Compute it again to review the new changes before writing.'
+                : 'Compute a preview to see new, changed and removed files with their diffs.'}
             </Empty>
           </Card>
         ) : null

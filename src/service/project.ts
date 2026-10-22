@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { wireMethod, type TagIR } from '../ir/types.ts';
 import { findDuplicateSchemas } from '../analysis/graph.ts';
 import type { OperationSymbol, ProjectModel } from '../analysis/types.ts';
@@ -11,15 +13,26 @@ import { generateQueryModule, QUERY_LABELS } from '../codegen/query/index.ts';
 import { validatorFor } from '../codegen/validation/index.ts';
 import { loadConfig, type LoadedConfig } from '../config/load.ts';
 import { SwaggerzError } from '../diagnostics/bag.ts';
+import type { Diagnostic } from '../diagnostics/types.ts';
 import { MANIFEST_FILENAME } from '../meta.ts';
 import { describeSchema, inspectData } from '../analysis/describe.ts';
 import { locatePointer } from '../loader/locate.ts';
+import { getAtPointer, parsePointer } from '../loader/pointer.ts';
 import { polledDocuments, type PolledDocument } from '../loader/remote-watcher.ts';
+import type { DocumentStore } from '../loader/store.ts';
 import { diffHunks, unifiedDiff } from '../output/diff.ts';
-import { planWrite, readManifest, type PlannedWrite } from '../output/writer.ts';
+import type { WriteResult } from '../output/types.ts';
+import {
+  applyWrite,
+  hashContent,
+  planWrite,
+  readManifest,
+  type PlannedWrite,
+} from '../output/writer.ts';
 import { compile, type CompileResult } from '../pipeline/compile.ts';
-import { runGeneration } from '../pipeline/generate.ts';
+import { checkOutputDirectory } from '../pipeline/generate.ts';
 import { versionLabel } from '../spec/detect.ts';
+import { isRecord } from '../utils/object.ts';
 import { compareStrings, pluralize } from '../utils/strings.ts';
 import type {
   ChangedItem,
@@ -84,8 +97,22 @@ export class ProjectService {
   #revision = 0;
   #lastReload: SessionInfo['lastReload'];
   #failure: ReloadFailure | undefined;
+  /** `config/unsafe-output` for the loaded config, checked once per load (it resolves paths). */
+  #unsafeOutput: Diagnostic | undefined;
   #watching: readonly string[] = [];
+  /**
+   * What the last failed reload read or tried to read (the documents of the failed compilation,
+   * a new input, missing `$ref` targets), watched besides the last version that loaded until a
+   * reload succeeds: editing or creating one of them is what fixes the failure.
+   */
+  #attempted:
+    | { readonly sources: readonly string[]; readonly remote: readonly PolledDocument[] }
+    | undefined;
   readonly #unreachable = new Map<string, { readonly error: string; readonly since: string }>();
+  /** Derived per compilation and computed on first use: summaries and duplicate groups. */
+  #operationSummaries: Map<string, OperationSummary> | undefined;
+  #modelSummaries: Map<string, ModelSummary> | undefined;
+  #duplicates: readonly (readonly string[])[] | undefined;
 
   constructor(options: ProjectServiceOptions) {
     this.#options = options;
@@ -127,8 +154,9 @@ export class ProjectService {
       this.#revision++;
       return { revision: this.#revision, ok: false, files: changed, error: failure.message };
     };
-    let loaded: LoadedConfig;
+    let loaded: LoadedConfig | undefined;
     let compiled: CompileResult;
+    let unsafeOutput: Diagnostic | undefined;
     try {
       loaded = await loadConfig({
         cwd: this.#options.cwd,
@@ -137,8 +165,14 @@ export class ProjectService {
         ...(this.#options.configFile === undefined ? {} : { configFile: this.#options.configFile }),
       });
       compiled = await compile({ config: loaded.config, plugins: loaded.plugins });
+      unsafeOutput = await checkOutputDirectory(loaded.config);
     } catch (error) {
       if (this.#compiled === undefined) throw error;
+      this.#attempted = attemptedTargets(
+        loaded,
+        undefined,
+        error instanceof SwaggerzError ? error.diagnostics : [],
+      );
       return fail(
         error instanceof SwaggerzError
           ? { message: error.message, diagnostics: error.diagnostics }
@@ -147,6 +181,7 @@ export class ProjectService {
     }
     if (compiled.project === undefined && this.#compiled?.project !== undefined) {
       const errors = compiled.diagnostics.filter((d) => d.severity === 'error');
+      this.#attempted = attemptedTargets(loaded, compiled.store, compiled.diagnostics);
       return fail({
         message: 'The specification could not be compiled',
         diagnostics: errors.length > 0 ? errors : compiled.diagnostics,
@@ -154,9 +189,14 @@ export class ProjectService {
     }
     this.#loaded = loaded;
     this.#compiled = compiled;
+    this.#unsafeOutput = unsafeOutput;
     this.#failure = undefined;
+    this.#attempted = undefined;
     this.#preview = undefined;
     this.#status = undefined;
+    this.#operationSummaries = undefined;
+    this.#modelSummaries = undefined;
+    this.#duplicates = undefined;
     const delta =
       compiled.project === undefined
         ? undefined
@@ -179,9 +219,11 @@ export class ProjectService {
   }
 
   /**
-   * What should reload the dashboard: the config file and every local document of the
-   * specification (`sources`), the output manifest (for the generation status), and the remote
-   * documents to poll (`spec.fetch.poll`) with their interval.
+   * What should reload the dashboard: the config file, local plugin modules and every local
+   * document of the specification (`sources`), the output manifest (for the generation status), and the remote
+   * documents to poll (`spec.fetch.poll`) with their interval. While the project does not compile,
+   * the files that would fix it count too: the targets of `$ref`s that could not be loaded and,
+   * after a failed reload, what that reload read.
    */
   watchTargets(): {
     readonly sources: readonly string[];
@@ -189,19 +231,26 @@ export class ProjectService {
     readonly remote: readonly PolledDocument[];
     readonly interval: number;
   } {
-    const { config, file } = this.loaded;
+    const { config, file, watchFiles } = this.loaded;
     const sources = new Set<string>();
     if (file !== undefined) sources.add(file);
+    // Local plugin modules: loading the config again picks up their changes.
+    for (const plugin of watchFiles) sources.add(plugin);
     if (!/^https?:/i.test(config.spec.input)) sources.add(config.spec.input);
     for (const overlay of config.spec.overlays)
       if (!/^https?:/i.test(overlay)) sources.add(overlay);
-    for (const doc of this.#compiled?.store?.documents ?? []) {
-      if (doc.url.startsWith('file:')) sources.add(doc.location);
-    }
+    for (const source of attemptedFiles(this.#compiled?.store, this.#compiled?.diagnostics ?? []))
+      sources.add(source);
+    const remote = new Map(
+      polledDocuments(config, this.#compiled?.store).map((doc) => [doc.url, doc]),
+    );
+    for (const source of this.#attempted?.sources ?? []) sources.add(source);
+    for (const doc of this.#attempted?.remote ?? [])
+      if (!remote.has(doc.url)) remote.set(doc.url, doc);
     return {
       sources: [...sources].sort(compareStrings),
       manifest: path.join(config.output.directory, MANIFEST_FILENAME),
-      remote: polledDocuments(config, this.#compiled?.store),
+      remote: [...remote.values()].sort((a, b) => compareStrings(a.url, b.url)),
       interval: config.spec.fetch.poll.interval,
     };
   }
@@ -264,26 +313,42 @@ export class ProjectService {
 
   async #generationStatus(): Promise<GenerationStatus> {
     if (this.#status !== undefined) return this.#status;
-    const directory = this.loaded.config.output.directory;
+    // A reload or an output change while this runs makes the result outdated: return it, but do
+    // not keep it.
+    const revision = this.#revision;
+    const compiled = this.compiled;
+    const { config } = this.loaded;
+    const failed = !compiled.ok || this.#failure !== undefined || this.#unsafeOutput !== undefined;
+    const directory = config.output.directory;
     const manifest = await readManifest(directory);
     const base = {
       manifestFiles: Object.keys(manifest?.files ?? {}).length,
       ...(manifest === undefined ? {} : { generatorVersion: manifest.generator.version }),
       ...(this.#lastRun === undefined ? {} : { lastRun: this.#lastRun }),
     };
-    if (!this.compiled.ok || this.#failure !== undefined) {
-      this.#status = { status: 'failed', staleFiles: 0, ...base };
+    let status: GenerationStatus;
+    if (failed) {
+      status = { status: 'failed', staleFiles: 0, ...base };
     } else if (manifest === undefined) {
-      this.#status = { status: 'never', staleFiles: this.compiled.files.length, ...base };
+      status = { status: 'never', staleFiles: compiled.files.length, ...base };
     } else {
-      const planned = await planWrite(this.compiled.files, directory, {
-        clean: this.loaded.config.output.clean,
+      const planned = await planWrite(compiled.files, directory, {
+        clean: config.output.clean,
         force: false,
       });
       const staleFiles = planned.plan.changes.filter((c) => c.kind !== 'unchanged').length;
-      this.#status = { status: staleFiles === 0 ? 'up-to-date' : 'stale', staleFiles, ...base };
+      status = { status: staleFiles === 0 ? 'up-to-date' : 'stale', staleFiles, ...base };
     }
-    return this.#status;
+    if (this.#revision === revision) this.#status = status;
+    return status;
+  }
+
+  /** The compiler's diagnostics, and the problem with the output directory that would stop `generate`. */
+  #diagnostics(): readonly Diagnostic[] {
+    const unsafe = this.#unsafeOutput;
+    return unsafe === undefined
+      ? this.compiled.diagnostics
+      : [...this.compiled.diagnostics, unsafe];
   }
 
   async overview(): Promise<OverviewResponse> {
@@ -329,7 +394,7 @@ export class ProjectService {
       },
       methods,
       tags,
-      diagnostics: compiled.diagnostics,
+      diagnostics: this.#diagnostics(),
       generation: await this.#generationStatus(),
       timings: compiled.timings,
       session: this.#session(),
@@ -362,8 +427,19 @@ export class ProjectService {
     };
   }
 
+  /** The summary of an operation, computed once per compilation (its model closure is costly). */
+  #cachedOperationSummary(symbol: OperationSymbol): OperationSummary {
+    this.#operationSummaries ??= new Map();
+    let summary = this.#operationSummaries.get(symbol.key);
+    if (summary === undefined) {
+      summary = this.#operationSummary(symbol);
+      this.#operationSummaries.set(symbol.key, summary);
+    }
+    return summary;
+  }
+
   operations(): OperationSummary[] {
-    return (this.project?.operations ?? []).map((symbol) => this.#operationSummary(symbol));
+    return (this.project?.operations ?? []).map((symbol) => this.#cachedOperationSummary(symbol));
   }
 
   #link(id: string): Link {
@@ -428,7 +504,7 @@ export class ProjectService {
     if (hooks !== undefined)
       code.push(...this.#codeVariants(hooks.module, undefined, `${hooksLabel ?? ''} · `));
     const op = symbol.operation;
-    const schemeKeys = new Set(this.#operationSummary(symbol).auth);
+    const schemeKeys = new Set(this.#cachedOperationSummary(symbol).auth);
     const dependencies = [...project.graph.operationClosure(key)]
       .map((id) => ({
         ...this.#link(id),
@@ -436,7 +512,7 @@ export class ProjectService {
       }))
       .sort((a, b) => a.chain.length - b.chain.length || compareStrings(a.name, b.name));
     return {
-      summary: this.#operationSummary(symbol),
+      summary: this.#cachedOperationSummary(symbol),
       operation: op,
       // Only the type names the operation module actually exports.
       typeNames: {
@@ -463,21 +539,41 @@ export class ProjectService {
     };
   }
 
-  models(): ModelSummary[] {
+  /** Model summaries by id, computed once per compilation. */
+  #modelSummaryIndex(): ReadonlyMap<string, ModelSummary> {
+    const project = this.project;
+    if (project === undefined) return new Map();
+    if (this.#modelSummaries !== undefined) return this.#modelSummaries;
+    const recursive = project.graph.recursiveSchemas();
+    this.#modelSummaries = new Map(
+      project.models.map((model) => [
+        model.id,
+        {
+          id: model.id,
+          name: model.name,
+          kind: describeSchema(model.definition.schema),
+          module: model.module,
+          used: model.used,
+          usedBy: project.graph.operationsUsing(model.id).length,
+          recursive: recursive.has(model.id),
+          deprecated: model.definition.schema.deprecated === true,
+          ...changeOf(this.#tracker.model(model.id)),
+        },
+      ]),
+    );
+    return this.#modelSummaries;
+  }
+
+  /** Groups of structurally identical models, computed once per compilation. */
+  #duplicateGroups(): readonly (readonly string[])[] {
     const project = this.project;
     if (project === undefined) return [];
-    const recursive = project.graph.recursiveSchemas();
-    return project.models.map((model) => ({
-      id: model.id,
-      name: model.name,
-      kind: describeSchema(model.definition.schema),
-      module: model.module,
-      used: model.used,
-      usedBy: project.graph.operationsUsing(model.id).length,
-      recursive: recursive.has(model.id),
-      deprecated: model.definition.schema.deprecated === true,
-      ...changeOf(this.#tracker.model(model.id)),
-    }));
+    this.#duplicates ??= findDuplicateSchemas(project.ir);
+    return this.#duplicates;
+  }
+
+  models(): ModelSummary[] {
+    return [...this.#modelSummaryIndex().values()];
   }
 
   modelDetail(id: string): ModelDetail | undefined {
@@ -485,15 +581,15 @@ export class ProjectService {
     const model = project?.modelById.get(id);
     const emit = this.#emit();
     if (project === undefined || model === undefined || emit === undefined) return undefined;
-    const summary = this.models().find((m) => m.id === id);
+    const summary = this.#modelSummaryIndex().get(id);
     if (summary === undefined) return undefined;
-    const duplicates = findDuplicateSchemas(project.ir).find((group) => group.includes(id)) ?? [];
+    const duplicates = this.#duplicateGroups().find((group) => group.includes(id)) ?? [];
     const usedBy = project.graph.operationsUsing(id).flatMap((key) => {
       const symbol = project.operationByKey.get(key);
       if (symbol === undefined) return [];
       return [
         {
-          ...this.#operationSummary(symbol),
+          ...this.#cachedOperationSummary(symbol),
           chain: (project.graph.explain(key, id) ?? []).map((step) => this.#link(step).name),
         },
       ];
@@ -529,9 +625,7 @@ export class ProjectService {
       recursive: [...project.graph.recursiveSchemas()]
         .map((id) => this.#link(id))
         .sort((a, b) => compareStrings(a.name, b.name)),
-      duplicates: findDuplicateSchemas(project.ir).map((group) =>
-        group.map((id) => this.#link(id)),
-      ),
+      duplicates: this.#duplicateGroups().map((group) => group.map((id) => this.#link(id))),
       mostUsed: counts
         .sort((a, b) => b.count - a.count || compareStrings(a.name, b.name))
         .slice(0, 15),
@@ -549,21 +643,60 @@ export class ProjectService {
     });
   }
 
-  async preview(): Promise<PreviewResponse> {
+  /**
+   * Plans writing the current compilation and identifies the exact plan: the id changes whenever
+   * a file to write, the content it replaces or the manifest differs.
+   */
+  async #plan(): Promise<{
+    readonly compiled: CompileResult;
+    readonly planned: PlannedWrite;
+    readonly id: string;
+  }> {
+    const compiled = this.compiled;
     const { config } = this.loaded;
-    if (!this.compiled.ok || this.#failure !== undefined) {
-      return {
-        ok: false,
-        directory: this.#relative(config.output.directory),
-        diagnostics: this.#failure?.diagnostics ?? this.compiled.diagnostics,
-        changes: [],
-      };
-    }
-    const planned = await planWrite(this.compiled.files, config.output.directory, {
+    const planned = await planWrite(compiled.files, config.output.directory, {
       clean: config.output.clean,
       force: false,
     });
-    this.#preview = planned;
+    const digest = (text: string | undefined): string | null =>
+      text === undefined ? null : hashContent(text);
+    const id = createHash('sha256')
+      .update(
+        JSON.stringify({
+          directory: planned.plan.directory,
+          // Unchanged files equal the generated content, which the manifest records.
+          changes: planned.plan.changes.map((change) => [
+            change.path,
+            change.kind,
+            digest(change.before),
+            digest(change.after),
+          ]),
+          manifest: planned.manifest.files,
+          manifestChange: planned.manifestChange,
+        }),
+      )
+      .digest('hex');
+    return { compiled, planned, id };
+  }
+
+  /**
+   * The changes generating would make. The `id` of a writable preview is what {@link generate}
+   * requires, so what is written is exactly what was reviewed.
+   */
+  async preview(): Promise<PreviewResponse> {
+    const { config } = this.loaded;
+    const unsafe = await checkOutputDirectory(config);
+    if (!this.compiled.ok || this.#failure !== undefined || unsafe !== undefined) {
+      return {
+        ok: false,
+        directory: this.#relative(config.output.directory),
+        diagnostics: this.#failure?.diagnostics ?? this.#diagnostics(),
+        changes: [],
+      };
+    }
+    const { compiled, planned, id } = await this.#plan();
+    // A reload while planning makes this plan outdated: keep it out of the diffs.
+    if (this.#compiled === compiled) this.#preview = planned;
     const changes = planned.plan.changes.map((change) => {
       const lines = (text: string | undefined): number =>
         text === undefined || text === '' ? 0 : text.split('\n').length;
@@ -581,10 +714,12 @@ export class ProjectService {
       }
       return { path: change.path, kind: change.kind, additions, deletions };
     });
+    const ok = planned.conflicts.length === 0;
     return {
-      ok: planned.conflicts.length === 0,
+      ok,
+      ...(ok ? { id } : {}),
       directory: this.#relative(config.output.directory),
-      diagnostics: [...this.compiled.diagnostics, ...planned.notes, ...planned.conflicts],
+      diagnostics: [...compiled.diagnostics, ...planned.notes, ...planned.conflicts],
       changes,
     };
   }
@@ -606,12 +741,64 @@ export class ProjectService {
     };
   }
 
-  /** Writes the generated client (same safety rules as `generate`: user files are never overwritten). */
-  async generate(): Promise<GenerateResponse> {
-    const result = await runGeneration({
-      config: this.loaded.config,
-      plugins: this.loaded.plugins,
-    });
+  /**
+   * Writes the plan of the preview `previewId` (same safety rules as `generate`: user files are
+   * never overwritten). The plan is computed again and written only when it is still the one that
+   * was previewed: the same files, replacing the same content. Otherwise nothing is written and
+   * the response is `outdated`.
+   */
+  async generate(previewId: string): Promise<GenerateResponse> {
+    const { config } = this.loaded;
+    const unsafe = await checkOutputDirectory(config);
+    if (!this.compiled.ok || this.#failure !== undefined || unsafe !== undefined) {
+      return this.#ran({
+        ok: false,
+        diagnostics: this.#failure?.diagnostics ?? this.#diagnostics(),
+      });
+    }
+    const { compiled, planned, id } = await this.#plan();
+    if (id !== previewId || this.#compiled !== compiled)
+      return { ok: false, outdated: true, diagnostics: [] };
+    const diagnostics = [...compiled.diagnostics, ...planned.notes, ...planned.conflicts];
+    const project = compiled.project;
+    if (planned.conflicts.length > 0 || project === undefined)
+      return this.#ran({ ok: false, diagnostics });
+    const base = { project };
+    try {
+      await compiled.runner.beforeWrite(planned.plan, base);
+    } catch (error) {
+      if (!(error instanceof SwaggerzError)) throw error;
+      return this.#ran({ ok: false, diagnostics: [...diagnostics, ...error.diagnostics] });
+    }
+    let write: WriteResult;
+    try {
+      write = await applyWrite(planned);
+    } catch (error) {
+      // Temporary files were removed; the previous output is still in place.
+      return this.#ran({
+        ok: false,
+        diagnostics: [
+          ...diagnostics,
+          {
+            code: 'output/write-failed',
+            severity: 'error',
+            message: `Could not write the output: ${error instanceof Error ? error.message : String(error)}`,
+            location: { file: config.output.directory },
+          },
+        ],
+      });
+    }
+    try {
+      await compiled.runner.afterWrite(write, base);
+    } catch (error) {
+      if (!(error instanceof SwaggerzError)) throw error;
+      return this.#ran({ ok: false, write, diagnostics: [...diagnostics, ...error.diagnostics] });
+    }
+    return this.#ran({ ok: true, write, diagnostics });
+  }
+
+  /** Records a generation run (written or not) for the generation status. */
+  #ran(result: GenerateResponse): GenerateResponse {
     const write = result.write;
     this.#lastRun = {
       at: new Date().toISOString(),
@@ -623,12 +810,59 @@ export class ProjectService {
     };
     this.#status = undefined;
     this.#preview = undefined;
-    return {
-      ok: result.ok,
-      diagnostics: result.diagnostics,
-      ...(write === undefined ? {} : { write }),
-    };
+    // The output changed: a generation status computed meanwhile is outdated.
+    if (write !== undefined) this.#revision++;
+    return result;
   }
+}
+
+/**
+ * Local files a compilation read or tried to read: its documents, the files its diagnostics point
+ * at, and the targets of `$ref`s that could not be loaded (a file that does not exist yet).
+ */
+function attemptedFiles(
+  store: DocumentStore | undefined,
+  diagnostics: readonly Diagnostic[],
+): string[] {
+  const files = new Set<string>();
+  for (const doc of store?.documents ?? [])
+    if (doc.url.startsWith('file:')) files.add(doc.location);
+  for (const diagnostic of diagnostics) {
+    const location = diagnostic.location;
+    if (location === undefined || !path.isAbsolute(location.file)) continue;
+    files.add(location.file);
+    if (diagnostic.code !== 'ref/external-load-failed' || location.pointer === undefined) continue;
+    // The location is the `$ref` that failed: resolve it against its document.
+    const doc = store?.byLocation(location.file);
+    const at =
+      doc === undefined ? undefined : getAtPointer(doc.data, parsePointer(location.pointer) ?? []);
+    const ref = at?.found === true && isRecord(at.value) ? at.value.$ref : undefined;
+    if (doc === undefined || typeof ref !== 'string') continue;
+    try {
+      const target = new URL(ref, doc.url);
+      target.hash = '';
+      if (target.protocol === 'file:') files.add(fileURLToPath(target));
+    } catch {
+      // Not a URL: the reference itself is reported as invalid.
+    }
+  }
+  return [...files];
+}
+
+/** What a failed reload read or tried to read, to watch until a reload succeeds. */
+function attemptedTargets(
+  loaded: LoadedConfig | undefined,
+  store: DocumentStore | undefined,
+  diagnostics: readonly Diagnostic[],
+): { readonly sources: readonly string[]; readonly remote: readonly PolledDocument[] } {
+  const sources = new Set(attemptedFiles(store, diagnostics));
+  if (loaded === undefined) return { sources: [...sources], remote: [] };
+  const { config, file, watchFiles } = loaded;
+  if (file !== undefined) sources.add(file);
+  for (const plugin of watchFiles) sources.add(plugin);
+  for (const input of [config.spec.input, ...config.spec.overlays])
+    if (!/^https?:/i.test(input)) sources.add(input);
+  return { sources: [...sources], remote: polledDocuments(config, store) };
 }
 
 /** The tags an operation's tags are nested under (OpenAPI 3.2 `parent`), sorted. */

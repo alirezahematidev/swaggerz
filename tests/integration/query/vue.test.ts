@@ -90,6 +90,36 @@ describe('generated Vue Query composables', () => {
     stop();
   });
 
+  it('refetch an infinite query with the parameters of its own key', async () => {
+    server.respond((request) => ({
+      body: { items: [], nextCursor: null, query: request.rawQuery },
+    }));
+    // Two components share a list; one of them then switches to other parameters.
+    const first = { 'X-Request-ID': 'r', limit: 1 };
+    const a = ref(first);
+    const b = ref(first);
+    const pagination = { initialPageParam: undefined, getNextPageParam: () => undefined };
+    const { value, stop } = inScope(() => ({
+      a: call('useListShapesInfinite', a, pagination, queryClient) as QueryResult,
+      b: call('useListShapesInfinite', b, pagination, queryClient) as QueryResult,
+    }));
+    await vi.waitFor(() => {
+      expect(value.a.isSuccess.value).toBe(true);
+    });
+    b.value = { 'X-Request-ID': 'r', limit: 2 };
+    await vi.waitFor(() => {
+      expect(value.b.data.value).toMatchObject({ pages: [{ query: 'limit=2' }] });
+    });
+    // Refetching the first list (still shown by `a`) must request its own parameters.
+    await queryClient.invalidateQueries({ queryKey: ['Shapes'] });
+    const pages = (key: unknown): unknown => queryClient.getQueryData(key as readonly unknown[]);
+    expect(pages(call('listShapesInfiniteQueryKey', first))).toMatchObject({
+      pages: [{ query: 'limit=1' }],
+    });
+    expect(server.requests.filter((r) => r.rawQuery === 'limit=1')).toHaveLength(2);
+    stop();
+  });
+
   it('run mutations and invalidate configured queries', async () => {
     server.respond((request) =>
       request.method === 'POST'

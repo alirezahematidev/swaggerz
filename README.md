@@ -217,25 +217,25 @@ swaggerz <command> [options]        (alias: sz)
   doctor      Check Node.js, config, spec, output directory and dependency versions.
 ```
 
-| Option                                                                                                    | Commands            | Description                                                                                             |
-| --------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------- |
-| `-c, --config <path>`                                                                                     | all                 | Config file (default: `swaggerz.config.{ts,mts,cts,js,mjs,cjs,json,yaml,yml}` in the working directory) |
-| `--cwd <dir>`                                                                                             | all                 | Working directory                                                                                       |
-| `--json`                                                                                                  | all                 | One machine-readable JSON document on stdout                                                            |
-| `--verbose` / `-q, --quiet`                                                                               | all                 | Show notes and timings / only errors                                                                    |
-| `--color` / `--no-color`                                                                                  | all                 | Force or disable color (`NO_COLOR` is respected)                                                        |
-| `-w, --watch`                                                                                             | `generate`          | Regenerate when the spec, any referenced file or the config changes (remote documents are polled)       |
-| `--dry-run`                                                                                               | `generate`, `clean` | Show changes without writing                                                                            |
-| `--check`                                                                                                 | `generate`          | Write nothing; exit `1` and list the differences when the output is not up to date (for CI)             |
-| `--force`                                                                                                 | `generate`, `clean` | Overwrite files the generator does not own; delete hand-edited generated files                          |
-| `--no-clean`                                                                                              | `generate`          | Keep generated files that are no longer produced                                                        |
-| `--operations`, `--models`, `--filter <text>`                                                             | `inspect`           | Narrow the listing                                                                                      |
-| `--host`, `--port`, `--open`, `--no-watch`                                                                | `dashboard`         | Bind address, browser opening, live reload off                                                          |
-| `--max-warnings <n>`, `--rules`                                                                           | `lint`              | Fail above n warnings; list the rules and their severities                                              |
-| `--allow-write`, `--no-watch`                                                                             | `mcp`               | Offer the `generate` tool; do not reload on changes                                                     |
-| `--spec`, `--spec-version`, `--output`, `--language`, `--adapter`, `--react-query`, `--format`, `--force` | `init`              | Initial values; `--format ts\|js\|json\|yaml` picks the config format                                   |
+| Option                                                                                                    | Commands            | Description                                                                                                       |
+| --------------------------------------------------------------------------------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `-c, --config <path>`                                                                                     | all                 | Config file (default: `swaggerz.config.{ts,mts,cts,js,mjs,cjs,json,yaml,yml}` in the working directory)           |
+| `--cwd <dir>`                                                                                             | all                 | Working directory                                                                                                 |
+| `--json`                                                                                                  | all                 | One machine-readable JSON document on stdout                                                                      |
+| `--verbose` / `-q, --quiet`                                                                               | all                 | Show notes and timings / only errors                                                                              |
+| `--color` / `--no-color`                                                                                  | all                 | Force or disable color (`NO_COLOR` is respected)                                                                  |
+| `-w, --watch`                                                                                             | `generate`          | Regenerate when the spec, any referenced file, the config or a local plugin changes (remote documents are polled) |
+| `--dry-run`                                                                                               | `generate`, `clean` | Show changes without writing                                                                                      |
+| `--check`                                                                                                 | `generate`          | Write nothing; exit `1` and list the differences when the output is not up to date (for CI)                       |
+| `--force`                                                                                                 | `generate`, `clean` | Overwrite files the generator does not own; delete hand-edited generated files                                    |
+| `--no-clean`                                                                                              | `generate`          | Keep generated files that are no longer produced                                                                  |
+| `--operations`, `--models`, `--filter <text>`                                                             | `inspect`           | Narrow the listing                                                                                                |
+| `--host`, `--port`, `--open`, `--no-watch`                                                                | `dashboard`         | Bind address, browser opening, live reload off                                                                    |
+| `--max-warnings <n>`, `--rules`                                                                           | `lint`              | Fail above n warnings; list the rules and their severities                                                        |
+| `--allow-write`, `--no-watch`                                                                             | `mcp`               | Offer the `generate` tool; do not reload on changes                                                               |
+| `--spec`, `--spec-version`, `--output`, `--language`, `--adapter`, `--react-query`, `--format`, `--force` | `init`              | Initial values; `--format ts\|js\|json\|yaml` picks the config format                                             |
 
-Exit codes: `0` success · `1` failed checks, invalid specification or generation errors · `2` invalid usage or configuration · `3` internal error.
+Exit codes: `0` success · `1` failed checks, invalid specification or generation errors · `2` invalid usage or configuration (including an unsafe output directory) · `3` internal error. Ctrl+C stops `generate --watch`, `dashboard` and `mcp` gracefully and ends other commands at once.
 
 Diagnostics point to the source: `error ref/missing-target $ref "#/components/schemas/Categry" … at openapi.yaml:478:9 (#/components/schemas/NewPet/properties/category)`.
 
@@ -396,7 +396,7 @@ http.interceptors.request.use((config) => config);
 client.setConfig({ transport: createAxiosTransport(http) });
 ```
 
-HTTP errors still reject with `ApiError`; the `AxiosError` is preserved as `error.cause` and the `AxiosResponse` as `error.response`. Only the selected adapter is generated, so axios is never bundled with the fetch adapter. Bodies are serialized by the generated runtime before reaching axios.
+HTTP errors still reject with `ApiError`; the `AxiosError` is preserved as `error.cause` and the `AxiosResponse` as `error.response`. Only the selected adapter is generated, so axios is never bundled with the fetch adapter. Bodies are serialized by the generated runtime before reaching axios, and responses are read as bytes and decoded by the runtime exactly as with fetch (JSON, text or `Blob`, by status and `Content-Type`).
 
 ## Data fetching: TanStack Query and SWR
 
@@ -565,7 +565,7 @@ npx swaggerz dashboard --open --port 0
 - **Usage** — statically scans `dashboard.usage.include` (default `src`) with oxc to find which generated operations, hooks and models your code imports (TypeScript, JavaScript, JSX, `require()`, `tsconfig` paths). Dynamic imports and escaping namespace objects are reported as _undetermined_, never as unused. No TypeScript installation needed.
 - **Generate** — preview every create/update/delete with diffs, then write after confirmation.
 
-**Live reload**: while it runs, the dashboard watches the config, the specification (with every local file it references) and the output. Edit the spec or run `swaggerz generate` and open pages update in place, with **New** and **Updated** badges on the operations and models that changed since the dashboard started (they reset on restart). A change that does not parse keeps the last good version on screen with its diagnostics.
+**Live reload**: while it runs, the dashboard watches the config, local plugins, the specification (with every local file it references) and the output. Edit the spec or run `swaggerz generate` and open pages update in place, with **New** and **Updated** badges on the operations and models that changed since the dashboard started (they reset on restart). A change that does not parse keeps the last good version on screen with its diagnostics.
 
 Light and dark themes, a <kbd>⌘K</kbd> command palette and layouts down to phone width.
 
@@ -633,7 +633,8 @@ Earlier versions of this list included `readOnly`/`writeOnly` handling, `Date` c
 
 - Generation never executes code from specifications. Descriptions, examples and names end up in comments, string literals and identifiers through dedicated escaping and sanitization.
 - External `$ref`s are restricted by default to the project and spec directories; remote references need an explicit host allow-list, redirects are re-checked, credentials from `spec.fetch.headers` are only sent to the origin of `spec.input`, and remote documents may never reference local files.
-- The writer only overwrites or deletes files it owns (manifest), refuses unsafe output directories (the project root, the config or spec file) and refuses to write through symbolic links that leave the output directory.
+- The writer only overwrites or deletes files it owns (manifest), refuses unsafe output directories (the project root, the config or spec file, also when reached through a symbolic link or another letter case) and refuses to write or delete through symbolic links that leave the output directory.
+- The CLI prints control characters from specifications and plugins as `\xNN` escapes, so spec text cannot clear the terminal, change its title or write to the clipboard.
 - The dashboard binds to loopback, requires a per-session token, rejects foreign `Host` and `Origin` headers, uses a strict Content Security Policy and renders spec content as text.
 - The MCP server only reads unless started with `--allow-write`; `generate` keeps the manifest rules and asks the user first when the client supports it. Text from the specification is returned in fields marked as data, never as instructions.
 - Config files and plugins are trusted code.

@@ -23,9 +23,9 @@ type View = 'read' | 'write';
  * Definitions keep their id and become the response ("read") shape. Every definition whose
  * shape differs between directions — directly, or through the models it references — gets a
  * request ("write") variant with the id `<id>~input` and the name `<name><suffix>`. Request
- * bodies reference the write variants. Webhooks and callbacks are requests the API sends, so
- * their payloads use the read shape and their responses the write shape. Returns `ir` itself
- * when no schema uses `readOnly` or `writeOnly`.
+ * bodies and parameters reference the write variants. Webhooks and callbacks are requests the API
+ * sends, so their payloads use the read shape and their responses the write shape. Returns `ir`
+ * itself when no schema uses `readOnly` or `writeOnly`.
  */
 export function splitReadWrite(ir: ApiDocument, suffix: string): ApiDocument {
   const byId = new Map(ir.schemas.map((definition) => [definition.id, definition]));
@@ -98,9 +98,10 @@ export function splitReadWrite(ir: ApiDocument, suffix: string): ApiDocument {
   const writable = new Set<string>();
   const pending = [
     ...ir.operations.flatMap((operation) =>
-      (operation.requestBody?.contents ?? [])
-        .flatMap(mediaSchemas)
-        .flatMap((schema) => references(schema)),
+      [
+        ...operation.parameters.map((parameter) => parameter.schema),
+        ...(operation.requestBody?.contents ?? []).flatMap(mediaSchemas),
+      ].flatMap((schema) => references(schema)),
     ),
     ...incoming.flatMap((operation) =>
       operation.responses.flatMap((response) =>
@@ -229,6 +230,15 @@ export function splitReadWrite(ir: ApiDocument, suffix: string): ApiDocument {
   /** `outgoing`: a request we send. Webhooks and callbacks are requests the API sends us. */
   const mapOperation = (operation: OperationIR, outgoing: boolean): OperationIR => ({
     ...operation,
+    // Parameters are part of the request, like the body: what the client sends.
+    ...(outgoing
+      ? {
+          parameters: operation.parameters.map((parameter) => {
+            const schema = view(parameter.schema, 'write');
+            return schema === parameter.schema ? parameter : { ...parameter, schema };
+          }),
+        }
+      : {}),
     ...(operation.requestBody === undefined
       ? {}
       : {
@@ -279,9 +289,10 @@ function isEmptied(schema: SchemaIR): boolean {
   );
 }
 
-/** Schemas of an operation's bodies (request and responses). */
+/** Schemas of an operation's parameters and bodies (request and responses). */
 function operationSchemas(operation: OperationIR): SchemaIR[] {
   return [
+    ...operation.parameters.map((parameter) => parameter.schema),
     ...(operation.requestBody?.contents ?? []).flatMap(mediaSchemas),
     ...operation.responses.flatMap((response) => response.contents.flatMap(mediaSchemas)),
   ];

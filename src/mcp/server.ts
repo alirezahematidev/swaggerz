@@ -42,8 +42,16 @@ const ERROR = {
 /** Cache hints of list and read results (2026-07-28): fresh until a change notification. */
 const CACHE = { ttlMs: 0, cacheScope: 'private' } as const;
 
+/** How long a legacy confirmation waits for the user before it is withdrawn (declined). */
+const ELICITATION_TIMEOUT_MS = 10 * 60_000;
+
 export type JsonValue = unknown;
 type RequestId = string | number;
+
+/** Map key of a request id: `1` and `"1"` are different requests. */
+function idKey(id: RequestId): string {
+  return `${typeof id}:${id}`;
+}
 
 export class McpError extends Error {
   readonly code: number;
@@ -153,10 +161,28 @@ function elicitation(message: string, withMode: boolean): Record<string, unknown
   };
 }
 
-/** Whether an elicitation result accepts: `accept`, with `confirm` true when it is present. */
+/**
+ * Whether an elicitation result accepts: `accept` with `confirm: true`. Anything else, including
+ * an `accept` without content, declines: the confirmation fails closed.
+ */
 function accepted(result: unknown): boolean {
-  if (!isRecord(result) || result.action !== 'accept') return false;
-  return !isRecord(result.content) || result.content.confirm !== false;
+  return (
+    isRecord(result) &&
+    result.action === 'accept' &&
+    isRecord(result.content) &&
+    result.content.confirm === true
+  );
+}
+
+/**
+ * Whether client capabilities allow a form-mode elicitation: `elicitation: {}` (the only form
+ * before URL mode existed) or one that declares `form`. A client declaring only `url` cannot
+ * show a form.
+ */
+function supportsFormElicitation(capabilities: Record<string, unknown>): boolean {
+  const capability = capabilities.elicitation;
+  if (!isRecord(capability)) return false;
+  return isRecord(capability.form) || capability.url === undefined;
 }
 
 export class McpServer {
@@ -169,14 +195,20 @@ export class McpServer {
   #legacyVersion: string | undefined;
   #legacyCapabilities: Record<string, unknown> = {};
   readonly #legacySubscriptions = new Set<string>();
-  // Modern `subscriptions/listen` streams.
+  // Modern `subscriptions/listen` streams, by request id key.
   readonly #subscriptions = new Map<string, Subscription>();
   // Server-to-client requests (legacy elicitation) awaiting a response.
   readonly #pending = new Map<RequestId, (result: unknown) => void>();
   #nextRequestId = 0;
-  readonly #cancelled = new Set<string>();
+  /**
+   * Client requests not answered yet (and open subscription streams), by request id key. A
+   * cancellation aborts the request: its response is not sent and a confirmation it waits for is
+   * withdrawn. Ids are forgotten once answered, so a later request may reuse one.
+   */
+  readonly #inFlight = new Map<string, AbortController>();
 
   readonly #onSubscribe: (uri: string) => void;
+  readonly #elicitationTimeout: number;
 
   constructor(
     handlers: McpHandlers,
@@ -185,12 +217,15 @@ export class McpServer {
       readonly log?: (message: string) => void;
       /** A client subscribed to a resource: remember its content to report real changes only. */
       readonly onSubscribe?: (uri: string) => void;
+      /** How long a legacy confirmation waits for the user (default 10 minutes). */
+      readonly elicitationTimeoutMs?: number;
     } = {},
   ) {
     this.#handlers = handlers;
     this.#transport = transport;
     this.#log = options.log ?? (() => undefined);
     this.#onSubscribe = options.onSubscribe ?? (() => undefined);
+    this.#elicitationTimeout = options.elicitationTimeoutMs ?? ELICITATION_TIMEOUT_MS;
   }
 
   /** Handles one incoming line of the transport. */
@@ -209,19 +244,25 @@ export class McpServer {
     }
     if (Array.isArray(message)) {
       // JSON-RPC batches were removed from MCP in 2025-06-18; answer each element.
+      if (message.length === 0) this.#invalid('Empty batch');
       for (const item of message) this.#dispatch(item);
       return;
     }
     this.#dispatch(message);
   }
 
+  /** Answers a message that is not a valid request (its id, if any, cannot be echoed). */
+  #invalid(message: string): void {
+    this.#transport.send({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: ERROR.invalidRequest, message },
+    });
+  }
+
   #dispatch(message: unknown): void {
     if (!isRecord(message) || message.jsonrpc !== '2.0') {
-      this.#transport.send({
-        jsonrpc: '2.0',
-        id: null,
-        error: { code: ERROR.invalidRequest, message: 'Invalid JSON-RPC message' },
-      });
+      this.#invalid('Invalid JSON-RPC message');
       return;
     }
     const id = message.id;
@@ -233,6 +274,12 @@ export class McpServer {
         this.#pending.delete(id);
         resolve?.(message.error === undefined ? message.result : undefined);
       }
+      return;
+    }
+    // A request whose id is null, a boolean or an object is not a notification: MCP request ids
+    // are strings or numbers.
+    if ('id' in message && !hasId) {
+      this.#invalid('Request ids must be strings or numbers');
       return;
     }
     const params = isRecord(message.params) ? message.params : {};
@@ -248,16 +295,25 @@ export class McpServer {
       const requestId = params.requestId;
       if (typeof requestId === 'string' || typeof requestId === 'number') {
         // Ending a subscription needs no response; other cancelled requests get none either.
-        this.#subscriptions.delete(String(requestId));
-        this.#cancelled.add(String(requestId));
+        const key = idKey(requestId);
+        this.#inFlight.get(key)?.abort();
+        if (this.#subscriptions.delete(key)) this.#inFlight.delete(key);
       }
     }
     // `notifications/initialized` and others need no action.
   }
 
   async #request(id: RequestId, method: string, params: Record<string, unknown>): Promise<void> {
+    const key = idKey(id);
+    const controller = new AbortController();
+    this.#inFlight.set(key, controller);
+    /** Ends the request; `false` when it was cancelled (and gets no response). */
+    const finish = (): boolean => {
+      if (this.#inFlight.get(key) === controller) this.#inFlight.delete(key);
+      return !controller.signal.aborted;
+    };
     const respond = (result: Record<string, unknown>, modern: boolean): void => {
-      if (this.#cancelled.delete(String(id))) return;
+      if (!finish()) return;
       this.#transport.send({
         jsonrpc: '2.0',
         id,
@@ -274,7 +330,7 @@ export class McpServer {
       });
     };
     const fail = (error: McpError): void => {
-      if (this.#cancelled.delete(String(id))) return;
+      if (!finish()) return;
       this.#transport.send({
         jsonrpc: '2.0',
         id,
@@ -306,6 +362,7 @@ export class McpServer {
         if (!isRecord(capabilities))
           throw new McpError(ERROR.invalidParams, `Missing ${META.clientCapabilities} in _meta`);
         const result = await this.#modern(id, method, params, capabilities);
+        // `undefined`: a stream, in flight until it is cancelled or the server closes.
         if (result !== undefined) respond(result, true);
         return;
       }
@@ -320,7 +377,7 @@ export class McpServer {
           ERROR.invalidRequest,
           `Send initialize first, or ${META.protocolVersion} in _meta (supported: ${[...MODERN_VERSIONS, ...LEGACY_VERSIONS].join(', ')}).`,
         );
-      respond(await this.#legacy(method, params), false);
+      respond(await this.#legacy(method, params, controller.signal), false);
     } catch (error) {
       if (error instanceof McpError) {
         fail(error);
@@ -348,6 +405,8 @@ export class McpServer {
         : LEGACY_VERSIONS[0];
     this.#legacyVersion = version;
     this.#legacyCapabilities = isRecord(params.capabilities) ? params.capabilities : {};
+    // A new session: subscriptions of an earlier one end.
+    this.#legacySubscriptions.clear();
     return {
       protocolVersion: version,
       capabilities: this.#capabilities(),
@@ -376,7 +435,7 @@ export class McpServer {
         return { tools: this.#handlers.tools(), ...CACHE };
       case 'tools/call':
         return this.#callTool(params, async (confirmation) => {
-          if (!isRecord(capabilities.elicitation)) return 'unsupported';
+          if (!supportsFormElicitation(capabilities)) return 'unsupported';
           const state = this.#sign(confirmation.fingerprint);
           const responses = isRecord(params.inputResponses) ? params.inputResponses : {};
           // The state binds the answer to what was asked: when the change to confirm differs
@@ -415,7 +474,7 @@ export class McpServer {
           resourcesListChanged: filter.resourcesListChanged === true,
           uris: new Set(uris),
         };
-        this.#subscriptions.set(String(id), subscription);
+        this.#subscriptions.set(idKey(id), subscription);
         for (const uri of uris) this.#onSubscribe(uri);
         this.#transport.send({
           jsonrpc: '2.0',
@@ -437,12 +496,16 @@ export class McpServer {
   }
 
   /** Methods of the initialize-based revisions. */
-  async #legacy(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async #legacy(
+    method: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<Record<string, unknown>> {
     switch (method) {
       case 'tools/list':
         return { tools: this.#handlers.tools() };
       case 'tools/call':
-        return this.#callTool(params, (confirmation) => this.#elicit(confirmation.message));
+        return this.#callTool(params, (confirmation) => this.#elicit(confirmation.message, signal));
       case 'resources/list':
         return this.#resourcePage(params);
       case 'resources/templates/list':
@@ -466,13 +529,39 @@ export class McpServer {
     }
   }
 
-  /** Legacy confirmations: an `elicitation/create` request to the client. */
-  async #elicit(message: string): Promise<boolean | 'unsupported'> {
-    if (!isRecord(this.#legacyCapabilities.elicitation)) return 'unsupported';
+  /**
+   * Legacy confirmations: an `elicitation/create` request to the client. When the tool call is
+   * cancelled or the user does not answer in time, the request is withdrawn and counts as
+   * declined.
+   */
+  async #elicit(message: string, signal: AbortSignal): Promise<boolean | 'unsupported'> {
+    if (!supportsFormElicitation(this.#legacyCapabilities)) return 'unsupported';
+    if (signal.aborted) return false;
     const id = `elicitation-${this.#nextRequestId++}`;
     const withMode = this.#legacyVersion === LEGACY_VERSIONS[0];
     const result = await new Promise<unknown>((resolve) => {
-      this.#pending.set(id, resolve);
+      const settle = (value: unknown): void => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', withdraw);
+        this.#pending.delete(id);
+        resolve(value);
+      };
+      const withdraw = (): void => {
+        if (!this.#pending.has(id)) return;
+        settle(undefined);
+        this.#transport.send({
+          jsonrpc: '2.0',
+          method: 'notifications/cancelled',
+          params: {
+            requestId: id,
+            reason: signal.aborted ? 'The tool call was cancelled.' : 'No answer in time.',
+          },
+        });
+      };
+      const timer = setTimeout(withdraw, this.#elicitationTimeout);
+      timer.unref();
+      signal.addEventListener('abort', withdraw, { once: true });
+      this.#pending.set(id, settle);
       this.#transport.send({
         jsonrpc: '2.0',
         id,
@@ -517,8 +606,11 @@ export class McpServer {
   #resourcePage(params: Record<string, unknown>): Record<string, unknown> {
     const all = this.#handlers.resources();
     const size = 200;
-    const start =
-      typeof params.cursor === 'string' && /^\d+$/.test(params.cursor) ? Number(params.cursor) : 0;
+    // Cursors are the `nextCursor`s this server returned: an offset.
+    const cursor = params.cursor ?? undefined;
+    if (cursor !== undefined && (typeof cursor !== 'string' || !/^\d{1,9}$/.test(cursor)))
+      throw new McpError(ERROR.invalidParams, 'Invalid cursor', { cursor });
+    const start = cursor === undefined ? 0 : Number(cursor);
     const page = all.slice(start, start + size);
     return {
       resources: page,
@@ -535,12 +627,14 @@ export class McpServer {
   }
 
   /**
-   * Tells clients that resources changed: `list_changed` to whoever listens for it, and
-   * `updated` for each subscribed URI in `updated`.
+   * Tells clients that resources changed: `list_changed` to whoever listens for it (unless
+   * `listChanged` is false: only contents changed), and `updated` for each subscribed URI in
+   * `updated`.
    */
-  resourcesChanged(updated: ReadonlySet<string>): void {
+  resourcesChanged(updated: ReadonlySet<string>, { listChanged = true } = {}): void {
     if (this.#legacyVersion !== undefined) {
-      this.#transport.send({ jsonrpc: '2.0', method: 'notifications/resources/list_changed' });
+      if (listChanged)
+        this.#transport.send({ jsonrpc: '2.0', method: 'notifications/resources/list_changed' });
       for (const uri of this.#legacySubscriptions)
         if (updated.has(uri))
           this.#transport.send({
@@ -551,7 +645,7 @@ export class McpServer {
     }
     for (const subscription of this.#subscriptions.values()) {
       const meta = { _meta: { [META.subscriptionId]: subscription.id } };
-      if (subscription.resourcesListChanged)
+      if (listChanged && subscription.resourcesListChanged)
         this.#transport.send({
           jsonrpc: '2.0',
           method: 'notifications/resources/list_changed',
@@ -584,6 +678,8 @@ export class McpServer {
         result: { resultType: 'complete', _meta: { [META.subscriptionId]: subscription.id } },
       });
     this.#subscriptions.clear();
+    this.#inFlight.clear();
+    // Each resolver removes its own entry; deleting while iterating a Map is safe.
     for (const resolve of this.#pending.values()) resolve(undefined);
     this.#pending.clear();
   }

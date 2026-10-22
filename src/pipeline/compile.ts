@@ -1,4 +1,3 @@
-import path from 'node:path';
 import { buildProject } from '../analysis/project.ts';
 import { splitReadWrite } from '../analysis/read-write.ts';
 import type { ProjectModel } from '../analysis/types.ts';
@@ -11,7 +10,7 @@ import type { Diagnostic } from '../diagnostics/types.ts';
 import type { ApiDocument } from '../ir/types.ts';
 import { enrichLocations } from '../loader/locate.ts';
 import type { DocumentStore } from '../loader/store.ts';
-import { MANIFEST_FILENAME } from '../meta.ts';
+import { isSafeOutputPath } from '../output/writer.ts';
 import { PluginRunner } from '../plugins/runner.ts';
 import type { GenerateContext, SwaggerzPlugin, PluginContext } from '../plugins/types.ts';
 import { parseSpecification } from '../spec/parse.ts';
@@ -36,6 +35,18 @@ export interface CompileResult {
   readonly timings: Readonly<Record<string, number>>;
 }
 
+/** The diagnostics bag each compilation's plugins report into. */
+const bags = new WeakMap<PluginRunner, DiagnosticBag>();
+
+/**
+ * Diagnostics reported after {@link compile} returned, by plugin hooks that run later
+ * (`beforeWrite`, `afterWrite`), with source positions added.
+ */
+export function laterDiagnostics(result: CompileResult): Diagnostic[] {
+  const later = bags.get(result.runner)?.toArray().slice(result.diagnostics.length) ?? [];
+  return result.store === undefined ? later : enrichLocations(later, result.store);
+}
+
 /**
  * Runs the compiler pipeline without touching the file system:
  * load → plugins.beforeParse → detect/validate → resolve refs → adapter → IR →
@@ -45,6 +56,7 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
   const { config } = options;
   const diagnostics = new DiagnosticBag();
   const runner = new PluginRunner(options.plugins ?? [], diagnostics, config);
+  bags.set(runner, diagnostics);
   const timings: Record<string, number> = {};
   let started = performance.now();
   const lap = (stage: string): void => {
@@ -119,17 +131,7 @@ function validateFiles(
   const seen = new Map<string, string>();
   const valid: GeneratedFile[] = [];
   for (const file of files) {
-    const normalized = path.posix.normalize(file.path);
-    if (
-      file.path === '' ||
-      path.posix.isAbsolute(file.path) ||
-      path.win32.isAbsolute(file.path) ||
-      normalized.startsWith('../') ||
-      normalized === '..' ||
-      normalized !== file.path ||
-      file.path.includes('\\') ||
-      file.path === MANIFEST_FILENAME
-    ) {
+    if (!isSafeOutputPath(file.path)) {
       diagnostics.error({
         code: 'output/invalid-path',
         message: `Generated file path "${file.path}" (from ${file.origin}) is not a normalized path inside the output directory.`,

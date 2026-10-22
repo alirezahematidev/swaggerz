@@ -2,6 +2,24 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * Sets an own, enumerable data property. Unlike `target[key] = value`, this also works for the key
+ * `__proto__`, which would otherwise replace the object's prototype: use it for keys that come from
+ * a specification.
+ */
+export function setOwn(target: Record<string, unknown>, key: string, value: unknown): void {
+  if (key === '__proto__') {
+    Object.defineProperty(target, key, {
+      value,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  } else {
+    target[key] = value;
+  }
+}
+
 /** True for `{}` literals and `Object.create(null)` objects (not class instances). */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false;
@@ -30,7 +48,7 @@ export function sortKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (!isRecord(value)) return value;
   const sorted: Record<string, unknown> = {};
-  for (const key of Object.keys(value).sort()) sorted[key] = sortKeysDeep(value[key]);
+  for (const key of Object.keys(value).sort()) setOwn(sorted, key, sortKeysDeep(value[key]));
   return sorted;
 }
 

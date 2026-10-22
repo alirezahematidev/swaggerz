@@ -68,9 +68,12 @@ export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
             ['d.ts', `${name}.d.ts`],
           ];
     for (const [extensionName, file] of variants) {
+      // The `.js` runtime is type-stripped TypeScript without JSDoc; its types come from the
+      // `.d.ts` next to it, so `checkJs` projects that include the output skip checking it.
+      const nocheck = extensionName === 'js' ? '// @ts-nocheck\n' : '';
       files.push({
         path: `runtime/${name}.${extensionName}`,
-        content: header(config) + rewrite(readTemplate(file)),
+        content: header(config) + nocheck + rewrite(readTemplate(file)),
         origin: 'core:runtime',
       });
     }

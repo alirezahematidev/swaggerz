@@ -116,6 +116,30 @@ async function applySecurity<T>(
 }
 
 /** 2xx statuses, plus declared statuses (`304`) and ranges (`3XX`) the operation resolves with. */
+/**
+ * A copy of the plain objects in a request body (also inside arrays) without the properties whose
+ * value is `undefined`: `JSON.stringify` drops them, so validation sees what is sent and an optional
+ * property set to `undefined` is accepted. Other objects (`Date`, `Blob`, …) are kept as they are.
+ */
+function withoutUndefined(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutUndefined);
+  if (typeof value !== 'object' || value === null) return value;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) return value;
+  const result = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (entry === undefined) continue;
+    // `defineProperty`, so a key named `__proto__` stays a property.
+    Object.defineProperty(result, key, {
+      value: withoutUndefined(entry),
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return result;
+}
+
 function isSuccess(status: number, declared: readonly string[] | undefined): boolean {
   if (status >= 200 && status < 300) return true;
   if (declared === undefined) return false;
@@ -174,7 +198,7 @@ export function createClient<TTransportOptions = unknown>(
       bodyValue = operation.encodeBody(bodyValue);
     if (operation.validateBody !== undefined && bodyValue !== undefined) {
       try {
-        bodyValue = operation.validateBody(bodyValue);
+        bodyValue = operation.validateBody(withoutUndefined(bodyValue));
       } catch (error) {
         throw new RequestError(
           'validation',
@@ -220,13 +244,16 @@ export function createClient<TTransportOptions = unknown>(
       );
       if (operation.accept !== undefined && !headers.has('accept'))
         headers.set('accept', operation.accept);
-      const headerParams = operation.headers ?? {};
-      for (const name of Object.keys(headerParams)) {
-        const value = headerParams[name];
-        if (value !== undefined && value !== null)
-          headers.set(name, serializeHeader(value, operation.styles?.header?.[name]));
-      }
-      appendCookie(headers, serializeCookies(operation.cookies, operation.styles?.cookie));
+      // `Headers` rejects values that are not byte strings (e.g. `naïve ✓`).
+      serialize(() => {
+        const headerParams = operation.headers ?? {};
+        for (const name of Object.keys(headerParams)) {
+          const value = headerParams[name];
+          if (value !== undefined && value !== null)
+            headers.set(name, serializeHeader(value, operation.styles?.header?.[name]));
+        }
+        appendCookie(headers, serializeCookies(operation.cookies, operation.styles?.cookie));
+      });
       // A JSON or text query string has no room for `name=value` credentials.
       const querystringType = operation.querystring?.mediaType.split(';')[0]?.trim().toLowerCase();
       const queryAllowed =

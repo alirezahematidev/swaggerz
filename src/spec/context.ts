@@ -3,7 +3,7 @@ import type { SourceLocation } from '../diagnostics/types.ts';
 import type { Extensions, JsonValue, SourceRef } from '../ir/types.ts';
 import { appendPointer } from '../loader/pointer.ts';
 import type { DocumentStore, LoadedDocument } from '../loader/store.ts';
-import { isRecord } from '../utils/object.ts';
+import { isRecord, setOwn } from '../utils/object.ts';
 
 /** A raw value together with where it came from. */
 export interface Cursor {
@@ -67,7 +67,7 @@ export function toJsonValue(value: unknown): JsonValue | undefined {
     const result: Record<string, JsonValue> = {};
     for (const [key, entry] of Object.entries(value)) {
       const converted = toJsonValue(entry);
-      if (converted !== undefined) result[key] = converted;
+      if (converted !== undefined) setOwn(result, key, converted);
     }
     return result;
   }
@@ -80,7 +80,7 @@ export function readExtensions(cursor: Cursor): Extensions {
   for (const [key, value] of Object.entries(cursor.value)) {
     if (!key.startsWith('x-')) continue;
     const converted = toJsonValue(value);
-    if (converted !== undefined) result[key] = converted;
+    if (converted !== undefined) setOwn(result, key, converted);
   }
   return result;
 }

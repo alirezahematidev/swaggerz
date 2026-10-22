@@ -7,7 +7,9 @@ import {
   serializeHeader,
   serializePathParam,
   serializeQuery,
+  serializeQuerystring,
   toFormData,
+  toSearchParams,
 } from '../../../src/templates/runtime/serialization.ts';
 
 describe('path parameters', () => {
@@ -61,6 +63,23 @@ describe('query parameters', () => {
       ),
     ).toBe('filter[color]=red&filter[nested][a][0]=1');
     expect(serializeQuery({ filter: { a: 1 } }, { filter: { explode: false } })).toBe('filter=a,1');
+  });
+
+  it('joins non-exploded objects with the delimiter of their style', () => {
+    const color = { R: 1, G: 2 };
+    expect(serializeQuery({ c: color }, { c: { style: 'spaceDelimited', explode: false } })).toBe(
+      'c=R%201%20G%202',
+    );
+    expect(serializeQuery({ c: color }, { c: { style: 'pipeDelimited', explode: false } })).toBe(
+      'c=R%7C1%7CG%7C2',
+    );
+  });
+
+  it('keeps reserved characters with allowReserved but never a lone percent sign', () => {
+    const styles = { q: { allowReserved: true } };
+    expect(serializeQuery({ q: 'a/b?c=%20d' }, styles)).toBe('q=a/b?c=%20d');
+    expect(serializeQuery({ q: '100% sure' }, styles)).toBe('q=100%25%20sure');
+    expect(serializeQuery({ q: 'smile 😀' }, styles)).toBe('q=smile%20%F0%9F%98%80');
   });
 
   it('serializes JSON content parameters and dates', () => {
@@ -131,11 +150,65 @@ describe('bodies', () => {
     expect(await (form.get('bytes') as Blob).text()).toBe('A');
     expect(toFormData({ csv: [1, 2] }, { csv: { explode: false } }).get('csv')).toBe('1,2');
   });
+
+  it('applies the encoding style of object properties in urlencoded bodies', () => {
+    const body = { amount: 5, metadata: { order_id: '6735', tags: ['a', 'b'] } };
+    // Without style or explode, nested objects are JSON (OpenAPI's default content type).
+    expect(decodeURIComponent(toSearchParams(body).toString())).toBe(
+      'amount=5&metadata={"order_id":"6735","tags":["a","b"]}',
+    );
+    const deep = toSearchParams(body, { metadata: { style: 'deepObject', explode: true } });
+    expect(decodeURIComponent(deep.toString())).toBe(
+      'amount=5&metadata[order_id]=6735&metadata[tags][0]=a&metadata[tags][1]=b',
+    );
+    expect(String(toSearchParams({ m: { a: 1, b: 2 } }, { m: { style: 'form' } }))).toBe('a=1&b=2');
+    expect(String(toSearchParams({ m: { a: 1, b: 2 } }, { m: { explode: false } }))).toBe(
+      'm=a%2C1%2Cb%2C2',
+    );
+    // The serialized body of a request descriptor carrying the encoding.
+    const { body: serialized } = serializeBody(
+      { metadata: { order_id: '6735' } },
+      'application/x-www-form-urlencoded',
+      { metadata: { style: 'deepObject', explode: true } },
+    );
+    expect(String(serialized)).toBe('metadata%5Border_id%5D=6735');
+    expect(
+      serializeQuerystring({ f: { a: 1 } }, 'application/x-www-form-urlencoded', {
+        f: { style: 'deepObject' },
+      }),
+    ).toBe('f%5Ba%5D=1');
+  });
+
+  it('never sends a wildcard media type as Content-Type', () => {
+    expect(serializeBody({ a: 1 }, '*/*')).toEqual({
+      body: '{"a":1}',
+      contentType: 'application/json',
+    });
+    const blob = new Blob(['x'], { type: 'image/png' });
+    expect(serializeBody(blob, '*/*')).toEqual({ body: blob, contentType: undefined });
+    expect(serializeBody('text', 'application/*')).toEqual({
+      body: 'text',
+      contentType: undefined,
+    });
+    expect(serializeBody(42, 'text/*')).toEqual({ body: '42', contentType: undefined });
+  });
 });
 
 describe('urls', () => {
   it('joins base URLs and query strings', () => {
     expect(joinUrl('https://api.test/v1/', '/pets', 'a=1')).toBe('https://api.test/v1/pets?a=1');
     expect(joinUrl('', '/pets', '')).toBe('/pets');
+  });
+
+  it('keeps a query string of the base URL after the path', () => {
+    expect(joinUrl('https://api.test/v1?key=k', '/pets', 'a=1')).toBe(
+      'https://api.test/v1/pets?key=k&a=1',
+    );
+    expect(joinUrl('https://api.test/v1/?key=k', '/pets', '')).toBe(
+      'https://api.test/v1/pets?key=k',
+    );
+    expect(joinUrl('https://api.test', '/search?type=a', 'q=1')).toBe(
+      'https://api.test/search?type=a&q=1',
+    );
   });
 });

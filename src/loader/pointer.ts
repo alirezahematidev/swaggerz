@@ -17,17 +17,37 @@ export function appendPointer(pointer: string, ...segments: readonly (string | n
   );
 }
 
-/** Splits a pointer (`/a/b`, `#/a/b` or `""`) into unescaped segments. */
+/**
+ * Splits a JSON pointer (`/a/b` or `""`) into unescaped segments. This is for pointers built with
+ * {@link appendPointer} (diagnostics, cursors, resolved references), which are not URI-encoded:
+ * `/a%25` names the member `a%25`. Use {@link parseFragment} for the fragment of a `$ref`.
+ */
 export function parsePointer(pointer: string): string[] | undefined {
-  let value = pointer.startsWith('#') ? pointer.slice(1) : pointer;
-  if (value === '') return [];
-  if (!value.startsWith('/')) return undefined;
+  if (pointer === '') return [];
+  if (!pointer.startsWith('/')) return undefined;
+  return pointer.slice(1).split('/').map(unescapeSegment);
+}
+
+/**
+ * Decodes the percent-escapes of a URI fragment (without its `#`); `undefined` when one is
+ * malformed, such as `%zz`.
+ */
+export function decodeFragment(fragment: string): string | undefined {
   try {
-    value = decodeURIComponent(value);
+    return decodeURIComponent(fragment);
   } catch {
     return undefined;
   }
-  return value.slice(1).split('/').map(unescapeSegment);
+}
+
+/**
+ * Splits the fragment of a URI reference (`#/a/b`, `/a/b` or `""`) into unescaped segments. The
+ * fragment is URI-encoded (RFC 6901, section 6), so `#/a%25` names the member `a%`. Returns
+ * `undefined` when it is not a JSON pointer or contains a malformed percent-escape.
+ */
+export function parseFragment(fragment: string): string[] | undefined {
+  const decoded = decodeFragment(fragment.startsWith('#') ? fragment.slice(1) : fragment);
+  return decoded === undefined ? undefined : parsePointer(decoded);
 }
 
 export type PointerLookup =
@@ -52,7 +72,7 @@ export function getAtPointer(root: unknown, segments: readonly string[]): Pointe
   return { found: true, value: current };
 }
 
-/** The last segment of a pointer, unescaped. */
+/** The last segment of a pointer (see {@link parsePointer}), unescaped. */
 export function lastSegment(pointer: string): string | undefined {
   return parsePointer(pointer)?.at(-1);
 }

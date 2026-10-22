@@ -161,6 +161,36 @@ describe('RemoteWatcher', () => {
       await watcher.close();
     }
   });
+
+  it('cancels a request in flight when it closes instead of waiting for the timeout', async () => {
+    // A server that accepts requests and never answers them.
+    const hanging = createServer(() => undefined);
+    await new Promise<void>((resolve) => hanging.listen(0, '127.0.0.1', resolve));
+    const slow = `http://127.0.0.1:${(hanging.address() as AddressInfo).port}/openapi.yaml`;
+    let received = 0;
+    hanging.on('request', () => received++);
+    const { events, watcher } = watch();
+    try {
+      const options = documentFetchOptions(
+        {
+          fetch: { headers: {}, timeout: 30_000, maxBytes: 1_000_000 },
+          policy: { external: 'local', allowedDirectories: [], allowedHosts: [] },
+        },
+        new URL(slow),
+        { isRoot: true },
+      );
+      watcher.set([{ url: slow, text: 'openapi: 3.1.0', fetch: options }], 10);
+      await until(() => received === 1);
+      const started = Date.now();
+      await watcher.close();
+      expect(Date.now() - started).toBeLessThan(2_000);
+      // Closing is not a failure of the document.
+      expect(events).toEqual([]);
+    } finally {
+      hanging.closeAllConnections();
+      await new Promise<void>((resolve) => hanging.close(() => resolve()));
+    }
+  });
 });
 
 describe('polled documents', () => {

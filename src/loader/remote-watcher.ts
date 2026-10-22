@@ -51,6 +51,8 @@ export class RemoteWatcher {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #running: Promise<void> | undefined;
   #closed = false;
+  /** Cancels requests in flight when the watcher closes, instead of waiting for their timeout. */
+  readonly #abort = new AbortController();
 
   constructor(options: RemoteWatcherOptions) {
     this.#options = options;
@@ -93,11 +95,12 @@ export class RemoteWatcher {
     }
   }
 
-  /** Stops polling and waits for a running round to finish. */
+  /** Stops polling, cancels requests in flight and waits for a running round to finish. */
   async close(): Promise<void> {
     this.#closed = true;
     if (this.#timer !== undefined) clearTimeout(this.#timer);
     this.#timer = undefined;
+    this.#abort.abort();
     await this.#running;
   }
 
@@ -119,7 +122,12 @@ export class RemoteWatcher {
     await Promise.all(
       [...this.#entries].map(async ([url, entry]) => {
         try {
-          const fetched = await fetchTextIfModified(new URL(url), entry.fetch, entry.validators);
+          const fetched = await fetchTextIfModified(
+            new URL(url),
+            entry.fetch,
+            entry.validators,
+            this.#abort.signal,
+          );
           if (entry.failing) {
             entry.failing = false;
             this.#options.onRecover?.(url);
@@ -131,7 +139,7 @@ export class RemoteWatcher {
           entry.hash = hash;
           changed.push(url);
         } catch (error) {
-          if (entry.failing) return;
+          if (entry.failing || this.#closed) return;
           entry.failing = true;
           this.#options.onError?.(url, error);
         }

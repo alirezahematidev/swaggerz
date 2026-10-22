@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { ModelSymbol, OperationSymbol, ProjectModel } from '../analysis/types.ts';
 import type { EmitContext } from '../codegen/context.ts';
@@ -13,6 +12,7 @@ import { wireMethod, type ParameterIR, type SchemaIR } from '../ir/types.ts';
 import { lintProject } from '../lint/lint.ts';
 import { PACKAGE_VERSION, TOOL_NAME } from '../meta.ts';
 import type { ProjectService } from '../service/project.ts';
+import type { OverviewResponse } from '../service/types.ts';
 import { compareStrings, suggest } from '../utils/strings.ts';
 import type {
   McpHandlers,
@@ -45,13 +45,61 @@ export interface ToolOptions {
   readonly allowWrite: boolean;
 }
 
-/** Strips the generated header from a module, keeping imports and declarations. */
+/**
+ * A generated module without its comments, keeping imports and declarations: the header goes,
+ * and so does the JSDoc, which carries descriptions and examples from the specification (they
+ * are returned under `specification` keys instead). Comments are recognized outside string
+ * literals; the generator escapes comment text, so specification text cannot end one early.
+ */
 function declaration(source: string): string {
-  return source
-    .split('\n')
-    .filter((line) => !line.startsWith('/* eslint-disable */') && !line.startsWith('// @generated'))
+  const lines: string[] = [];
+  let line = '';
+  // A comment was removed from the current line: it is dropped when nothing else is left.
+  let stripped = false;
+  const endLine = (): void => {
+    if (!stripped || line.trim() !== '') lines.push(line.trimEnd());
+    line = '';
+    stripped = false;
+  };
+  let index = 0;
+  while (index < source.length) {
+    const char = source.charAt(index);
+    if (char === "'" || char === '"' || char === '`') {
+      let end = index + 1;
+      while (end < source.length && source.charAt(end) !== char)
+        end += source.charAt(end) === '\\' ? 2 : 1;
+      line += source.slice(index, end + 1);
+      index = end + 1;
+    } else if (source.startsWith('/*', index)) {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+      stripped = true;
+    } else if (source.startsWith('//', index)) {
+      const end = source.indexOf('\n', index);
+      index = end === -1 ? source.length : end;
+      stripped = true;
+    } else if (char === '\n') {
+      endLine();
+      index++;
+    } else {
+      line += char;
+      index++;
+    }
+  }
+  endLine();
+  return lines
+    .filter((text, i) => text !== '' || (i > 0 && lines[i - 1] !== ''))
     .join('\n')
     .trim();
+}
+
+/** A percent-decoded URI segment, or `undefined` when its encoding is malformed (`%`, `%E0%A4%A`). */
+function decode(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
 }
 
 function words(text: string): string[] {
@@ -141,17 +189,21 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     );
   };
 
-  /** A placeholder value of a schema, as a JavaScript expression for example calls. */
-  const example = (schema: SchemaIR, depth = 0): string => {
-    if (schema.examples?.[0] !== undefined && schema.kind !== 'binary')
+  /**
+   * A value of a schema as a JavaScript expression, for example calls: placeholders derived from
+   * the types, or with `fromSpec` the examples and defaults of the specification where it has
+   * some (text written by the API's authors, returned under `specification` only).
+   */
+  const example = (schema: SchemaIR, fromSpec: boolean, depth = 0): string => {
+    if (fromSpec && schema.examples?.[0] !== undefined && schema.kind !== 'binary')
       return literal(schema.examples[0]);
-    if (schema.default !== undefined) return literal(schema.default);
+    if (fromSpec && schema.default !== undefined) return literal(schema.default);
     switch (schema.kind) {
       case 'ref': {
         const target = project().modelById.get(schema.target);
         return target === undefined || depth > 3
           ? '{}'
-          : example(target.definition.schema, depth + 1);
+          : example(target.definition.schema, fromSpec, depth + 1);
       }
       case 'string': {
         const format = schema.format;
@@ -176,18 +228,20 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       case 'enum':
         return schema.values[0] === undefined ? 'null' : literal(schema.values[0]);
       case 'array':
-        return depth > 3 ? '[]' : `[${example(schema.items, depth + 1)}]`;
+        return depth > 3 ? '[]' : `[${example(schema.items, fromSpec, depth + 1)}]`;
       case 'object': {
         if (depth > 3) return '{}';
         const required = schema.properties.filter((p) => p.required && p.schema.readOnly !== true);
         if (required.length === 0) return '{}';
-        return `{ ${required.map((p) => `${/^[A-Za-z_$][\w$]*$/.test(p.name) ? p.name : literal(p.name)}: ${example(p.schema, depth + 1)}`).join(', ')} }`;
+        return `{ ${required.map((p) => `${/^[A-Za-z_$][\w$]*$/.test(p.name) ? p.name : literal(p.name)}: ${example(p.schema, fromSpec, depth + 1)}`).join(', ')} }`;
       }
       case 'union':
-        return schema.variants[0] === undefined ? 'null' : example(schema.variants[0], depth);
+        return schema.variants[0] === undefined
+          ? 'null'
+          : example(schema.variants[0], fromSpec, depth);
       case 'intersection': {
         const parts = schema.members
-          .map((m) => example(m, depth))
+          .map((m) => example(m, fromSpec, depth))
           .filter((p) => p.startsWith('{ '));
         return parts.length === 0 ? '{}' : `{ ${parts.map((p) => p.slice(2, -2)).join(', ')} }`;
       }
@@ -197,20 +251,20 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
         return 'undefined';
     }
   };
-  const parameterExample = (parameter: ParameterIR): string => {
-    const value = parameter.examples[0]?.value;
-    return value === undefined ? example(parameter.schema) : literal(value);
+  const parameterExample = (parameter: ParameterIR, fromSpec: boolean): string => {
+    const value = fromSpec ? parameter.examples[0]?.value : undefined;
+    return value === undefined ? example(parameter.schema, fromSpec) : literal(value);
   };
-  const exampleCall = (symbol: OperationSymbol): string => {
+  const exampleCall = (symbol: OperationSymbol, fromSpec: boolean): string => {
     const plan = planOperation(symbol, project().ir);
     const entries = plan.parameters
       .filter(({ parameter }) => parameter.required)
       .map(
         ({ property, parameter }) =>
-          `${/^[A-Za-z_$][\w$]*$/.test(property) ? property : literal(property)}: ${parameterExample(parameter)}`,
+          `${/^[A-Za-z_$][\w$]*$/.test(property) ? property : literal(property)}: ${parameterExample(parameter, fromSpec)}`,
       );
     if (plan.body?.required === true)
-      entries.push(`${plan.body.property}: ${example(plan.body.media.schema)}`);
+      entries.push(`${plan.body.property}: ${example(plan.body.media.schema, fromSpec)}`);
     const args = !plan.hasParams ? '' : entries.length === 0 ? '{}' : `{ ${entries.join(', ')} }`;
     const call = `${symbol.name}(${args})`;
     return plan.success.every((s) => s.media === undefined)
@@ -247,6 +301,8 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     const hooks = symbol.query === undefined ? undefined : generateQueryModule(plan, context);
     const library = symbol.query?.library;
     const exported = module.exports.map((e) => e.name);
+    const call = exampleCall(symbol, false);
+    const callWithExamples = exampleCall(symbol, true);
     return {
       name: symbol.name,
       method: wireMethod(op.method),
@@ -255,7 +311,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       ...(op.deprecated ? { deprecated: true } : {}),
       module: moduleFile(symbol.module),
       import: importLine([symbol.name], 'index'),
-      example: exampleCall(symbol),
+      example: call,
       /** The generated declarations: the function, its params, response and error types. */
       declaration: declaration(module.dts),
       types: exported.filter((name) => name !== symbol.name),
@@ -299,11 +355,16 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
         ...(op.summary === undefined ? {} : { summary: op.summary }),
         ...(op.description === undefined ? {} : { description: op.description }),
         ...(op.externalDocs === undefined ? {} : { externalDocs: op.externalDocs.url }),
+        // The example call with the specification's examples and defaults in place of placeholders.
+        ...(callWithExamples === call ? {} : { example: callWithExamples }),
         parameters: Object.fromEntries(
           op.parameters
             .filter((p) => p.description !== undefined)
             .map((p) => [p.name, p.description]),
         ),
+        ...(op.requestBody?.description === undefined
+          ? {}
+          : { requestBody: op.requestBody.description }),
         responses: Object.fromEntries(
           op.responses
             .filter((r) => r.description !== undefined)
@@ -313,11 +374,30 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     };
   };
 
+  /** The documentation of a model, which its declaration leaves out. */
+  const modelDocumentation = (schema: SchemaIR): Record<string, unknown> => {
+    const properties = schema.kind === 'object' ? schema.properties : [];
+    const described = properties.flatMap((p) => {
+      const text = p.schema.description ?? p.schema.title;
+      return text === undefined ? [] : [[p.name, text] as const];
+    });
+    const exemplified = properties.flatMap((p) => {
+      const value = p.schema.examples?.[0];
+      return value === undefined ? [] : [[p.name, value] as const];
+    });
+    return {
+      ...(schema.title === undefined ? {} : { title: schema.title }),
+      ...(schema.description === undefined ? {} : { description: schema.description }),
+      ...(schema.examples?.[0] === undefined ? {} : { example: schema.examples[0] }),
+      ...(described.length === 0 ? {} : { properties: Object.fromEntries(described) }),
+      ...(exemplified.length === 0 ? {} : { examples: Object.fromEntries(exemplified) }),
+    };
+  };
   const modelDetail = (model: ModelSymbol): Record<string, unknown> => {
     const context = emit();
     const graph = context.project.graph;
     const validator = validatorFor(context);
-    const schema = model.definition.schema;
+    const documentation = modelDocumentation(model.definition.schema);
     return {
       name: model.name,
       ...(model.aliases.length === 0 ? {} : { aliases: model.aliases }),
@@ -340,9 +420,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       references: [...(graph.schemaDeps.get(model.id) ?? [])]
         .map((id) => context.project.modelById.get(id)?.name ?? id)
         .sort(compareStrings),
-      ...(schema.description === undefined
-        ? {}
-        : { specification: { description: schema.description } }),
+      ...(Object.keys(documentation).length === 0 ? {} : { specification: documentation }),
     };
   };
 
@@ -363,6 +441,40 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     items: list.slice(0, limit).map(diagnosticSummary),
     ...(list.length > limit ? { truncated: true } : {}),
   });
+  /**
+   * The state of the sources rather than of the version served: after a reload fails, the
+   * diagnostics are those of the failure (the last version that compiled is still served), and
+   * remote documents that cannot be fetched are listed.
+   */
+  const sourceState = (
+    overview: OverviewResponse,
+  ): {
+    readonly failed: boolean;
+    readonly diagnostics: readonly Diagnostic[];
+    readonly problems: Record<string, unknown>;
+  } => {
+    const { failure, unreachable = [] } = overview.session;
+    return {
+      failed: failure !== undefined,
+      diagnostics: failure?.diagnostics ?? overview.diagnostics,
+      problems: {
+        ...(failure === undefined
+          ? {}
+          : {
+              reloadFailed: {
+                message: failure.message,
+                at: failure.at,
+                note: 'The sources changed and do not load: diagnostics lists their problems. The other results describe the last version that loaded until the problem is fixed.',
+              },
+            }),
+        ...(unreachable.length === 0
+          ? {}
+          : {
+              unreachable: unreachable.map(({ url, error, since }) => ({ url, error, since })),
+            }),
+      },
+    };
+  };
 
   const tools: ToolDefinition[] = [
     {
@@ -426,7 +538,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     {
       name: 'check',
       title: 'Check',
-      description: `Compiler diagnostics (errors and warnings, with codes and locations), lint findings about what in the specification makes the generated client worse, and whether the generated files are up to date.`,
+      description: `Compiler diagnostics (errors and warnings, with codes and locations), lint findings about what in the specification makes the generated client worse, and whether the generated files are up to date. ok is false with errors, lint errors, or when the changed sources do not load (reloadFailed; the other tools then serve the last version that loaded).`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -497,11 +609,10 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       const validator = service.project === undefined ? undefined : validatorFor(emit());
       const library = service.project?.operations.find((op) => op.query !== undefined)?.query
         ?.library;
+      const state = sourceState(overview);
       const severity = (s: string): number =>
-        overview.diagnostics.filter((d) => d.severity === s).length;
+        state.diagnostics.filter((d) => d.severity === s).length;
       return {
-        title: overview.title,
-        version: overview.version,
         specVersion: overview.specVersionRaw,
         servers: overview.servers,
         counts: overview.counts,
@@ -536,9 +647,12 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
           warnings: severity('warning'),
           notes: severity('info'),
         },
-        ...(overview.description === undefined
-          ? {}
-          : { specification: { description: overview.description } }),
+        ...state.problems,
+        specification: {
+          title: overview.title,
+          version: overview.version,
+          ...(overview.description === undefined ? {} : { description: overview.description }),
+        },
       };
     },
     find_operations: (args) => {
@@ -596,16 +710,20 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     },
     check: async (args) => {
       const overview = await service.overview();
+      const state = sourceState(overview);
       const includeNotes = args.includeNotes === true;
       const keep = (d: Diagnostic): boolean => includeNotes || d.severity !== 'info';
       const findings =
         service.project === undefined
           ? []
           : lintProject(service.project, service.loaded.config, service.compiled.store);
+      const error = (d: Diagnostic): boolean => d.severity === 'error';
       return {
-        ok: !overview.diagnostics.some((d) => d.severity === 'error'),
+        // Lint rules configured as errors fail like `swaggerz lint` does.
+        ok: !state.failed && !state.diagnostics.some(error) && !findings.some(error),
+        ...state.problems,
         generation: overview.generation,
-        diagnostics: limited(overview.diagnostics.filter(keep), LIMITS.diagnostics),
+        diagnostics: limited(state.diagnostics.filter(keep), LIMITS.diagnostics),
         lint: limited(findings.filter(keep), LIMITS.diagnostics),
       };
     },
@@ -666,38 +784,48 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       };
     },
     generate: async (_args, context) => {
-      const preview = await service.preview();
-      if (!preview.ok)
-        throw new ToolError(
-          'The client cannot be generated; call preview_generation or check for the problems.',
-        );
-      const changed = preview.changes.filter((c) => c.kind !== 'unchanged');
-      if (changed.length === 0)
-        return { ok: true, written: false, message: 'The generated client is up to date.' };
-      const fingerprint = createHash('sha256')
-        .update(JSON.stringify(changed.map((c) => [c.path, c.kind, c.additions, c.deletions])))
-        .digest('hex');
-      const answer = await context.confirm({
-        message: `Write the generated client to ${preview.directory}? ${changed.length} file(s) change (${changed.filter((c) => c.kind === 'create').length} new, ${changed.filter((c) => c.kind === 'update').length} updated, ${changed.filter((c) => c.kind === 'delete').length} deleted).`,
-        fingerprint,
-      });
-      if (answer === false) return { ok: false, written: false, message: 'Cancelled by the user.' };
-      const result = await service.generate();
+      // The confirmation is bound to the exact plan (every file's content before and after), and
+      // only that plan is written. When the specification, the config or the output changes
+      // before it is written, the user is asked again about the new changes.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const preview = await service.preview();
+        if (!preview.ok || preview.id === undefined)
+          throw new ToolError(
+            'The client cannot be generated; call preview_generation or check for the problems.',
+          );
+        const changed = preview.changes.filter((c) => c.kind !== 'unchanged');
+        if (changed.length === 0)
+          return { ok: true, written: false, message: 'The generated client is up to date.' };
+        const answer = await context.confirm({
+          message: `Write the generated client to ${preview.directory}? ${changed.length} file(s) change (${changed.filter((c) => c.kind === 'create').length} new, ${changed.filter((c) => c.kind === 'update').length} updated, ${changed.filter((c) => c.kind === 'delete').length} deleted).`,
+          fingerprint: preview.id,
+        });
+        if (answer === false)
+          return { ok: false, written: false, message: 'Cancelled by the user.' };
+        const result = await service.generate(preview.id);
+        if (result.outdated === true) continue;
+        return {
+          ok: result.ok,
+          written: result.write !== undefined,
+          ...(result.write === undefined
+            ? {}
+            : {
+                created: result.write.created.length,
+                updated: result.write.updated.length,
+                deleted: result.write.deleted.length,
+                unchanged: result.write.unchanged.length,
+              }),
+          problems: limited(
+            result.diagnostics.filter((d) => d.severity !== 'info'),
+            LIMITS.diagnostics,
+          ),
+        };
+      }
       return {
-        ok: result.ok,
-        written: result.write !== undefined,
-        ...(result.write === undefined
-          ? {}
-          : {
-              created: result.write.created.length,
-              updated: result.write.updated.length,
-              deleted: result.write.deleted.length,
-              unchanged: result.write.unchanged.length,
-            }),
-        problems: limited(
-          result.diagnostics.filter((d) => d.severity !== 'info'),
-          LIMITS.diagnostics,
-        ),
+        ok: false,
+        written: false,
+        message:
+          'The specification or the output kept changing while the changes were confirmed; nothing was written. Call generate again once it settles.',
       };
     },
   };
@@ -793,12 +921,17 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
         const operation = uri.startsWith(`${SCHEME}operations/`)
           ? uri.slice(`${SCHEME}operations/`.length)
           : undefined;
-        if (operation !== undefined)
-          return json(operationDetail(findOperation(decodeURIComponent(operation))));
+        if (operation !== undefined) {
+          const name = decode(operation);
+          return name === undefined ? undefined : json(operationDetail(findOperation(name)));
+        }
         const model = uri.startsWith(`${SCHEME}models/`)
           ? uri.slice(`${SCHEME}models/`.length)
           : undefined;
-        if (model !== undefined) return json(modelDetail(findModel(decodeURIComponent(model))));
+        if (model !== undefined) {
+          const name = decode(model);
+          return name === undefined ? undefined : json(modelDetail(findModel(name)));
+        }
       } catch (error) {
         if (error instanceof ToolError) return undefined;
         throw error;

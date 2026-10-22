@@ -155,15 +155,32 @@ export function keyType(prefix: readonly string[], extra: readonly string[]): st
   return `readonly [${[...prefix.map((p) => literal(p)), ...extra].join(', ')}]`;
 }
 
+/** `type | undefined`, parenthesizing function types. */
+function orUndefined(type: string): string {
+  return `${type.includes('=>') ? `(${type})` : type} | undefined`;
+}
+
+/** `type[]`, parenthesizing unions (`Page | null`) and function types. */
+export function arrayOf(type: string): string {
+  return /\||=>/.test(type) ? `(${type})[]` : `${type}[]`;
+}
+
 /** Renders a function as TypeScript, JavaScript with JSDoc types, or a `.d.ts` declaration. */
 export function renderFunction(scope: Scope, doc: JsDocBlock, spec: FunctionSpec): string {
   const typeParams = spec.typeParams ?? [];
+  const skippable = (p: Param): boolean => p.optional === true || p.defaultValue !== undefined;
+  // Only parameters without a required one after them can be optional (TS1016); a defaulted
+  // parameter before a required one accepts `undefined` instead, e.g. `(params = {}, pagination)`.
+  const trailing = spec.params.map((_, index) => spec.params.slice(index).every(skippable));
   if (scope.lang === 'js') {
     const tags: JsDocTag[] = [
       ...typeParams.map((t) => ({ tag: 'template', text: `[${t.name}=${t.default}]` })),
-      ...spec.params.map((p) => ({
+      ...spec.params.map((p, index) => ({
         tag: 'param',
-        text: `{${p.type}} ${p.optional === true || p.defaultValue !== undefined ? `[${p.name}]` : p.name} - ${p.description}`,
+        text:
+          trailing[index] === true
+            ? `{${p.type}} [${p.name}] - ${p.description}`
+            : `{${skippable(p) ? orUndefined(p.type) : p.type}} ${p.name} - ${p.description}`,
       })),
       ...(spec.returns === undefined ? [] : [{ tag: 'returns', text: `{${spec.returns}}` }]),
     ];
@@ -176,12 +193,12 @@ export function renderFunction(scope: Scope, doc: JsDocBlock, spec: FunctionSpec
     typeParams.length === 0
       ? ''
       : `<${typeParams.map((t) => `${t.name} = ${t.default}`).join(', ')}>`;
-  const params = spec.params.map((p) => {
-    const optional =
-      p.optional === true || (scope.lang === 'dts' && p.defaultValue !== undefined) ? '?' : '';
-    const defaultValue =
-      scope.lang === 'ts' && p.defaultValue !== undefined ? ` = ${p.defaultValue}` : '';
-    return `${p.name}${optional}: ${p.type}${defaultValue}`;
+  const params = spec.params.map((p, index) => {
+    // TypeScript keeps the initializer; declarations only say whether the parameter is optional.
+    if (scope.lang === 'ts' && p.defaultValue !== undefined)
+      return `${p.name}: ${p.type} = ${p.defaultValue}`;
+    if (!skippable(p)) return `${p.name}: ${p.type}`;
+    return trailing[index] === true ? `${p.name}?: ${p.type}` : `${p.name}: ${orUndefined(p.type)}`;
   });
   const returns = spec.returns === undefined ? '' : `: ${spec.returns}`;
   const keyword = scope.lang === 'dts' ? 'export declare function' : 'export function';
@@ -336,7 +353,7 @@ export function infiniteParamsParam(
 
 /** The type of `getNextPageParam`/`getPreviousPageParam` and the pagination object. */
 export function paginationType(scope: Scope, pageType: string): string {
-  const pageFn = `(lastPage: ${scope.queryData}, allPages: ${scope.queryData}[], lastPageParam: ${pageType}, allPageParams: ${pageType}[]) => ${pageType} | undefined | null`;
+  const pageFn = `(lastPage: ${scope.queryData}, allPages: ${arrayOf(scope.queryData)}, lastPageParam: ${pageType}, allPageParams: ${arrayOf(pageType)}) => ${pageType} | undefined | null`;
   return `{ initialPageParam: ${pageType}; getNextPageParam: ${pageFn}; getPreviousPageParam?: ${pageFn} }`;
 }
 
@@ -354,34 +371,12 @@ export function mutationFn(plan: OperationPlan, scope: Scope, request: string): 
       : `(variables) => ${scope.op}(variables || undefined, ${request})`;
 }
 
-/** Resolves configured invalidation targets (operation names/ids or tags) to query key prefixes. */
-export function resolveInvalidations(plan: OperationPlan, ctx: EmitContext): string[][] {
-  const options =
-    ctx.config.features.query === false ? ctx.config.features.swr : ctx.config.features.query;
-  if (options === false) return [];
-  const symbol = plan.symbol;
-  const targets =
-    options.invalidates[symbol.name] ??
-    (symbol.operation.operationId === undefined
-      ? undefined
-      : options.invalidates[symbol.operation.operationId]) ??
-    [];
-  const keys: string[][] = [];
-  for (const target of targets) {
-    const operation = ctx.project.operations.find(
-      (o) => o.name === target || o.operation.operationId === target,
-    );
-    if (operation?.query !== undefined) {
-      keys.push([...operation.query.keyPrefix]);
-      continue;
-    }
-    // A tag (nested tags match their own name) or a group directory.
-    const group = ctx.project.queryGroups.find(
-      (g) => g.prefix.at(-1) === target || g.group === target,
-    );
-    if (group !== undefined) keys.push([...group.prefix]);
-  }
-  return keys;
+/**
+ * The query key prefixes a mutation invalidates: its configured targets (operation names/ids or
+ * tags), resolved during analysis (`src/analysis/data-fetching.ts`).
+ */
+export function resolveInvalidations(plan: OperationPlan): string[][] {
+  return (plan.symbol.query?.invalidates ?? []).map((key) => [...key]);
 }
 
 /** Exports of a query module, in declaration order. */
@@ -419,10 +414,10 @@ export function generateGroupKeys(
   const outputs = renderAll(group.module, ctx, (imports, lang) => {
     imports.declare(group.name);
     const doc: JsDocBlock = {
-      summary: `${label} keys of the \`${group.prefix.join('/')}\` operations.`,
+      summary: `${label} keys of the \`${group.tags.join('/')}\` operations.`,
       description:
         label === 'SWR'
-          ? '`all` is the prefix of every key of the group, e.g. to revalidate them with `mutate((key) => Array.isArray(key) && key[0] === keys.all[0])`.'
+          ? '`all` is the prefix of every key of the group, e.g. to revalidate them with `mutate((key) => Array.isArray(key) && keys.all.every((part, index) => key[index] === part))`.'
           : '`all` matches every query of the group, e.g. `queryClient.invalidateQueries({ queryKey: keys.all })`.',
       tags: [],
     };

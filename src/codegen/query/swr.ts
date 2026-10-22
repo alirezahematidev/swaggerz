@@ -104,7 +104,8 @@ function generateSwrInfinite(
           infiniteParamsParam(q, shape),
           {
             name: 'options',
-            type: `${scope.type('SWRInfiniteConfiguration', INFINITE)}<${data}, ${scope.error}> & { initialPageParam: ${shape.pageType}; getNextPageParam: ${pageFn}; request?: ${scope.options} | undefined; enabled?: boolean | undefined }`,
+            // `parallel` is left out: each page parameter is computed from the previous page.
+            type: `Omit<${scope.type('SWRInfiniteConfiguration', INFINITE)}<${data}, ${scope.error}>, 'parallel'> & { initialPageParam: ${shape.pageType}; getNextPageParam: ${pageFn}; request?: ${scope.options} | undefined; enabled?: boolean | undefined }`,
             description: 'SWR options with pagination, `enabled`, and `request` options.',
           },
         ],
@@ -115,8 +116,10 @@ function generateSwrInfinite(
           `    (pageIndex${scope.lang === 'ts' ? ': number' : ''}, previousPage${scope.lang === 'ts' ? `: ${data} | null` : ''})${scope.lang === 'ts' ? `: ${pageKey} | null` : ''} => {\n` +
           `      if (!enabled) return null;\n` +
           `      // The first page is always requested (its page parameter may be undefined); later\n` +
-          `      // pages end the list when getNextPageParam returns undefined or null.\n` +
-          `      if (previousPage === null) return ${scope.assert(pageKey, `[...${shape.keyFn}(params), initialPageParam]`)};\n` +
+          `      // pages end the list when getNextPageParam returns undefined or null, or when the\n` +
+          `      // previous page has no data to compute it from (a \`null\` body).\n` +
+          `      if (pageIndex === 0) return ${scope.assert(pageKey, `[...${shape.keyFn}(params), initialPageParam]`)};\n` +
+          `      if (previousPage === null) return null;\n` +
           `      const page = getNextPageParam(previousPage, pageIndex - 1);\n` +
           `      return page === undefined || page === null ? null : ${scope.assert(pageKey, `[...${shape.keyFn}(params), page]`)};\n` +
           `    },\n` +

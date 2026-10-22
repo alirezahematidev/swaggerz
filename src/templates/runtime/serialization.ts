@@ -1,4 +1,10 @@
-import type { ParamLocation, ParamSerialization, ParamStyle, PropertyEncoding } from './types.js';
+import type {
+  ParamLocation,
+  ParamSerialization,
+  ParamStyle,
+  ParseAs,
+  PropertyEncoding,
+} from './types.js';
 
 const DEFAULT_STYLE: Readonly<Record<ParamLocation, ParamStyle>> = {
   path: 'simple',
@@ -21,9 +27,14 @@ const encodeStrict: Encoder = (value) =>
     (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 
-/** Keeps RFC 3986 reserved characters, as requested by `allowReserved`. */
+/**
+ * Keeps RFC 3986 reserved characters, as requested by `allowReserved`. Percent signs are kept only
+ * when they start a percent-encoded octet, so the result is always valid percent-encoding.
+ */
 const encodeReserved: Encoder = (value) =>
-  value.replace(/[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/g, (c) => encodeURIComponent(c));
+  value.replace(/%(?![0-9A-Fa-f]{2})|[^A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/gu, (c) =>
+    encodeURIComponent(c),
+  );
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return (
@@ -138,8 +149,10 @@ export function serializeQuery(
       else if (delimiter !== undefined) parts.push(`${key}=${items.join(encodeStrict(delimiter))}`);
       else parts.push(`${key}=${items.join(',')}`);
     } else if (isObject(value)) {
-      if (style === 'deepObject') parts.push(...deepObjectPairs(key, value, encode));
-      else if (explode) {
+      if (style === 'deepObject') {
+        for (const [path, item] of deepObjectPairs(key, value, encodeStrict))
+          parts.push(`${path}=${encode(primitiveToString(item))}`);
+      } else if (explode) {
         for (const [property, item] of entriesOf(value)) {
           parts.push(`${encodeStrict(property)}=${encode(primitiveToString(item))}`);
         }
@@ -148,7 +161,8 @@ export function serializeQuery(
           encode(property),
           encode(primitiveToString(item)),
         ]);
-        parts.push(`${key}=${flat.join(',')}`);
+        const delimiter = DELIMITERS[style];
+        parts.push(`${key}=${flat.join(delimiter === undefined ? ',' : encodeStrict(delimiter))}`);
       }
     } else {
       parts.push(`${key}=${encode(primitiveToString(value))}`);
@@ -157,17 +171,25 @@ export function serializeQuery(
   return parts.join('&');
 }
 
-function deepObjectPairs(prefix: string, value: unknown, encode: Encoder): string[] {
+/**
+ * `deepObject` pairs: bracketed key paths (`filter[a][0]`, property names passed through
+ * `encodeKey`) and the primitive values at their ends.
+ */
+function deepObjectPairs(
+  prefix: string,
+  value: unknown,
+  encodeKey: Encoder,
+): [path: string, value: unknown][] {
   if (Array.isArray(value)) {
-    return value.flatMap((item, index) => deepObjectPairs(`${prefix}[${index}]`, item, encode));
+    return value.flatMap((item, index) => deepObjectPairs(`${prefix}[${index}]`, item, encodeKey));
   }
   if (isObject(value)) {
     return entriesOf(value).flatMap(([key, item]) =>
-      deepObjectPairs(`${prefix}[${encodeStrict(key)}]`, item, encode),
+      deepObjectPairs(`${prefix}[${encodeKey(key)}]`, item, encodeKey),
     );
   }
   if (value === undefined || value === null) return [];
-  return [`${prefix}=${encode(primitiveToString(value))}`];
+  return [[prefix, value]];
 }
 
 /** Serializes a header parameter (`simple` style). */
@@ -264,6 +286,32 @@ export function isJsonMediaType(mediaType: string | null | undefined): boolean {
   return type === 'application/json' || type.endsWith('+json') || type === 'text/json';
 }
 
+/**
+ * How a transport reads a response body: `parseAs` applies to successful and redirect statuses;
+ * error bodies (other statuses) are read by their `Content-Type` (`auto`), so `ApiError.body`
+ * matches the error response's declared type. `stream` keeps every body unread.
+ */
+export function responseParseAs(parseAs: ParseAs, status: number): ParseAs {
+  return parseAs === 'stream' || (status >= 200 && status < 400) ? parseAs : 'auto';
+}
+
+/** Whether a response of this (non-JSON) media type is read as text rather than as a `Blob`. */
+export function isTextMediaType(mediaType: string): boolean {
+  const type = (mediaType.split(';')[0] ?? '').trim().toLowerCase();
+  return (
+    type.startsWith('text/') ||
+    type === 'application/xml' ||
+    type.endsWith('+xml') ||
+    type === 'application/x-www-form-urlencoded' ||
+    type === 'application/javascript' ||
+    // Sequences of JSON values (JSON Lines, NDJSON, JSON text sequences) are read as text.
+    type === 'application/jsonl' ||
+    type === 'application/x-ndjson' ||
+    type === 'application/json-seq' ||
+    type.endsWith('+json-seq')
+  );
+}
+
 function isBinaryLike(value: unknown): boolean {
   return (
     (typeof Blob !== 'undefined' && value instanceof Blob) ||
@@ -304,9 +352,17 @@ export function serializeBody(
     const isParams = typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams;
     return { body: isParams ? body : toSearchParams(body, encoding), contentType: mediaType };
   }
-  if (type === '' || isJsonMediaType(type)) {
-    if (type === '' && isNativeBody(body)) return { body, contentType: undefined };
-    return { body: JSON.stringify(body), contentType: mediaType ?? 'application/json' };
+  // A wildcard (`*/*`, `text/*`) is not a Content-Type: JSON is labeled as such, and native bodies
+  // get the transport's default (e.g. a Blob's own type).
+  const wildcard = type.endsWith('*');
+  if (type === '' || wildcard || isJsonMediaType(type)) {
+    if ((type === '' || wildcard) && isNativeBody(body)) return { body, contentType: undefined };
+    if (wildcard && type.startsWith('text/'))
+      return { body: primitiveToString(body), contentType: undefined };
+    return {
+      body: JSON.stringify(body),
+      contentType: mediaType === undefined || wildcard ? 'application/json' : mediaType,
+    };
   }
   if (type.startsWith('text/'))
     return { body: isNativeBody(body) ? body : primitiveToString(body), contentType: mediaType };
@@ -367,7 +423,33 @@ export function toFormData(
   return form;
 }
 
-/** Converts an object into `URLSearchParams` (`form` style; nested objects are sent as JSON). */
+/** Appends an object property of a form body that declares `style` or `explode`. */
+function appendStyledObject(
+  params: URLSearchParams,
+  name: string,
+  value: Record<string, unknown>,
+  encoding: PropertyEncoding,
+): void {
+  const style = encoding.style ?? 'form';
+  if (style === 'deepObject') {
+    for (const [path, item] of deepObjectPairs(name, value, (key) => key))
+      params.append(path, primitiveToString(item));
+  } else if (style === 'form' && encoding.explode !== false) {
+    for (const [property, item] of entriesOf(value))
+      params.append(property, primitiveToString(item));
+  } else {
+    const flat = entriesOf(value).flatMap(([property, item]) => [
+      property,
+      primitiveToString(item),
+    ]);
+    params.append(name, flat.join(DELIMITERS[style] ?? ','));
+  }
+}
+
+/**
+ * Converts an object into `URLSearchParams` (`form` style). Nested objects are sent as JSON unless
+ * their `encoding` declares a `style` or `explode` (`deepObject` sends `name[key]=value`).
+ */
 export function toSearchParams(
   body: unknown,
   encoding?: Readonly<Record<string, PropertyEncoding>>,
@@ -387,7 +469,9 @@ export function toSearchParams(
         for (const item of value) params.append(name, primitiveToString(item));
       }
     } else if (isObject(value)) {
-      params.append(name, JSON.stringify(value));
+      if (propertyEncoding?.style !== undefined || propertyEncoding?.explode !== undefined)
+        appendStyledObject(params, name, value, propertyEncoding);
+      else params.append(name, JSON.stringify(value));
     } else {
       params.append(name, primitiveToString(value));
     }
@@ -395,10 +479,16 @@ export function toSearchParams(
   return params;
 }
 
-/** Joins a base URL and a path without duplicating slashes. */
+/**
+ * Joins a base URL and a path without duplicating slashes. A query string in the base URL is kept
+ * after the path and combined with `query`.
+ */
 export function joinUrl(baseUrl: string, path: string, query: string): string {
-  const base = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-  const url = base + path;
-  if (query === '') return url;
-  return url + (url.includes('?') ? '&' : '?') + query;
+  const queryStart = baseUrl.indexOf('?');
+  const basePath = queryStart === -1 ? baseUrl : baseUrl.slice(0, queryStart);
+  const baseQuery = queryStart === -1 ? '' : baseUrl.slice(queryStart + 1);
+  const url = (basePath.endsWith('/') ? basePath.slice(0, -1) : basePath) + path;
+  const search = [baseQuery, query].filter((part) => part !== '').join('&');
+  if (search === '') return url;
+  return url + (url.includes('?') ? '&' : '?') + search;
 }

@@ -1,0 +1,87 @@
+openapi: 3.2.0
+info:
+  title: Query edge cases
+  version: '1.0.0'
+  description: >-
+    Data-fetching edge cases: an infinite query whose pages may be missing (`200` with a nullable
+    page and a bodiless `204`) and whose parameters are all optional, nested tags, an operation
+    that carries a tag only as its secondary tag, and a tag without queries.
+tags:
+  - name: pets
+  - name: cats
+    parent: pets
+  - name: dogs
+  - name: admin
+paths:
+  /pets:
+    get:
+      operationId: list_pets
+      tags: [pets]
+      parameters:
+        - { name: page_token, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        '200':
+          description: A page of pets, or `null` past the end.
+          content:
+            application/json:
+              schema:
+                type: [object, 'null']
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/Pet' } }
+                  next: { type: string }
+        '204': { description: No pets at all. }
+    post:
+      operationId: create_pet
+      tags: [pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Pet' }
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Pet' }
+  /cats:
+    get:
+      operationId: listCats
+      tags: [cats]
+      responses:
+        '200':
+          description: Cats.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Pet' } }
+    delete:
+      operationId: deleteCats
+      tags: [cats]
+      responses:
+        '204': { description: Deleted. }
+  /dogs:
+    get:
+      operationId: listDogs
+      tags: [dogs, pets]
+      responses:
+        '200':
+          description: Dogs, also listed under pets.
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Pet' } }
+  /admin/reset:
+    post:
+      operationId: reset
+      tags: [admin]
+      responses:
+        '204': { description: Reset. }
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [name]
+      properties:
+        id: { type: integer, readOnly: true }
+        name: { type: string }

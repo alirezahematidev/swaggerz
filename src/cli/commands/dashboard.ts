@@ -1,7 +1,43 @@
 import { spawn } from 'node:child_process';
 import { TOOL_NAME } from '../../meta.ts';
+import { isRecord } from '../../utils/object.ts';
 import { UsageError } from '../args.ts';
-import { EXIT, flag, option, type Command } from '../context.ts';
+import { EXIT, flag, integerOption, option, type Command } from '../context.ts';
+
+/** Why the server could not listen, for errors that the host or port options can fix. */
+const LISTEN_PROBLEMS: Readonly<Record<string, { problem: string; hint: string }>> = {
+  EADDRINUSE: {
+    problem: 'the port is already in use',
+    hint: 'Choose another port with --port (or dashboard.port), or stop the process that uses it.',
+  },
+  EACCES: {
+    problem: 'permission denied',
+    hint: 'Ports below 1024 usually need elevated privileges; choose a higher port with --port.',
+  },
+  EADDRNOTAVAIL: {
+    problem: 'the address is not available on this machine',
+    hint: 'Use the address of a local interface with --host (the default is 127.0.0.1).',
+  },
+  ENOTFOUND: {
+    problem: 'the host name could not be resolved',
+    hint: 'Use a local interface address or host name with --host (the default is 127.0.0.1).',
+  },
+};
+
+/** Turns a failure to listen (port taken, privileged port, unknown host) into a usage error. */
+function listenError(error: unknown): UsageError | undefined {
+  if (!isRecord(error) || typeof error.code !== 'string') return undefined;
+  const known = LISTEN_PROBLEMS[error.code];
+  if (known === undefined || (error.syscall !== 'listen' && error.syscall !== 'getaddrinfo'))
+    return undefined;
+  const address =
+    typeof error.address === 'string'
+      ? `${error.address}${typeof error.port === 'number' ? `:${error.port}` : ''}`
+      : typeof error.hostname === 'string'
+        ? error.hostname
+        : 'the configured address';
+  return new UsageError(`The dashboard cannot listen on ${address}: ${known.problem}.`, known.hint);
+}
 
 function openBrowser(url: string): void {
   const [command, args] =
@@ -42,11 +78,7 @@ export const dashboardCommand: Command = {
     },
   },
   async run(ctx) {
-    const portOption = option(ctx, 'port');
-    const port = portOption === undefined ? undefined : Number(portOption);
-    if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
-      throw new UsageError('--port must be an integer between 0 and 65535.');
-    }
+    const port = integerOption(ctx, 'port', { max: 65535 });
     const host = option(ctx, 'host');
     const configFile = option(ctx, 'config');
     // The dashboard (and its web assets) are only loaded when this command runs.
@@ -58,6 +90,8 @@ export const dashboardCommand: Command = {
       ...(host === undefined ? {} : { host }),
       ...(port === undefined ? {} : { port }),
       watch: !flag(ctx, 'no-watch'),
+    }).catch((error: unknown) => {
+      throw listenError(error) ?? error;
     });
     const { reporter } = ctx;
     reporter.json({ ok: true, url: server.url });

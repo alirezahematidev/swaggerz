@@ -86,10 +86,21 @@ export const t = {
         if (!values.includes(value as string | number | boolean)) {
           const list = values.map((v) => JSON.stringify(v)).join(', ');
           const guess = typeof value === 'string' ? suggest(value, values.map(String)) : undefined;
+          // YAML and JSON read an unquoted `3.0` as the number 3.
+          const quoted =
+            typeof value === 'number'
+              ? values.find((v) => typeof v === 'string' && v.trim() !== '' && Number(v) === value)
+              : undefined;
+          const hint =
+            quoted !== undefined
+              ? `Quote the value: ${JSON.stringify(quoted)} is a string option, but an unquoted ${String(quoted)} is read as a number.`
+              : guess === undefined
+                ? undefined
+                : `Did you mean "${guess}"?`;
           issues.push({
             path,
-            message: `Expected one of ${list} but received ${value === undefined ? 'undefined' : typeof value === 'function' ? describe(value) : JSON.stringify(value)}.`,
-            ...(guess === undefined ? {} : { hint: `Did you mean "${guess}"?` }),
+            message: `Expected one of ${list} but received ${value === undefined ? 'undefined' : typeof value === 'function' ? describe(value) : typeof value === 'number' ? `the number ${JSON.stringify(value)}` : JSON.stringify(value)}.`,
+            ...(hint === undefined ? {} : { hint }),
           });
         }
       },
@@ -181,7 +192,8 @@ export const t = {
           }
         }
         for (const [key, entry] of Object.entries(value)) {
-          const entryCheck = shape[key];
+          // Own properties only: `constructor`, `toString` or `__proto__` are unknown options.
+          const entryCheck = Object.hasOwn(shape, key) ? shape[key] : undefined;
           if (entryCheck === undefined) {
             const guess = suggest(key, Object.keys(shape));
             issues.push({

@@ -100,6 +100,38 @@ export function bodyKind(media: MediaTypeIR): BodyKind {
   return media.schema.kind === 'string' ? 'text' : 'raw';
 }
 
+/** What the runtime makes of a response body: parsed JSON, a string or a `Blob`. */
+export type ResponseKind = 'json' | 'text' | 'binary';
+
+/** Non-JSON media types the runtime reads as text (mirrors `isTextMediaType` in the runtime). */
+function isTextResponse(type: string): boolean {
+  return (
+    type.startsWith('text/') ||
+    type === 'application/xml' ||
+    type.endsWith('+xml') ||
+    type === 'application/x-www-form-urlencoded' ||
+    type === 'application/javascript' ||
+    type === 'application/jsonl' ||
+    type === 'application/x-ndjson' ||
+    type === 'application/json-seq' ||
+    type.endsWith('+json-seq')
+  );
+}
+
+/**
+ * How the runtime reads a response of a media type: successful responses by the operation's
+ * `parseAs` hint, if any, everything else by `Content-Type` (JSON is parsed, text media types are
+ * strings, other types `Blob`s). Pass `undefined` as `parseAs` for error responses.
+ */
+export function responseKind(media: MediaTypeIR, parseAs: ParseAsHint): ResponseKind {
+  if (parseAs === 'blob') return 'binary';
+  if (parseAs === 'text') return 'text';
+  const type = (media.mediaType.split(';')[0] ?? '').trim().toLowerCase();
+  if (isJson(type) || type === 'text/json') return 'json';
+  if (media.schema.kind === 'binary') return 'binary';
+  return isTextResponse(type) ? 'text' : 'binary';
+}
+
 /** 2xx responses, and declared 3xx responses (redirects that surface, such as `304`). */
 export function isSuccessStatus(status: string): boolean {
   return /^[23](\d\d|XX)$/i.test(status);

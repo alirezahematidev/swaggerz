@@ -92,6 +92,73 @@ describe('config file formats', () => {
       });
     }));
 
+  it('reports the line and column of validation errors in JSON and YAML configs', () =>
+    withTempDir(async (dir) => {
+      await write(
+        dir,
+        'swaggerz.config.yaml',
+        'spec:\n  version: "3.1"\n  input: a.yaml\noutput:\n  clean: "yes"\n',
+      );
+      const yaml = await failure(loadConfig({ cwd: dir }));
+      expect(yaml.diagnostics[0]).toMatchObject({
+        code: 'config/invalid',
+        message: 'output.clean: Expected a boolean but received a string.',
+        location: { file: path.join(dir, 'swaggerz.config.yaml'), line: 5, column: 3 },
+      });
+      // A wrong value from an environment variable has no position in the file.
+      await write(
+        dir,
+        'env/swaggerz.config.yaml',
+        'spec:\n  version: "3.1"\n  input: a.yaml\nclient:\n  adapter: fetch\n',
+      );
+      const fromEnv = await failure(
+        loadConfig({ cwd: path.join(dir, 'env'), env: { SWAGGERZ_CLIENT_ADAPTER: 'fech' } }),
+      );
+      expect(fromEnv.diagnostics[0]).toMatchObject({ message: expect.stringContaining('"fech"') });
+      expect(fromEnv.diagnostics[0]?.location?.line).toBeUndefined();
+
+      await write(
+        dir,
+        'swaggerz.config.json',
+        JSON.stringify({ spec: { version: '3.1', input: 'a.yaml' }, ouput: {} }, null, 2),
+      );
+      const json = await failure(loadConfig({ cwd: dir, configFile: 'swaggerz.config.json' }));
+      expect(json.diagnostics[0]).toMatchObject({
+        message: 'ouput: Unknown option.',
+        location: { line: 6, column: 3 },
+      });
+    }));
+
+  it('suggests quoting spec.version when YAML reads it as a number', () =>
+    withTempDir(async (dir) => {
+      await write(dir, 'swaggerz.config.yaml', 'spec:\n  version: 3.1\n  input: a.yaml\n');
+      expect((await failure(loadConfig({ cwd: dir }))).diagnostics[0]).toMatchObject({
+        message:
+          'spec.version: Expected one of "2.0", "3.0", "3.1", "3.2", "auto" but received the number 3.1.',
+        hint: expect.stringContaining('Quote the value: "3.1"') as string,
+      });
+      await write(dir, 'swaggerz.config.yaml', 'spec:\n  version: 3.0\n  input: a.yaml\n');
+      expect((await failure(loadConfig({ cwd: dir }))).diagnostics[0]).toMatchObject({
+        message: expect.stringContaining('but received the number 3.') as string,
+        hint: expect.stringContaining('Quote the value: "3.0"') as string,
+      });
+    }));
+
+  it('treats Object.prototype member names as unknown options', () =>
+    withTempDir(async (dir) => {
+      await write(
+        dir,
+        'swaggerz.config.json',
+        '{ "spec": { "version": "3.1", "input": "a.yaml" }, "__proto__": { "x": 1 }, "output": { "valueOf": 1, "constructor": 2 } }',
+      );
+      const error = await failure(loadConfig({ cwd: dir }));
+      expect(error.diagnostics.map((d) => [d.code, d.message])).toEqual([
+        ['config/invalid', '__proto__: Unknown option.'],
+        ['config/invalid', 'output.valueOf: Unknown option.'],
+        ['config/invalid', 'output.constructor: Unknown option.'],
+      ]);
+    }));
+
   it('prefers code configs over data configs in the same directory', () =>
     withTempDir(async (dir) => {
       await write(dir, 'swaggerz.config.yaml', 'spec: { version: "3.0", input: yaml.yaml }\n');
@@ -164,6 +231,55 @@ describe('plugin references', () => {
       );
       const loaded = await loadConfig({ cwd: dir });
       expect(loaded.plugins).toEqual([{ name: 'acme:{"level":2}' }]);
+    }));
+
+  it('lists local plugin modules and loads their changes on the next load', () =>
+    withTempDir(async (dir) => {
+      const esm = await write(dir, 'plugins/esm.mjs', "export default { name: 'esm-v1' };\n");
+      const cjs = await write(dir, 'plugins/cjs.cjs', "module.exports = { name: 'cjs-v1' };\n");
+      await write(
+        dir,
+        'node_modules/pkg-plugin/package.json',
+        JSON.stringify({ name: 'pkg-plugin', main: 'index.js' }),
+      );
+      await write(dir, 'node_modules/pkg-plugin/index.js', "module.exports = { name: 'pkg' };\n");
+      await write(
+        dir,
+        'swaggerz.config.json',
+        JSON.stringify({
+          spec: { version: '3.0', input: 'spec.yaml' },
+          plugins: ['./plugins/esm.mjs', './plugins/cjs.cjs', 'pkg-plugin'],
+        }),
+      );
+      const first = await loadConfig({ cwd: dir });
+      expect(first.plugins.map((p) => p.name)).toEqual(['esm-v1', 'cjs-v1', 'pkg']);
+      // Packages are not watched; local modules are.
+      expect(first.watchFiles).toEqual([cjs, esm]);
+
+      await writeFile(esm, "export default { name: 'esm-v2' };\n");
+      await writeFile(cjs, "module.exports = { name: 'cjs-v2' };\n");
+      expect((await loadConfig({ cwd: dir })).plugins.map((p) => p.name)).toEqual([
+        'esm-v2',
+        'cjs-v2',
+        'pkg',
+      ]);
+    }));
+
+  it('reports a malformed package.json of a plugin package as a load failure', () =>
+    withTempDir(async (dir) => {
+      await write(dir, 'node_modules/broken-plugin/package.json', '{ "name": ');
+      await write(
+        dir,
+        'swaggerz.config.json',
+        JSON.stringify({
+          spec: { version: '3.0', input: 'spec.yaml' },
+          plugins: ['broken-plugin'],
+        }),
+      );
+      expect((await failure(loadConfig({ cwd: dir }))).diagnostics[0]).toMatchObject({
+        code: 'config/plugin-load-failed',
+        message: expect.stringContaining('is not valid JSON') as string,
+      });
     }));
 
   it('explains plugin reference failures', () =>

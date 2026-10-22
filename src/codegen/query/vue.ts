@@ -117,10 +117,13 @@ function generateVueInfinite(
   const optionsType = `Exclude<Parameters<typeof ${scope.typeofValue('useInfiniteQuery')}<${generics.join(', ')}>>[0], ${scope.type('Ref', VUE)}<unknown> | ((...args: never[]) => unknown)>`;
   const toValue = scope.value('toValue', VUE);
   // Vue Query 5.0 takes a plain options object for infinite queries (later releases also accept
-  // refs), so the parameters stay reactive through a computed key and are read when fetching.
+  // refs), so the parameters stay reactive through a computed key. The query function reads them
+  // from the key of the query it fetches: a query can be refetched (invalidated, refocused) after
+  // the composable that created it has moved on to other parameters.
+  const paramsIndex = q.keyPrefix.length + 1;
   const object =
     `{\n      ...vueQueryOptions,\n      queryKey: ${scope.value('computed', VUE)}(() => ${shape.keyFn}(${toValue}(params))),\n` +
-    `      queryFn: ({ pageParam, signal }) => ${scope.queryCall(`${scope.op}({ ...${toValue}(params), ${propertyKey(shape.property)}: pageParam }, ${scope.signal('request')})`)},\n    }`;
+    `      queryFn: ({ pageParam, signal, queryKey }) => ${scope.queryCall(`${scope.op}({ ...queryKey[${paramsIndex}], ${propertyKey(shape.property)}: pageParam }, ${scope.signal('request')})`)},\n    }`;
   return [
     ...infiniteKeyParts(plan, q, scope, shape),
     plainInfiniteQueryOptions(plan, q, scope, shape),

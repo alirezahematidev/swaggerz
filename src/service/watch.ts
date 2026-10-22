@@ -44,7 +44,9 @@ export class ProjectWatcher {
         const { manifest } = this.#service.watchTargets();
         const sources = files.filter((file) => file !== manifest);
         if (sources.length === 0) {
-          this.#events.outputChanged?.(this.#service.outputChanged());
+          // The service drops its cached generation status whether or not anyone listens.
+          const revision = this.#service.outputChanged();
+          this.#events.outputChanged?.(revision);
           return;
         }
         await this.#reload('watch', sources);

@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { RequestError } from './errors.js';
-import type { ParseAs, Transport, TransportRequest, TransportResponse } from './types.js';
+import { isJsonMediaType, isTextMediaType, responseParseAs } from './serialization.js';
+import type { Transport, TransportRequest, TransportResponse } from './types.js';
 
 /** Extra axios options accepted per request (`transportOptions`) and as client defaults. */
 export type AxiosTransportOptions = Omit<
@@ -38,41 +39,54 @@ function copyBytes(bytes: Uint8Array) {
 }
 
 /**
- * Binary bodies are always requested as `arraybuffer` (axios decodes `blob` responses as text in
- * Node.js) and converted here.
+ * Reads a body requested as `arraybuffer` like the fetch transport reads a `Response`: by
+ * `parseAs` for successful statuses, otherwise by `Content-Type` (JSON, text, or a `Blob`). Bytes
+ * are decoded here because axios decodes `blob` responses as text in Node.js and would decode
+ * binary `auto` responses as UTF-8 text.
  */
-function readData(data: unknown, parseAs: ParseAs, contentType: string | null): unknown {
-  if (parseAs === 'blob' || parseAs === 'arrayBuffer') {
-    const bytes = toBytes(data);
-    if (bytes === undefined) return data;
-    const copy = copyBytes(bytes);
-    return parseAs === 'blob'
-      ? new Blob([copy], contentType === null ? {} : { type: contentType })
-      : copy.buffer;
+function readData(
+  response: AxiosResponse<unknown>,
+  request: TransportRequest<AxiosTransportOptions>,
+  headers: Headers,
+): unknown {
+  const { status, data } = response;
+  const parseAs = responseParseAs(request.parseAs, status);
+  if (parseAs === 'stream') return data;
+  if (request.method === 'HEAD' || status === 204 || status === 205 || status === 304)
+    return undefined;
+  const bytes = toBytes(data);
+  // Already decoded, e.g. by a `responseType` passed in `transportOptions`.
+  if (bytes === undefined) return data;
+  const contentType = headers.get('content-type');
+  const blob = (): Blob =>
+    new Blob([copyBytes(bytes)], contentType === null ? {} : { type: contentType });
+  if (parseAs === 'blob') return blob();
+  if (parseAs === 'arrayBuffer') return copyBytes(bytes).buffer;
+  const text = new TextDecoder().decode(bytes);
+  if (parseAs === 'text') return text;
+  if (parseAs === 'json' || isJsonMediaType(contentType)) {
+    if (text.trim() === '') return undefined;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch (error) {
+      // Error bodies are best-effort: keep the text so ApiError still carries it.
+      if (status < 200 || status >= 300) return text;
+      throw new RequestError(
+        'parse',
+        'The response body is not valid JSON.',
+        { operationId: request.operationId, method: request.method, url: request.url },
+        error,
+      );
+    }
   }
-  if ((parseAs === 'auto' || parseAs === 'json') && data === '') return undefined;
-  return data;
-}
-
-function responseType(parseAs: ParseAs): AxiosRequestConfig['responseType'] {
-  switch (parseAs) {
-    case 'blob':
-    case 'arrayBuffer':
-      return 'arraybuffer';
-    case 'text':
-      return 'text';
-    case 'stream':
-      return 'stream';
-    case 'json':
-      return 'json';
-    case 'auto':
-      return undefined;
-  }
+  if (contentType === null || isTextMediaType(contentType))
+    return text === '' && contentType === null ? undefined : text;
+  return blob();
 }
 
 function fromAxiosResponse(
   response: AxiosResponse<unknown>,
-  parseAs: ParseAs,
+  request: TransportRequest<AxiosTransportOptions>,
   error?: unknown,
 ): TransportResponse {
   const headers = toHeaders(response.headers);
@@ -80,7 +94,7 @@ function fromAxiosResponse(
     status: response.status,
     statusText: response.statusText,
     headers,
-    data: readData(response.data, parseAs, headers.get('content-type')),
+    data: readData(response, request, headers),
     raw: response,
   };
   return error === undefined ? result : { ...result, error };
@@ -94,29 +108,30 @@ export function createAxiosTransport(
   instance: AxiosInstance = axios,
 ): Transport<AxiosTransportOptions> {
   return async (request: TransportRequest<AxiosTransportOptions>) => {
-    const headers: Record<string, string> = {};
+    const entries: [string, string][] = [];
     request.headers.forEach((value, name) => {
-      headers[name] = value;
+      entries.push([name, value]);
     });
+    // Own properties for every name, including `__proto__`.
+    const headers: Record<string, string> = Object.fromEntries(entries);
     const config: AxiosRequestConfig = {
       url: request.url,
       method: request.method,
       headers,
       data: request.body,
     };
-    const type = responseType(request.parseAs);
-    if (type !== undefined) config.responseType = type;
+    // Bodies are read as bytes and decoded by `readData`; streams are passed through.
+    config.responseType = request.parseAs === 'stream' ? 'stream' : 'arraybuffer';
     Object.assign(config, request.transportOptions);
     if (request.signal !== undefined) config.signal = request.signal;
     if (request.credentials === 'include') config.withCredentials = true;
     try {
       const response = await instance.request<unknown>(config);
-      return fromAxiosResponse(response, request.parseAs);
+      return fromAxiosResponse(response, request);
     } catch (error) {
       // `axios.isAxiosError` (rather than the named export) works with every axios 1.x release.
       if (axios.isAxiosError(error)) {
-        if (error.response !== undefined)
-          return fromAxiosResponse(error.response, request.parseAs, error);
+        if (error.response !== undefined) return fromAxiosResponse(error.response, request, error);
         if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') {
           throw new RequestError(
             'timeout',

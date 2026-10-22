@@ -9,12 +9,13 @@ import {
   type SecurityRequirementIR,
   type TagIR,
 } from '../ir/types.ts';
-import { isRecord } from '../utils/object.ts';
+import { isRecord, setOwn } from '../utils/object.ts';
 import { compareStrings } from '../utils/strings.ts';
 import {
   child,
   entries,
   items,
+  num,
   str,
   toJsonValue,
   type Cursor,
@@ -31,10 +32,20 @@ export function readInfo(ctx: ParseContext, cursor: Cursor): ApiInfo {
     return { title: 'API', version: '0.0.0' };
   }
   const title = str(cursor, 'title');
-  const version = str(cursor, 'version');
+  let version = str(cursor, 'version');
   if (title === undefined) ctx.warning('spec/missing-field', '`info.title` is required.', cursor);
-  if (version === undefined)
+  // YAML reads an unquoted `version: 1.0` as a number.
+  const numeric = version === undefined ? num(cursor, 'version') : undefined;
+  if (numeric !== undefined) {
+    version = String(numeric);
+    ctx.warning(
+      'spec/unquoted-version',
+      `\`info.version\` is the number ${version}; quote it to keep its exact text (for example '${version}').`,
+      child(cursor, 'version'),
+    );
+  } else if (version === undefined) {
     ctx.warning('spec/missing-field', '`info.version` is required.', cursor);
+  }
   const contactCursor = child(cursor, 'contact');
   const licenseCursor = child(cursor, 'license');
   const contact = isRecord(contactCursor.value)
@@ -182,7 +193,7 @@ export function readSecurity(
         );
         continue;
       }
-      entry[name] = readStringArray(scopes);
+      setOwn(entry, name, readStringArray(scopes));
     }
     // Drop requirements whose schemes were all unknown, but keep a deliberate `{}` (optional auth).
     if (Object.keys(entry).length > 0 || Object.keys(requirement.value).length === 0)

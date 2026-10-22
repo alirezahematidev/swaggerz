@@ -1,5 +1,6 @@
 import { findDuplicateSchemas } from '../analysis/graph.ts';
-import { isIdentifier } from '../analysis/naming.ts';
+import { isIdentifier, toIdentifier } from '../analysis/naming.ts';
+import { INPUT_ID_SUFFIX } from '../analysis/read-write.ts';
 import type { ProjectModel } from '../analysis/types.ts';
 import type { ResolvedConfig } from '../config/resolved.ts';
 import type { Diagnostic, Severity } from '../diagnostics/types.ts';
@@ -56,15 +57,26 @@ const CHECKS: Readonly<Record<RuleName, (context: RuleContext) => Finding[]>> = 
         operation: symbol.operation,
         hint: 'Add an operationId (an overlay can add it to a specification you do not own).',
       })),
-  'operation-id-style': ({ project }) =>
+  'operation-id-style': ({ project, config }) =>
     project.operations.flatMap((symbol) => {
       const id = symbol.operation.operationId;
-      if (id === undefined || isIdentifier(id)) return [];
+      if (id === undefined) return [];
+      // The name the configured style makes of the operationId. Suffixes that tell duplicates
+      // apart and names chosen by a plugin are not the specification's doing (duplicates are
+      // reported as operation/duplicate-id and naming/collision).
+      const styled = toIdentifier(id, config.naming.operations);
+      if (styled === id) return [];
+      const style = config.naming.operations;
       return [
         {
-          message: `operationId "${id}" is not a JavaScript identifier; the function is exported as "${symbol.name}".`,
+          message: isIdentifier(id)
+            ? `operationId "${id}" does not follow naming.operations ('${style}'): the function is exported as "${symbol.name}".`
+            : `operationId "${id}" is not a JavaScript identifier; the function is exported as "${symbol.name}".`,
           source: symbol.operation.source,
           operation: symbol.operation,
+          hint: isIdentifier(id)
+            ? `Rename the operationId to "${styled}", or set naming.operations: 'preserve' to keep operationIds as they are.`
+            : `Rename the operationId to "${styled}".`,
         },
       ];
     }),
@@ -181,16 +193,24 @@ const CHECKS: Readonly<Record<RuleName, (context: RuleContext) => Finding[]>> = 
         },
       ];
     }),
-  'unused-model': ({ project, config }) =>
-    config.output.models === 'used'
-      ? []
-      : project.models
-          .filter((model) => !model.used)
-          .map((model) => ({
-            message: `Schema ${model.definition.name} is not used by any operation but is generated as ${model.name}.`,
-            source: model.definition.source,
-            hint: "Remove it, or set output.models: 'used' to generate only the models operations use.",
-          })),
+  'unused-model': ({ project, config }) => {
+    if (config.output.models === 'used') return [];
+    const used = project.graph.usedSchemas();
+    // Request bodies reference the request-side variant (`<id>~input`) of a schema with readOnly
+    // or writeOnly properties: the schema itself is then used too, and reported once at most.
+    return project.models
+      .filter(
+        (model) =>
+          !model.id.endsWith(INPUT_ID_SUFFIX) &&
+          !used.has(model.id) &&
+          !used.has(`${model.id}${INPUT_ID_SUFFIX}`),
+      )
+      .map((model) => ({
+        message: `Schema ${model.definition.name} is not used by any operation but is generated as ${model.name}.`,
+        source: model.definition.source,
+        hint: "Set output.models: 'used' to generate only the models operations use, or remove the schema if nothing else references it (including references the generator does not follow, such as contentSchema).",
+      }));
+  },
   'missing-servers': ({ project, config }) =>
     project.ir.servers.length > 0 || config.client.baseUrl !== undefined
       ? []

@@ -1,6 +1,7 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, request } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { hostname, networkInterfaces } from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type {
@@ -192,6 +193,88 @@ describe('dashboard security', () => {
     expect(unconfirmed.status).toBe(400);
   });
 
+  it('accepts writes from a page opened with any of its loopback names, and no other origin', async () => {
+    const port = new URL(dashboard.origin).port;
+    const post = (host: string, origin: string) =>
+      raw(
+        'POST',
+        '/api/preview',
+        {
+          authorization: `Bearer ${dashboard.token}`,
+          'content-type': 'application/json',
+          host,
+          origin,
+        },
+        '{}',
+      );
+    expect((await post(`localhost:${port}`, `http://localhost:${port}`)).status).toBe(200);
+    expect((await post(`[::1]:${port}`, `http://[::1]:${port}`)).status).toBe(200);
+    expect((await post(`127.0.0.1:${port}`, `http://localhost:${port}`)).status).toBe(200);
+    // Another port, another scheme or another site is another origin.
+    for (const origin of [
+      `http://localhost:${Number(port) + 1}`,
+      `https://localhost:${port}`,
+      `http://attacker.example.com:${port}`,
+      'null',
+    ])
+      expect([origin, (await post(`localhost:${port}`, origin)).status]).toEqual([origin, 403]);
+  });
+
+  it('answers on every interface address when it listens on all of them', async () => {
+    const network = await createProject('dashboard-network', {
+      config: { dashboard: { allowNetworkAccess: true } },
+    });
+    const server = await startDashboard({
+      cwd: network,
+      env: {},
+      port: 0,
+      host: '0.0.0.0',
+      watch: false,
+    });
+    try {
+      const port = new URL(server.origin).port;
+      const addresses = Object.values(networkInterfaces())
+        .flatMap((entries) => entries ?? [])
+        .filter((entry) => entry.family === 'IPv4' && !entry.internal)
+        .map((entry) => entry.address);
+      for (const host of [...addresses, hostname().toLowerCase(), '127.0.0.1']) {
+        const authority = `${host}:${port}`;
+        const headers = { authorization: `Bearer ${server.token}`, host: authority };
+        expect([authority, (await rawTo(server, 'GET', '/api/overview', headers)).status]).toEqual([
+          authority,
+          200,
+        ]);
+        const write = await rawTo(
+          server,
+          'POST',
+          '/api/preview',
+          { ...headers, 'content-type': 'application/json', origin: `http://${authority}` },
+          '{}',
+        );
+        expect([authority, write.status]).toEqual([authority, 200]);
+      }
+      // DNS rebinding and cross-site writes are still refused.
+      const auth = { authorization: `Bearer ${server.token}` };
+      expect(
+        (await rawTo(server, 'GET', '/api/overview', { ...auth, host: `evil.example:${port}` }))
+          .status,
+      ).toBe(421);
+      expect(
+        (
+          await rawTo(
+            server,
+            'POST',
+            '/api/preview',
+            { ...auth, 'content-type': 'application/json', origin: `http://evil.example:${port}` },
+            '{}',
+          )
+        ).status,
+      ).toBe(403);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('refuses to listen on a network interface unless explicitly allowed', async () => {
     const error = await startDashboard({ cwd: project, env: {}, port: 0, host: '0.0.0.0' }).catch(
       (e: unknown) => e,
@@ -288,10 +371,16 @@ describe('dashboard API', () => {
       `/api/diff?path=${encodeURIComponent('client.ts')}`,
     );
     expect(diff.hunks[0]?.lines.every((line) => line.kind === 'add')).toBe(true);
+    expect(preview.id).toMatch(/^[0-9a-f]{64}$/);
+    // The preview that was reviewed is required, and only that one is written.
+    await expect(api('/api/generate', 'POST', { confirm: true })).rejects.toThrow(/^400/);
+    await expect(
+      api('/api/generate', 'POST', { confirm: true, preview: '0'.repeat(64) }),
+    ).rejects.toThrow(/^409/);
     const result = await api<{ ok: boolean; write: { created: string[] } }>(
       '/api/generate',
       'POST',
-      { confirm: true },
+      { confirm: true, preview: preview.id },
     );
     expect(result.ok).toBe(true);
     expect(result.write.created).toHaveLength(35);
@@ -539,11 +628,94 @@ describe('dashboard live reload', () => {
       (await api<OverviewResponse>('/api/overview', 'GET', undefined, live)).generation.status,
     ).toBe('never');
     // Generated outside the dashboard (the CLI) or from it: only the manifest changes.
-    await api('/api/generate', 'POST', { confirm: true }, live);
+    const preview = await api<PreviewResponse>('/api/preview', 'POST', undefined, live);
+    await api('/api/generate', 'POST', { confirm: true, preview: preview.id }, live);
     expect(await events.next((e) => e.type === 'output')).toMatchObject({ type: 'output' });
     expect(
       (await api<OverviewResponse>('/api/overview', 'GET', undefined, live)).generation.status,
     ).toBe('up-to-date');
+  });
+});
+
+describe('dashboard generation', () => {
+  const health = [
+    'paths:',
+    '  /health:',
+    '    get:',
+    '      operationId: getHealth',
+    '      responses:',
+    "        '204':",
+    '          description: Healthy.',
+    '',
+  ].join('\n');
+
+  async function setup(name: string, watch: boolean) {
+    const original = await readFile(fixture('petstore-3.0.yaml'), 'utf8');
+    const directory = await createProject(name, {
+      config: { spec: { version: '3.0', input: './openapi.yaml' } },
+      files: { 'openapi.yaml': original },
+    });
+    const server = await startDashboard({ cwd: directory, env: {}, port: 0, watch });
+    const output = (file: string) => path.join(directory, 'src/generated/api', file);
+    const addHealth = () =>
+      writeFile(path.join(directory, 'openapi.yaml'), original.replace('paths:\n', health));
+    return { directory, server, output, addHealth };
+  }
+
+  it('writes the reviewed preview, not what is on disk now', async () => {
+    // Without watching, the dashboard shows the version it loaded; so does what it writes.
+    const { server, output, addHealth } = await setup('dashboard-generate-reviewed', false);
+    try {
+      const preview = await api<PreviewResponse>('/api/preview', 'POST', undefined, server);
+      await addHealth();
+      const result = await api<{ ok: boolean; write: { created: string[] } }>(
+        '/api/generate',
+        'POST',
+        { confirm: true, preview: preview.id },
+        server,
+      );
+      expect(result.ok).toBe(true);
+      expect(result.write.created).toEqual(
+        preview.changes.filter((c) => c.kind === 'create').map((c) => c.path),
+      );
+      await expect(readFile(output('default/get-health.ts'), 'utf8')).rejects.toThrow(/ENOENT/);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('refuses a preview that the specification or the output changed since', async () => {
+    const { server, output, addHealth } = await setup('dashboard-generate-outdated', true);
+    const events = subscribe(server);
+    try {
+      await events.next((event) => event.type === 'hello');
+      const before = await api<PreviewResponse>('/api/preview', 'POST', undefined, server);
+      await addHealth();
+      await events.next((e) => e.type === 'reload' && e.ok);
+      const refused = await rawTo(
+        server,
+        'POST',
+        '/api/generate',
+        { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+        JSON.stringify({ confirm: true, preview: before.id }),
+      );
+      expect(refused.status).toBe(409);
+      await expect(readFile(output('client.ts'), 'utf8')).rejects.toThrow(/ENOENT/);
+
+      const after = await api<PreviewResponse>('/api/preview', 'POST', undefined, server);
+      expect(after.id).not.toBe(before.id);
+      expect(after.changes.map((c) => c.path)).toContain('default/get-health.ts');
+      // A file changed in the output directory after the preview: asked again too.
+      await mkdir(output(''), { recursive: true });
+      await writeFile(output('client.ts'), '// mine\n');
+      await expect(
+        api('/api/generate', 'POST', { confirm: true, preview: after.id }, server),
+      ).rejects.toThrow(/^409/);
+      expect(await readFile(output('client.ts'), 'utf8')).toBe('// mine\n');
+    } finally {
+      events.close();
+      await server.close();
+    }
   });
 });
 

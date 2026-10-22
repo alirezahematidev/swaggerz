@@ -5,7 +5,13 @@ import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager, Lang } from '../imports.ts';
 import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
-import { wireType, type Validator } from './shared.ts';
+import {
+  acceptsAnything,
+  isInheritedOptional,
+  ownPropertiesFunction,
+  wireType,
+  type Validator,
+} from './shared.ts';
 
 /**
  * Zod (v4) schema generation. Schemas mirror the generated TypeScript types:
@@ -157,7 +163,8 @@ function zodBase(
     }
     case 'number':
     case 'integer': {
-      let expression = schema.kind === 'integer' ? `${z}.number().int()` : `${z}.number()`;
+      // `.int()` only accepts safe integers; JSON integers (`int64` ids) can be larger.
+      let expression = schema.kind === 'integer' ? `${z}.number().multipleOf(1)` : `${z}.number()`;
       const c = schema.constraints;
       if (c?.minimum !== undefined) expression += `.min(${c.minimum})`;
       if (c?.maximum !== undefined) expression += `.max(${c.maximum})`;
@@ -236,7 +243,12 @@ function zodObject(
   z: string,
   inGetter: boolean,
 ): string {
-  const additional = schema.additionalProperties;
+  const declared = schema.additionalProperties;
+  // Additional properties that accept anything are the same as undeclared ones.
+  const additional =
+    declared !== false && declared !== undefined && acceptsAnything(declared)
+      ? undefined
+      : declared;
   if (schema.properties.length === 0) {
     if (additional === false) return `${z}.strictObject({})`;
     // Inside a getter, references are evaluated lazily already and need no `z.lazy`.
@@ -255,9 +267,13 @@ function zodObject(
   });
   const factory = additional === false ? 'strictObject' : 'looseObject';
   let expression = `${z}.${factory}({\n${members.map((m) => `  ${m.replace(/\n/g, '\n  ')},`).join('\n')}\n})`;
-  if (additional !== undefined && additional !== false && additional.kind !== 'unknown') {
+  if (additional !== undefined && additional !== false) {
     expression += `.catchall(${zodExpression(additional, zc)})`;
   }
+  // Zod looks properties up with `in`: optional properties named like `Object.prototype`
+  // members (`constructor`) are checked on a copy that has only the object's own properties.
+  if (schema.properties.some(isInheritedOptional))
+    expression = `${z}.preprocess(\n  ${ownPropertiesFunction(zc.imports.lang).replace(/\n/g, '\n  ')},\n  ${expression.replace(/\n/g, '\n  ')},\n)`;
   return expression;
 }
 

@@ -7,6 +7,7 @@ import { Client as LegacyClient } from '@modelcontextprotocol/sdk/client/index.j
 import { StdioClientTransport as LegacyStdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import {
   ElicitRequestSchema,
+  ResourceListChangedNotificationSchema,
   ResourceUpdatedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -62,6 +63,24 @@ async function useLocalSpec(directory: string): Promise<string> {
   return path.join(directory, 'openapi.yaml');
 }
 
+/**
+ * Writes a file on every attempt until `check` passes. A platform file watcher that is still
+ * starting (under load, right after the server started) does not report an earlier write.
+ */
+async function writeUntil(
+  file: string,
+  text: string,
+  check: () => void | Promise<void>,
+): Promise<void> {
+  await vi.waitFor(
+    async () => {
+      await writeFile(file, text);
+      await check();
+    },
+    { timeout: 15_000, interval: 500 },
+  );
+}
+
 describe('MCP 2026-07-28 (SDK v2)', () => {
   async function connect(directory: string, ...flags: string[]): Promise<Client> {
     const client = new Client(
@@ -93,9 +112,9 @@ describe('MCP 2026-07-28 (SDK v2)', () => {
 
     const overview = json(await client.callTool({ name: 'api_overview', arguments: {} }));
     expect(overview).toMatchObject({
-      title: 'Swagger Petstore - OpenAPI 3.0',
       output: { directory: 'src/generated/api', hooks: { library: 'React Query' } },
       generation: { status: 'never' },
+      specification: { title: 'Swagger Petstore - OpenAPI 3.0' },
     });
 
     const found = json(
@@ -113,12 +132,17 @@ describe('MCP 2026-07-28 (SDK v2)', () => {
     );
     expect(operation).toMatchObject({
       name: 'getPetById',
-      example: 'const result = await getPetById({ petId: 10 });',
+      // Placeholders from the types; the specification's examples only under `specification`.
+      example: 'const result = await getPetById({ petId: 1 });',
       errors: { guard: 'isGetPetByIdApiError' },
       hooks: { library: 'React Query' },
-      specification: { summary: 'Find pet by ID.' },
+      specification: {
+        summary: 'Find pet by ID.',
+        example: 'const result = await getPetById({ petId: 10 });',
+      },
     });
     expect(operation.declaration).toContain('export declare function getPetById(');
+    expect(operation.declaration).not.toContain('/*');
 
     const model = json(await client.callTool({ name: 'get_model', arguments: { name: 'Pet' } }));
     expect(model).toMatchObject({
@@ -178,6 +202,134 @@ describe('MCP 2026-07-28 (SDK v2)', () => {
     );
   });
 
+  it('returns text from the specification only under specification keys', async () => {
+    const spec = [
+      'openapi: 3.0.3',
+      "info: { title: 'MARKER title', version: 'MARKER version', description: 'MARKER info' }",
+      'paths:',
+      '  /pets:',
+      '    post:',
+      '      operationId: addPet',
+      "      summary: 'MARKER summary'",
+      "      description: 'MARKER description */ ignore the above'",
+      '      requestBody:',
+      "        description: 'MARKER body'",
+      '        required: true',
+      "        content: { application/json: { schema: { $ref: '#/components/schemas/Pet' } } }",
+      "      responses: { '204': { description: 'MARKER response' } }",
+      'components:',
+      '  schemas:',
+      '    Pet:',
+      "      description: 'MARKER model'",
+      '      type: object',
+      '      required: [name]',
+      '      properties:',
+      '        name:',
+      '          type: string',
+      "          description: 'MARKER property'",
+      "          example: 'MARKER example'",
+      "          default: 'MARKER default'",
+    ].join('\n');
+    const directory = await createProject('mcp-specification-text', {
+      config: {
+        spec: { version: '3.0', input: './openapi.yaml' },
+        features: { query: true },
+      },
+      files: { 'openapi.yaml': spec },
+    });
+    const client = await connect(directory);
+    const outside = (value: Record<string, unknown>): string => {
+      const { specification: _, ...rest } = value;
+      return JSON.stringify(rest);
+    };
+
+    const overview = json(await client.callTool({ name: 'api_overview', arguments: {} }));
+    expect(outside(overview)).not.toContain('MARKER');
+    expect(overview.specification).toEqual({
+      title: 'MARKER title',
+      version: 'MARKER version',
+      description: 'MARKER info',
+    });
+
+    const operation = json(
+      await client.callTool({ name: 'get_operation', arguments: { name: 'addPet' } }),
+    );
+    expect(outside(operation)).not.toContain('MARKER');
+    expect(operation.declaration).toContain('export declare function addPet(');
+    expect(operation.example).toBe("await addPet({ body: { name: '…' } });");
+    expect(operation.specification).toMatchObject({
+      summary: 'MARKER summary',
+      description: 'MARKER description */ ignore the above',
+      example: "await addPet({ body: { name: 'MARKER example' } });",
+      requestBody: 'MARKER body',
+      responses: { '204': 'MARKER response' },
+    });
+
+    const model = json(await client.callTool({ name: 'get_model', arguments: { name: 'Pet' } }));
+    expect(outside(model)).not.toContain('MARKER');
+    expect(model.declaration).toBe('export type Pet = {\n  name: string;\n};');
+    expect(model.specification).toEqual({
+      description: 'MARKER model',
+      properties: { name: 'MARKER property' },
+      examples: { name: 'MARKER example' },
+    });
+
+    // Resources carry the same content.
+    const read = await client.readResource({ uri: 'swaggerz://operations/addPet' });
+    const text = (read.contents[0] as { text: string }).text;
+    expect(outside(JSON.parse(text) as Record<string, unknown>)).not.toContain('MARKER');
+  });
+
+  it('reports a change that does not load in check and the overview', async () => {
+    const directory = await project('mcp-reload-failure');
+    const spec = await useLocalSpec(directory);
+    const client = await connect(directory);
+    expect(json(await client.callTool({ name: 'check', arguments: {} }))).toMatchObject({
+      ok: true,
+    });
+    const text = await readFile(spec, 'utf8');
+    let failed: Record<string, unknown> = {};
+    await writeUntil(
+      spec,
+      text.replace("$ref: '#/components/schemas/Pet'", "$ref: '#/components/schemas/Nope'"),
+      async () => {
+        failed = json(await client.callTool({ name: 'check', arguments: {} }));
+        expect(failed.ok).toBe(false);
+      },
+    );
+    expect(failed).toMatchObject({
+      reloadFailed: { message: 'The specification could not be compiled' },
+      diagnostics: {
+        items: [expect.objectContaining({ code: 'ref/missing-target', severity: 'error' })],
+      },
+    });
+    const overview = json(await client.callTool({ name: 'api_overview', arguments: {} }));
+    expect(overview).toMatchObject({ diagnostics: { errors: 1 }, reloadFailed: {} });
+    // The last version that loaded is still served.
+    expect(
+      json(await client.callTool({ name: 'get_operation', arguments: { name: 'getPetById' } })),
+    ).toMatchObject({ name: 'getPetById' });
+
+    await writeUntil(spec, text, async () => {
+      const check = json(await client.callTool({ name: 'check', arguments: {} }));
+      expect(check.ok).toBe(true);
+      expect(check.reloadFailed).toBeUndefined();
+    });
+  });
+
+  it('fails check when a lint rule configured as an error fires', async () => {
+    const directory = await createProject('mcp-lint-error', {
+      config: { lint: { rules: { 'duplicate-schema': 'error' } } },
+    });
+    const client = await connect(directory);
+    const check = json(await client.callTool({ name: 'check', arguments: {} }));
+    expect(check).toMatchObject({
+      ok: false,
+      diagnostics: { count: 0 },
+      lint: { items: [expect.objectContaining({ code: 'lint/duplicate-schema' })] },
+    });
+  });
+
   it('notifies listeners when the specification changes', async () => {
     const directory = await project('mcp-listen');
     const spec = await useLocalSpec(directory);
@@ -187,13 +339,9 @@ describe('MCP 2026-07-28 (SDK v2)', () => {
     const subscription = await client.listen({ resourcesListChanged: true });
     expect(subscription.honoredFilter).toMatchObject({ resourcesListChanged: true });
     const text = await readFile(spec, 'utf8');
-    await writeFile(spec, text.replace('operationId: getPetById', 'operationId: fetchPet'));
-    await vi.waitFor(
-      () => {
-        expect(changed).toHaveBeenCalled();
-      },
-      { timeout: 15_000 },
-    );
+    await writeUntil(spec, text.replace('operationId: getPetById', 'operationId: fetchPet'), () => {
+      expect(changed).toHaveBeenCalled();
+    });
     const found = json(
       await client.callTool({ name: 'find_operations', arguments: { query: 'fetch' } }),
     );
@@ -234,6 +382,37 @@ describe('MCP 2026-07-28 (SDK v2)', () => {
     const again = json(await client.callTool({ name: 'generate', arguments: {} }));
     expect(again).toMatchObject({ ok: true, written: false });
   });
+
+  it('asks again when the content to write changed after the question, even at the same size', async () => {
+    const directory = await project('mcp-generate-changed');
+    const spec = await useLocalSpec(directory);
+    const client = await connect(directory, '--allow-write');
+    let reloaded: () => void = () => undefined;
+    client.setNotificationHandler('notifications/resources/list_changed', () => {
+      reloaded();
+    });
+    const subscription = await client.listen({ resourcesListChanged: true });
+    const asked = vi.fn<(params: unknown) => void>();
+    client.setRequestHandler('elicitation/create', async (request) => {
+      asked(request.params);
+      if (asked.mock.calls.length === 1) {
+        // While the user reads the question, the summary changes to text of the same length.
+        const done = new Promise<void>((resolve) => (reloaded = resolve));
+        const text = await readFile(spec, 'utf8');
+        await writeFile(spec, text.replace('summary: Find pet by ID.', 'summary: Find pet by Id.'));
+        await done;
+      }
+      return { action: 'accept', content: { confirm: true } };
+    });
+    const written = json(await client.callTool({ name: 'generate', arguments: {} }));
+    expect(written).toMatchObject({ ok: true, written: true });
+    // The first answer was about other content: the user confirmed the new content too.
+    expect(asked).toHaveBeenCalledTimes(2);
+    expect(
+      await readFile(path.join(directory, 'src/generated/api/pet/get-pet-by-id.ts'), 'utf8'),
+    ).toContain('Find pet by Id.');
+    await subscription.close();
+  });
 });
 
 describe('MCP 2025-11-25 (SDK v1)', () => {
@@ -255,10 +434,13 @@ describe('MCP 2025-11-25 (SDK v1)', () => {
     const operation = json(
       await client.callTool({ name: 'get_operation', arguments: { name: 'addPet' } }),
     );
-    // Examples from the specification fill the placeholders when there are some.
+    // Examples from the specification fill the placeholders under `specification`.
     expect(operation.example).toBe(
-      "const result = await addPet({ body: { name: 'doggie', photoUrls: ['…'] } });",
+      "const result = await addPet({ body: { name: '…', photoUrls: ['…'] } });",
     );
+    expect(operation.specification).toMatchObject({
+      example: "const result = await addPet({ body: { name: 'doggie', photoUrls: ['…'] } });",
+    });
     const read = await client.readResource({ uri: 'swaggerz://models/Pet' });
     expect(JSON.parse((read.contents[0] as { text: string }).text)).toMatchObject({ name: 'Pet' });
   });
@@ -276,15 +458,118 @@ describe('MCP 2025-11-25 (SDK v1)', () => {
     await client.subscribeResource({ uri: 'swaggerz://operations/getPetById' });
     await client.subscribeResource({ uri: 'swaggerz://models/User' });
     const text = await readFile(spec, 'utf8');
-    await writeFile(spec, text.replace('summary: Find pet by ID.', 'summary: Look up a pet.'));
-    await vi.waitFor(
+    await writeUntil(
+      spec,
+      text.replace('summary: Find pet by ID.', 'summary: Look up a pet.'),
       () => {
         expect(updated).toHaveBeenCalledWith('swaggerz://operations/getPetById');
       },
-      { timeout: 15_000 },
     );
     // Only resources whose content changed are reported.
     expect(updated).not.toHaveBeenCalledWith('swaggerz://models/User');
+  });
+
+  it('compares with the content at the time of a new subscription', async () => {
+    const directory = await project('mcp-legacy-resubscribe');
+    const spec = await useLocalSpec(directory);
+    const client = await connect(directory);
+    const updated = vi.fn<(uri: string) => void>();
+    const reloads = vi.fn<() => void>();
+    client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+      updated(notification.params.uri);
+      return Promise.resolve();
+    });
+    client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
+      reloads();
+      return Promise.resolve();
+    });
+    /** Writes the specification and waits until the server reloaded it. */
+    const edit = async (text: string): Promise<void> => {
+      const before = reloads.mock.calls.length;
+      await writeUntil(spec, text, () => {
+        expect(reloads.mock.calls.length).toBeGreaterThan(before);
+      });
+    };
+    const uri = 'swaggerz://operations/getPetById';
+    await client.subscribeResource({ uri });
+    await client.unsubscribeResource({ uri });
+    // The resource changes while nobody is subscribed.
+    const text = await readFile(spec, 'utf8');
+    const changed = text.replace('summary: Find pet by ID.', 'summary: Look up a pet.');
+    await edit(changed);
+    await client.subscribeResource({ uri });
+    // A change elsewhere leaves the resource as it was when subscribed again.
+    await edit(changed.replace('summary: Add a new pet', 'summary: Add a pet'));
+    expect(updated).not.toHaveBeenCalled();
+  });
+
+  it('follows generations and cleans made outside the server', async () => {
+    const directory = await project('mcp-legacy-output');
+    const client = await connect(directory);
+    const updated = vi.fn<(uri: string) => void>();
+    client.setNotificationHandler(ResourceUpdatedNotificationSchema, (notification) => {
+      updated(notification.params.uri);
+      return Promise.resolve();
+    });
+    await client.subscribeResource({ uri: 'swaggerz://overview' });
+    const status = async (): Promise<unknown> =>
+      (
+        json(await client.callTool({ name: 'check', arguments: {} })).generation as {
+          status: string;
+        }
+      ).status;
+    expect(await status()).toBe('never');
+    const run = (...args: string[]) =>
+      new Promise((resolve) => {
+        spawn(process.execPath, [BIN, ...args], { cwd: directory }).on('close', resolve);
+      });
+
+    await run('generate');
+    await vi.waitFor(
+      () => {
+        expect(updated).toHaveBeenCalledWith('swaggerz://overview');
+      },
+      { timeout: 15_000 },
+    );
+    expect(await status()).toBe('up-to-date');
+
+    updated.mockClear();
+    await run('clean');
+    await vi.waitFor(
+      () => {
+        expect(updated).toHaveBeenCalledWith('swaggerz://overview');
+      },
+      { timeout: 15_000 },
+    );
+    expect(await status()).toBe('never');
+  });
+
+  it('writes the changes the user confirmed, not what is on disk now', async () => {
+    const directory = await project('mcp-legacy-generate-reviewed');
+    const spec = await useLocalSpec(directory);
+    // Without watching, the server describes the version it loaded; so does what it writes.
+    const client = await connect(directory, '--allow-write', '--no-watch');
+    const text = await readFile(spec, 'utf8');
+    await writeFile(
+      spec,
+      text.replace(
+        'paths:\n',
+        "paths:\n  /health:\n    get:\n      operationId: getHealth\n      responses:\n        '204':\n          description: Healthy.\n",
+      ),
+    );
+    const messages: string[] = [];
+    client.setRequestHandler(ElicitRequestSchema, (request) => {
+      messages.push(request.params.message);
+      return Promise.resolve({ action: 'accept', content: { confirm: true } });
+    });
+    const written = json(await client.callTool({ name: 'generate', arguments: {} }));
+    expect(written).toMatchObject({ ok: true, written: true });
+    const count = Number(/(\d+) file\(s\) change/.exec(messages[0] ?? '')?.[1]);
+    expect(count).toBeGreaterThan(0);
+    expect((written.created as number) + (written.updated as number)).toBe(count);
+    await expect(
+      access(path.join(directory, 'src/generated/api/default/get-health.ts')),
+    ).rejects.toThrow(/ENOENT/);
   });
 
   it('confirms generate with an elicitation request', async () => {
@@ -319,6 +604,89 @@ describe('MCP protocol details', () => {
       .filter((line) => line !== '')
       .map((line) => JSON.parse(line) as Record<string, unknown>);
   }
+
+  it('answers invalid request ids, empty batches and malformed resource URIs', async () => {
+    const directory = await project('mcp-raw-invalid');
+    const meta = {
+      'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+      'io.modelcontextprotocol/clientCapabilities': {},
+    };
+    const responses = await exchange(directory, [
+      { jsonrpc: '2.0', id: null, method: 'ping' },
+      { jsonrpc: '2.0', id: true, method: 'ping' },
+      '[]',
+      {
+        jsonrpc: '2.0',
+        id: 'modern',
+        method: 'resources/read',
+        params: { _meta: meta, uri: 'swaggerz://operations/%' },
+      },
+      {
+        jsonrpc: '2.0',
+        id: 'init',
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'raw', version: '1' },
+        },
+      },
+      {
+        jsonrpc: '2.0',
+        id: 'legacy',
+        method: 'resources/read',
+        params: { uri: 'swaggerz://models/%E0%A4%A' },
+      },
+    ]);
+    expect(responses.filter((r) => r.id === null)).toEqual([
+      expect.objectContaining({ error: expect.objectContaining({ code: -32600 }) as unknown }),
+      expect.objectContaining({ error: expect.objectContaining({ code: -32600 }) as unknown }),
+      expect.objectContaining({ error: expect.objectContaining({ code: -32600 }) as unknown }),
+    ]);
+    expect(responses.find((r) => r.id === 'modern')?.error).toMatchObject({ code: -32602 });
+    expect(responses.find((r) => r.id === 'legacy')?.error).toMatchObject({ code: -32002 });
+  });
+
+  it('keeps output of the config file and plugins off the protocol stream', async () => {
+    const config = {
+      spec: { version: '3.0', input: path.join(REPO_ROOT, 'fixtures/specs/petstore-3.0.yaml') },
+      output: { directory: './src/generated/api' },
+    };
+    const directory = await createProject('mcp-noisy-config', {
+      files: {
+        'swaggerz.config.mjs': [
+          "console.log('Loading the config');",
+          'export default {',
+          `  ...${JSON.stringify(config)},`,
+          '  plugins: [',
+          '    {',
+          "      name: 'noisy',",
+          '      operationName() {',
+          "        process.stdout.write('Naming an operation\\n');",
+          '        return undefined;',
+          '      },',
+          '    },',
+          '  ],',
+          '};',
+        ].join('\n'),
+      },
+    });
+    // Every line of stdout is a protocol message (exchange parses each one as JSON).
+    const responses = await exchange(directory, [
+      {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/list',
+        params: {
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      },
+    ]);
+    expect(responses).toEqual([expect.objectContaining({ id: 1 })]);
+  });
 
   it('rejects unsupported versions, requests without metadata and unknown methods', async () => {
     const directory = await project('mcp-raw');

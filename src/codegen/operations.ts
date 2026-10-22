@@ -4,6 +4,7 @@ import {
   type MediaTypeIR,
   type ParameterIR,
   type ParameterLocation,
+  type SchemaIR,
 } from '../ir/types.ts';
 import { applyJsDocHook, renderAll, type EmitContext, type ModuleOutput } from './context.ts';
 import type { ImportManager, Lang } from './imports.ts';
@@ -11,22 +12,50 @@ import { schemaTags, splitSummary } from './jsdoc.ts';
 import { jsTypedef } from './models.ts';
 import {
   bodyKind,
+  responseKind,
   type OperationPlan,
+  type ParseAsHint,
   type PlannedBody,
   type PlannedResponse,
 } from './operation-plan.ts';
 import { literal, propertyAccess, propertyKey, quote, renderJsDoc } from './printer.ts';
-import { printType, type TypeContext } from './type-printer.ts';
+import { binaryType, printType, type TypeContext } from './type-printer.ts';
 import type { GeneratedExport, JsDocBlock, JsDocTag } from './types.ts';
 import { combinedDateShape, dateShape } from './dates.ts';
 import { requestValidation, responseValidation, validatorFor } from './validation/index.ts';
 
-/** Bodies of media types the runtime cannot serialize are passed already encoded. */
-const RAW_BODY = 'string | Blob | ArrayBuffer | ArrayBufferView';
-
 /** The body type of one media type, for request (input) types. */
 export function mediaBodyType(media: MediaTypeIR, ctx: TypeContext, indent = ''): string {
-  return bodyKind(media) === 'raw' ? RAW_BODY : printType(media.schema, ctx, indent);
+  // Bodies of media types the runtime cannot serialize are passed already encoded.
+  return bodyKind(media) === 'raw'
+    ? `string | ${binaryType({ ...ctx, direction: 'input' }).text}`
+    : printType(media.schema, ctx, indent);
+}
+
+/** Whether a schema describes strings only, so a text response can keep its exact type. */
+function isStringSchema(schema: SchemaIR): boolean {
+  if (schema.kind === 'string') return true;
+  return schema.kind === 'enum' && schema.values.every((value) => typeof value === 'string');
+}
+
+/**
+ * The type of a response body as the runtime returns it: the schema's type for JSON, `string` for
+ * text media types (XML, CSV, …) whose schema describes a structure the runtime does not parse,
+ * and `Blob` for binary and other media types.
+ */
+export function responseBodyType(
+  media: MediaTypeIR,
+  parseAs: ParseAsHint,
+  ctx: TypeContext,
+): string {
+  switch (responseKind(media, parseAs)) {
+    case 'json':
+      return printType(media.schema, ctx);
+    case 'text':
+      return isStringSchema(media.schema) ? printType(media.schema, ctx) : 'string';
+    case 'binary':
+      return binaryType({ ...ctx, direction: 'output' }).text;
+  }
 }
 
 /** Media types of a body grouped by identical body types, the default media type first. */
@@ -142,8 +171,11 @@ export function responseTypes(
   full: boolean,
   runtimeType: (module: 'runtime/types' | 'runtime/errors', name: string) => string,
 ): { response: string; errorBody: string; apiErrors: readonly string[] } {
+  const successes = new Set(plan.success);
   const bodyType = (r: PlannedResponse): string =>
-    r.media === undefined ? 'undefined' : printType(r.media.schema, typeCtx);
+    r.media === undefined
+      ? 'undefined'
+      : responseBodyType(r.media, successes.has(r) ? plan.parseAs : undefined, typeCtx);
   const statuses = new StatusTypes(plan, () => runtimeType('runtime/types', 'HttpStatus'));
   let response: string;
   if (full) {
@@ -407,9 +439,12 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
           tags.push({ tag: 'typedef', text: `{object} ${names.params}` });
           for (const member of members) {
             const description = member.doc.summary ?? '';
+            // Optional members accept `undefined`, as in TypeScript output
+            // (`exactOptionalPropertyTypes`).
+            const type = member.optional ? `${member.type} | undefined` : member.type;
             tags.push({
               tag: 'property',
-              text: `{${member.type}} ${member.optional ? `[${member.key}]` : member.key}${description === '' ? '' : ` - ${description}`}`,
+              text: `{${type}} ${member.optional ? `[${member.key}]` : member.key}${description === '' ? '' : ` - ${description}`}`,
             });
           }
         } else {

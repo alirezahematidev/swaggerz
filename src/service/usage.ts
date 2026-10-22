@@ -1,4 +1,4 @@
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { ParseResult, ParserOptions } from 'oxc-parser';
 import type { NapiResolveOptions, ResolveResult } from 'oxc-resolver';
@@ -36,7 +36,58 @@ const ALWAYS_SKIPPED = new Set([
   '.output',
   '.turbo',
 ]);
-const BARRELS = new Set(['index', 'react-query/index']);
+/** Generated modules that only re-export others: the main, hooks and schema barrels. */
+const BARREL_ORIGINS = new Set(['core:barrel', 'core:query-barrel', 'core:validation-barrel']);
+/** A statement of a re-export-only module: `export * from '…';`, `export { a, type B } from '…';`. */
+const RE_EXPORT =
+  /^export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s+from\s+(['"])[^'"]+\1;?$/;
+
+/**
+ * Whether a generated file is a barrel: one of the generator's own barrels, or (from a plugin) an
+ * `index` module made only of re-exports. Imports through a barrel are attributed to the module
+ * that defines the name.
+ */
+function isBarrel(file: GeneratedFile, module: string): boolean {
+  if (BARREL_ORIGINS.has(file.origin)) return true;
+  if (module !== 'index' && !module.endsWith('/index')) return false;
+  const statements = file.content
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s*\/\/.*$/, '').trim())
+    .filter((line) => line !== '');
+  return statements.length > 0 && statements.every((line) => RE_EXPORT.test(line));
+}
+
+/**
+ * Matches `usage.exclude` entries against the segments of a path relative to the project root, by
+ * whole segments: `legacy` skips every file or directory named `legacy`, `src/legacy` that
+ * directory wherever it is, and `*` matches within one segment (`*.test.ts`). Absolute entries are
+ * made relative to the root first.
+ */
+export function excludeMatcher(
+  root: string,
+  patterns: readonly string[],
+): (segments: readonly string[]) => boolean {
+  const escape = (text: string): string => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  const compiled = patterns.flatMap((pattern) => {
+    const relative = path.isAbsolute(pattern) ? path.relative(root, pattern) : pattern;
+    const segments = relative
+      .split(/[\\/]+/)
+      .filter((segment) => segment !== '' && segment !== '.');
+    if (segments.length === 0 || segments.includes('..')) return [];
+    return [
+      segments.map(
+        (segment) => new RegExp(`^${segment.split('*').map(escape).join('[^/]*')}$`, 'u'),
+      ),
+    ];
+  });
+  return (segments) =>
+    compiled.some((pattern) => {
+      for (let start = 0; start + pattern.length <= segments.length; start++)
+        if (pattern.every((part, index) => part.test(segments[start + index] ?? ''))) return true;
+      return false;
+    });
+}
 
 interface Scanner {
   readonly parse: (file: string, source: string, options: ParserOptions) => ParseResult;
@@ -87,12 +138,10 @@ async function collectFiles(
   const output = path.resolve(options.outputDirectory);
   const files: string[] = [];
   let truncated = false;
+  const matches = excludeMatcher(options.root, options.exclude);
   const excluded = (target: string): boolean => {
     const relative = path.relative(options.root, target).split(path.sep);
-    return (
-      relative.some((segment) => ALWAYS_SKIPPED.has(segment)) ||
-      options.exclude.some((pattern) => target.includes(pattern))
-    );
+    return relative.some((segment) => ALWAYS_SKIPPED.has(segment)) || matches(relative);
   };
   const walk = async (directory: string): Promise<void> => {
     if (truncated) return;
@@ -132,21 +181,29 @@ async function collectFiles(
   return { files: [...new Set(files)], truncated };
 }
 
-/** Maps generated modules to their exports, and exported names to the module that defines them. */
+/**
+ * Maps generated modules to their exports and exported names to the module that defines them, and
+ * lists the barrels.
+ */
 function exportIndex(files: readonly GeneratedFile[]): {
   modules: Map<string, GeneratedFile['exports']>;
   origin: Map<string, string>;
+  barrels: Set<string>;
 } {
   const modules = new Map<string, GeneratedFile['exports']>();
   const origin = new Map<string, string>();
+  const barrels = new Set<string>();
   for (const file of files) {
     const module = file.path.replace(/\.d\.ts$/, '').replace(/\.(ts|js)$/, '');
     if (file.exports === undefined || modules.has(module)) continue;
     modules.set(module, file.exports);
-    if (BARRELS.has(module)) continue;
-    for (const entry of file.exports) if (!origin.has(entry.name)) origin.set(entry.name, module);
+    if (isBarrel(file, module)) barrels.add(module);
   }
-  return { modules, origin };
+  for (const [module, exports] of modules) {
+    if (barrels.has(module) || exports === undefined) continue;
+    for (const entry of exports) if (!origin.has(entry.name)) origin.set(entry.name, module);
+  }
+  return { modules, origin, barrels };
 }
 
 /** A node of the ESTree-compatible AST produced by oxc-parser. */
@@ -184,6 +241,155 @@ function isNameKey(parent: AstNode, key: string): boolean {
   }
 }
 
+const FUNCTIONS = new Set([
+  'FunctionDeclaration',
+  'FunctionExpression',
+  'ArrowFunctionExpression',
+  'TSDeclareFunction',
+]);
+const BLOCKS = new Set([
+  'BlockStatement',
+  'StaticBlock',
+  'ForStatement',
+  'ForInStatement',
+  'ForOfStatement',
+  'CatchClause',
+  'SwitchStatement',
+  'ClassDeclaration',
+  'ClassExpression',
+  'TSModuleBlock',
+]);
+
+/** Nodes that open a scope: the module, functions, blocks, classes and generic declarations. */
+function opensScope(node: AstNode): boolean {
+  return (
+    node.type === 'Program' ||
+    FUNCTIONS.has(node.type) ||
+    BLOCKS.has(node.type) ||
+    isNode(node.typeParameters)
+  );
+}
+
+/** The identifiers a binding pattern declares (`a`, `{ b: { c } }`, `[d = 1, ...e]`). */
+function bindingIdentifiers(pattern: unknown, out: AstNode[]): AstNode[] {
+  if (!isNode(pattern)) return out;
+  switch (pattern.type) {
+    case 'Identifier':
+      out.push(pattern);
+      break;
+    case 'ObjectPattern':
+      for (const property of Array.isArray(pattern.properties) ? pattern.properties : [])
+        if (isNode(property))
+          bindingIdentifiers(
+            property.type === 'RestElement' ? property.argument : property.value,
+            out,
+          );
+      break;
+    case 'ArrayPattern':
+      for (const element of Array.isArray(pattern.elements) ? pattern.elements : [])
+        bindingIdentifiers(element, out);
+      break;
+    case 'RestElement':
+      bindingIdentifiers(pattern.argument, out);
+      break;
+    case 'AssignmentPattern':
+      bindingIdentifiers(pattern.left, out);
+      break;
+    case 'TSParameterProperty':
+      bindingIdentifiers(pattern.parameter, out);
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+function children(node: AstNode, visit: (child: AstNode, key: string) => void): void {
+  for (const [key, value] of Object.entries(node)) {
+    if (Array.isArray(value)) {
+      for (const item of value) if (isNode(item)) visit(item, key);
+    } else if (isNode(value)) {
+      visit(value, key);
+    }
+  }
+}
+
+/**
+ * A minimal scope analysis, enough to tell whether an identifier refers to a module-level import:
+ * which identifiers are declarations (not references), and which names of `tracked` each nested
+ * scope declares (shadowing the import). `var` is hoisted to its function, other declarations
+ * belong to their block.
+ */
+function analyzeScopes(
+  program: AstNode,
+  tracked: ReadonlySet<string>,
+): { bindings: Set<AstNode>; shadows: Map<AstNode, Set<string>> } {
+  const bindings = new Set<AstNode>();
+  const shadows = new Map<AstNode, Set<string>>();
+  const declare = (scope: AstNode | undefined, identifiers: readonly AstNode[]): void => {
+    for (const identifier of identifiers) {
+      bindings.add(identifier);
+      const name = identifier.name;
+      if (scope === undefined || scope === program || typeof name !== 'string') continue;
+      if (!tracked.has(name)) continue;
+      const names = shadows.get(scope) ?? new Set<string>();
+      names.add(name);
+      shadows.set(scope, names);
+    }
+  };
+  const walk = (node: AstNode, scopes: readonly AstNode[]): void => {
+    if (node.type === 'ImportDeclaration') return;
+    const enclosing = scopes.at(-1);
+    const inner = opensScope(node) ? [...scopes, node] : scopes;
+    const own = inner.at(-1);
+    switch (node.type) {
+      case 'VariableDeclaration': {
+        const target =
+          node.kind === 'var'
+            ? scopes.findLast((scope) => scope.type === 'Program' || FUNCTIONS.has(scope.type))
+            : enclosing;
+        for (const declarator of Array.isArray(node.declarations) ? node.declarations : [])
+          if (isNode(declarator)) declare(target, bindingIdentifiers(declarator.id, []));
+        break;
+      }
+      case 'FunctionDeclaration':
+      case 'TSDeclareFunction':
+      case 'ClassDeclaration':
+      case 'TSEnumDeclaration':
+      case 'TSModuleDeclaration':
+      case 'TSInterfaceDeclaration':
+      case 'TSTypeAliasDeclaration':
+        // Named in the enclosing scope.
+        if (isNode(node.id) && node.id.type === 'Identifier') declare(enclosing, [node.id]);
+        break;
+      case 'FunctionExpression':
+      case 'ClassExpression':
+        // Named inside itself only.
+        if (isNode(node.id)) declare(own, [node.id]);
+        break;
+      case 'CatchClause':
+        declare(own, bindingIdentifiers(node.param, []));
+        break;
+      case 'TSTypeParameter':
+        if (isNode(node.name)) declare(enclosing, [node.name]);
+        break;
+      default:
+        break;
+    }
+    if (FUNCTIONS.has(node.type)) {
+      const params: AstNode[] = [];
+      for (const param of Array.isArray(node.params) ? node.params : [])
+        bindingIdentifiers(param, params);
+      declare(own, params);
+    }
+    children(node, (child) => {
+      walk(child, inner);
+    });
+  };
+  walk(program, []);
+  return { bindings, shadows };
+}
+
 function stringLiteral(node: unknown): string | undefined {
   return isNode(node) && node.type === 'Literal' && typeof node.value === 'string'
     ? node.value
@@ -209,7 +415,12 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
   if ('reason' in scanner)
     return { status: 'unavailable', reason: scanner.reason, durationMs: 0, ...empty };
   const output = path.resolve(options.outputDirectory);
-  const { modules, origin } = exportIndex(options.files);
+  // The resolver returns real paths: a project reached through a symbolic link (`/tmp` on macOS)
+  // must be compared by its real location too.
+  const outputs = [
+    ...new Set([output, await realpath(output).catch(() => output)].map((dir) => dir + path.sep)),
+  ];
+  const { modules, origin, barrels } = exportIndex(options.files);
   const { files, truncated } = await collectFiles(options, options.maxFiles ?? 20_000);
 
   const references = new Map<string, number>();
@@ -227,9 +438,10 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
     let module: string | undefined;
     if (resolved !== undefined) {
       const absolute = path.resolve(resolved);
-      if (absolute.startsWith(output + path.sep)) {
+      const base = outputs.find((directory) => absolute.startsWith(directory));
+      if (base !== undefined) {
         module = path
-          .relative(output, absolute)
+          .relative(base, absolute)
           .split(path.sep)
           .join('/')
           .replace(/\.d\.(m|c)?ts$/, '')
@@ -242,7 +454,7 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
   };
 
   const record = (module: string, name: string, location: UsageLocation, count: number): void => {
-    const target = BARRELS.has(module) ? (origin.get(name) ?? module) : module;
+    const target = barrels.has(module) ? (origin.get(name) ?? module) : module;
     const id = key(target, name);
     imported.add(id);
     references.set(id, (references.get(id) ?? 0) + count);
@@ -316,7 +528,14 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
       }
     }
 
-    // Identifier occurrences outside import declarations, for reference counting.
+    // References to the imported bindings, for reference counting: identifiers outside import
+    // declarations that are not declarations themselves and not shadowed by a local declaration.
+    const program = parsed.program as unknown as AstNode;
+    const tracked = new Set([...pending.map((entry) => entry.local), ...namespaces.keys()]);
+    const { bindings, shadows } =
+      tracked.size === 0
+        ? { bindings: new Set<AstNode>(), shadows: new Map<AstNode, Set<string>>() }
+        : analyzeScopes(program, tracked);
     const identifiers = new Map<string, number>();
     const namespaceUses = new Map<string, Map<string, number>>();
     const escapingNamespaces = new Set<string>();
@@ -326,7 +545,18 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
       ambiguousModules.add(module);
       ambiguous.push({ module, reason, location: locate(node.start) });
     };
+    /** Scopes that declare a tracked name, innermost last. */
+    const shadowing: Set<string>[] = [];
     const visit = (node: AstNode, parent: AstNode | undefined, parentKey: string): void => {
+      const shadowed = shadows.get(node);
+      if (shadowed !== undefined) shadowing.push(shadowed);
+      try {
+        inspect(node, parent, parentKey);
+      } finally {
+        if (shadowed !== undefined) shadowing.pop();
+      }
+    };
+    const inspect = (node: AstNode, parent: AstNode | undefined, parentKey: string): void => {
       switch (node.type) {
         case 'ImportDeclaration':
           return;
@@ -353,6 +583,10 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
         case 'Identifier':
         case 'JSXIdentifier': {
           const name = typeof node.name === 'string' ? node.name : '';
+          // Declarations (`const { updatePet } = o`) and names a nested scope declares again
+          // refer to something else. Binding identifiers carry type annotations and decorators
+          // as children, which are visited below.
+          if (bindings.has(node) || shadowing.some((names) => names.has(name))) break;
           if (parent === undefined || !isNameKey(parent, parentKey))
             identifiers.set(name, (identifiers.get(name) ?? 0) + 1);
           if (namespaces.has(name) && parent !== undefined) {
@@ -378,21 +612,16 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
               escapingNamespaces.add(name);
             }
           }
-          // Binding identifiers carry type annotations and decorators as children.
           break;
         }
         default:
           break;
       }
-      for (const [childKey, value] of Object.entries(node)) {
-        if (Array.isArray(value)) {
-          for (const item of value) if (isNode(item)) visit(item, node, childKey);
-        } else if (isNode(value)) {
-          visit(value, node, childKey);
-        }
-      }
+      children(node, (child, childKey) => {
+        visit(child, node, childKey);
+      });
     };
-    visit(parsed.program as unknown as AstNode, undefined, '');
+    visit(program, undefined, '');
 
     for (const entry of pending)
       record(entry.module, entry.imported, entry.location, identifiers.get(entry.local) ?? 0);
@@ -410,10 +639,10 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
     }
   }
 
-  const barrelAmbiguity = [...ambiguousModules].some((module) => BARRELS.has(module));
+  const barrelAmbiguity = [...ambiguousModules].some((module) => barrels.has(module));
   const entries: UsageEntry[] = [];
   for (const [module, exports] of modules) {
-    if (BARRELS.has(module) || exports === undefined) continue;
+    if (barrels.has(module) || exports === undefined) continue;
     for (const entry of exports) {
       const id = key(module, entry.name);
       const count = references.get(id) ?? 0;

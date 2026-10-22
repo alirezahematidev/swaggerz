@@ -180,5 +180,9 @@ describe.each(LIBRARIES)('runtime validation with $library', ({ library, error: 
     await expect(api.addPet!({ body: { name: 'x', photoUrls: [] } })).resolves.toMatchObject({
       id: 1,
     });
+    // Optional properties set to `undefined` are not sent, so they pass validation.
+    const body = { name: 'x', photoUrls: [], status: undefined };
+    await expect(api.addPet!({ body })).resolves.toMatchObject({ id: 1 });
+    expect(server.requests.at(-1)?.json()).toEqual({ name: 'x', photoUrls: [] });
   });
 });

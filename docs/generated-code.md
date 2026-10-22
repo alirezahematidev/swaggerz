@@ -79,6 +79,8 @@ export function addPet(params: AddPetParams, options?: RequestOptions): Promise<
 
   XML and other non-JSON text media types take the body already serialized (`string | Blob | ArrayBuffer | ArrayBufferView`). `Accept` is set to the preferred success media type.
 
+- `application/x-www-form-urlencoded` bodies send arrays as repeated fields and nested objects as JSON, unless the property's `encoding` declares a `style` or `explode`: `deepObject` sends `metadata[order_id]=6735`, exploded `form` sends each property as its own field, and non-exploded styles join keys and values with `,` (or the style's delimiter). A wildcard request media type (`*/*`, `text/*`) is never sent as `Content-Type`: JSON bodies are sent as `application/json`, strings, `Blob`s and other native bodies with the transport's default.
+
 - Operations or paths with their own `servers` send requests to their first server (`client.operationServers`, on by default). The base URL passed per request still takes precedence; `client.setConfig({ operationServers: false })` turns it off at runtime.
 - Response data is the union of 2xx and declared 3xx response bodies (JSON is parsed; text responses are strings; binary responses are `Blob`s; bodiless responses such as `204` or `304` are `undefined`). If no 2xx response is declared, `default` is the success response. Undeclared 3xx statuses reject with `ApiError`.
 - Errors are typed by status: see [Errors](#errors). `<Name>ErrorBody` is the union of the other declared responses' bodies (`undefined` for bodiless ones, `unknown` when none are documented).
@@ -138,6 +140,8 @@ With `features.validation`, every model gets a schema module in the library's di
 
 All three keep unknown properties, enforce `additionalProperties: false` and typed additional properties, discriminators (including OpenAPI 3.2 default mappings), `minLength`/`maxLength`, numeric bounds and `multipleOf`, tuple items, and the assertions TypeScript cannot express (`not`, `if`/`then`/`else`, `dependentSchemas`, `dependentRequired`) as refinements (`.refine()`, `v.check()`, `.narrow()`). Formats and patterns are documentation only.
 
+Where the libraries' defaults differ from JSON Schema, the schemas follow JSON Schema and the generated types, identically in all three: string lengths count characters (not UTF-16 code units), a decimal `multipleOf` such as `0.01` tolerates floating-point rounding, integers may exceed 2^53 (`int64` ids), optional properties named like `Object.prototype` members (`constructor`, `toString`) are only checked when the object has them, `allOf` reads like the TypeScript intersection (a member's `additionalProperties: false` does not reject the properties other members declare), and `patternProperties` of an object without `additionalProperties` leave its other keys open. The client validates request bodies without their `undefined` properties, which `JSON.stringify` drops when sending.
+
 ArkType resolves definitions eagerly and rejects contradictory intersections (`string & number`) when they are defined, which would make importing a module throw. The generated `arktype/support.ts` therefore provides `lazy()` (a reference resolved when data is validated, keeping the target's error paths), `allOf()` (an intersection that falls back to checking every member when ArkType cannot combine them) and `rest()` (typed additional properties). ArkType's types need TypeScript 5.4 or later.
 
 ## Runtime contract
@@ -167,7 +171,7 @@ interface TransportResponse {
 }
 ```
 
-A transport sends the already serialized request and reads the body according to `parseAs`; it must not throw for HTTP error statuses. The client applies, in order: request body encoding (dates), request body validation, body serialization and timeout/signal composition once per call; then for every attempt default headers, `Accept`, header and cookie parameters, the first satisfiable security requirement, URL building, per-call headers, `onRequest` middleware, the transport (`onError` middleware may recover or retry) and `onResponse` middleware (may retry); then the status check (2xx and declared 3xx), response validation and response transformation (dates).
+A transport sends the already serialized request and reads the body of 2xx and 3xx responses according to `parseAs`; other responses (errors) are read by their `Content-Type` (`auto`: JSON is parsed, text is a string, anything else a `Blob`), so `ApiError.body` matches the declared error body even when the success response is binary or text. With `parseAs: 'stream'` every body is left unread. `responseParseAs(parseAs, status)` from `runtime/serialization` implements this rule for custom transports. A transport must not throw for HTTP error statuses. The axios transport requests every body as bytes (`arraybuffer`, or `stream`) and decodes it like the fetch transport, so binary responses are `Blob`s and malformed JSON in a successful response is a `RequestError` of kind `parse` with both. The client applies, in order: request body encoding (dates), request body validation, body serialization and timeout/signal composition once per call; then for every attempt default headers, `Accept`, header and cookie parameters, the first satisfiable security requirement, URL building, per-call headers, `onRequest` middleware, the transport (`onError` middleware may recover or retry) and `onResponse` middleware (may retry); then the status check (2xx and declared 3xx), response validation and response transformation (dates).
 
 | Client API                                  |                                                                                                                                                     |
 | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -240,7 +244,9 @@ With `scheme`, only operations that use that scheme are refreshed; without it, e
 | ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `ApiError<Body, Status>` | status that is neither 2xx nor a declared 3xx                                | `status`, `statusText`, `body`, `headers`, `response` (raw), `operationId`, `method`, `url`, `cause` (axios: the `AxiosError`) |
 | `RequestError`           | `kind: 'network' \| 'timeout' \| 'parse' \| 'serialization' \| 'validation'` | `operationId`, `method`, `url`, `cause`                                                                                        |
-| original abort error     | the caller's `AbortSignal` aborted                                           | —                                                                                                                              |
+
+`serialization` covers every value of the request that cannot be sent: a missing path parameter, a body `JSON.stringify` rejects, or a header or cookie parameter that is not a valid header value (such as `naïve ✓`).
+| original abort error | the caller's `AbortSignal` aborted | — |
 
 Each operation exports its errors typed by status:
 
@@ -283,15 +289,18 @@ The guard checks `instanceof ApiError` and the operation (`operationId` and meth
 
 `generate` compares the new files with the output directory using the manifest:
 
-| Situation                     | Action                                                                           |
-| ----------------------------- | -------------------------------------------------------------------------------- |
-| File unchanged                | Not written (mtime preserved)                                                    |
-| Generated file changed        | Rewritten                                                                        |
-| New file                      | Created                                                                          |
-| File no longer generated      | Deleted (kept with a warning if edited by hand; kept entirely with `--no-clean`) |
-| Non-generated file in the way | Error `output/user-file` (unless `--force`)                                      |
+| Situation                     | Action                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| File unchanged                | Not written (mtime preserved)                                                                                   |
+| Generated file changed        | Rewritten                                                                                                       |
+| New file                      | Created                                                                                                         |
+| File no longer generated      | Deleted (kept with a warning if edited by hand; kept entirely with `--no-clean`)                                |
+| Non-generated file in the way | Error `output/user-file` (unless `--force`)                                                                     |
+| Directory in the way          | Error `output/user-file` (also with `--force`): a directory where a file goes, or a file where a directory goes |
 
-All new content is written to temporary files first; they are renamed into place only after every write succeeded, so a failure leaves the previous output intact.
+All new content is written to temporary files first, and every file to write or delete is checked to stay inside the output directory (symbolic links included) before anything changes; files are renamed into place only after every write succeeded, so a failure leaves the previous output intact. Temporary files that an interrupted run left behind (`<file>.<pid>-<hex>.tmp`, from a process that is no longer running) are removed by the next run.
+
+Files are compared ignoring line endings, so a checkout that converted the generated files to CRLF (Git's `core.autocrlf`) is neither rewritten nor reported by `--check`, and its stale files are not mistaken for hand edits. A file or directory whose name changes only in letter case (for example after changing `naming.files`) is renamed on case-insensitive file systems (macOS, Windows) instead of being deleted as stale.
 
 ### Checking committed output in CI
 

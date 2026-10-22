@@ -17,7 +17,7 @@ import {
   type SecuritySchemeIR,
   type ServerIR,
 } from '../../ir/types.ts';
-import { isRecord } from '../../utils/object.ts';
+import { isRecord, setOwn } from '../../utils/object.ts';
 import { compareStrings } from '../../utils/strings.ts';
 import {
   bool,
@@ -443,7 +443,7 @@ function convertFormData(
     });
     if (str(parameter, 'type') === 'array') {
       const { style, explode } = collectionStyle(ctx, parameter, 'formData', label);
-      encoding[name] = { style, explode };
+      setOwn(encoding, name, { style, explode });
     }
   }
   const multipart = hasFile || consumes.includes('multipart/form-data');

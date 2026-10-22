@@ -1,5 +1,5 @@
 import { RequestError } from './errors.js';
-import { isJsonMediaType } from './serialization.js';
+import { isJsonMediaType, isTextMediaType, responseParseAs } from './serialization.js';
 import type { Transport, TransportRequest } from './types.js';
 
 /** Extra `fetch` options accepted per request (`transportOptions`) and as client defaults. */
@@ -10,27 +10,11 @@ export interface FetchTransportConfig {
   readonly fetch?: typeof fetch;
 }
 
-function isTextual(contentType: string): boolean {
-  const type = (contentType.split(';')[0] ?? '').trim().toLowerCase();
-  return (
-    type.startsWith('text/') ||
-    type === 'application/xml' ||
-    type.endsWith('+xml') ||
-    type === 'application/x-www-form-urlencoded' ||
-    type === 'application/javascript' ||
-    // Sequences of JSON values (JSON Lines, NDJSON, JSON text sequences) are read as text.
-    type === 'application/jsonl' ||
-    type === 'application/x-ndjson' ||
-    type === 'application/json-seq' ||
-    type.endsWith('+json-seq')
-  );
-}
-
 async function readBody(
   response: Response,
   request: TransportRequest<FetchTransportOptions>,
 ): Promise<unknown> {
-  const { parseAs } = request;
+  const parseAs = responseParseAs(request.parseAs, response.status);
   if (parseAs === 'stream') return response.body;
   if (
     request.method === 'HEAD' ||
@@ -60,7 +44,7 @@ async function readBody(
       );
     }
   }
-  if (contentType === null || isTextual(contentType)) {
+  if (contentType === null || isTextMediaType(contentType)) {
     const text = await response.text();
     return text === '' && contentType === null ? undefined : text;
   }

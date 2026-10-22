@@ -20,7 +20,7 @@ import {
   isStandardMethod,
 } from '../../ir/types.ts';
 import { pickMeta } from '../../ir/utils.ts';
-import { isRecord } from '../../utils/object.ts';
+import { isRecord, setOwn } from '../../utils/object.ts';
 import { compareStrings } from '../../utils/strings.ts';
 import {
   bool,
@@ -130,6 +130,8 @@ export function normalizeOpenApi3(
 
   const paths = child(root, 'paths');
   for (const [path, rawItem] of entries(paths)) {
+    // Specification extensions are allowed in the Paths Object.
+    if (path.startsWith('x-')) continue;
     if (!path.startsWith('/')) {
       ctx.error('spec/invalid-path', `Path "${path}" must start with "/".`, rawItem);
       continue;
@@ -239,11 +241,11 @@ export function readServers(cursor: Cursor): ServerIR[] {
       const defaultValue = str(variable, 'default');
       if (defaultValue === undefined) continue;
       const enumValues = readStringArray(child(variable, 'enum'));
-      variables[name] = {
+      setOwn(variables, name, {
         default: defaultValue,
         ...(enumValues.length > 0 ? { enum: enumValues } : {}),
         ...stripUndefined({ description: str(variable, 'description') }),
-      };
+      });
     }
     result.push({
       url,

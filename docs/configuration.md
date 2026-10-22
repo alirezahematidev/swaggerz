@@ -48,22 +48,22 @@ plugins:
 
 Data configs cannot contain functions, so inline `hooks` are only available in TypeScript and JavaScript; plugins are referenced by module (see [`plugins`](#plugins-and-hooks)). Syntax and validation errors in JSON and YAML configs report the line and column.
 
-**Loading.** TypeScript and JavaScript config files are imported with Node's module loader; TypeScript configs use Node's built-in type stripping (Node.js ≥ 22.18). They are trusted code executed with the CLI's permissions. Only erasable TypeScript syntax is allowed (no `enum`, `namespace`, parameter properties) and relative imports need file extensions.
+**Loading.** TypeScript and JavaScript config files are imported with Node's module loader; TypeScript configs use Node's built-in type stripping (Node.js ≥ 22.18). They are trusted code executed with the CLI's permissions. Only erasable TypeScript syntax is allowed (no `enum`, `namespace`, parameter properties) and relative imports need file extensions. `generate --watch` loads the config file and the plugin modules it references by path again after they change; other modules that the config file imports are cached by Node.js until the process restarts.
 
 **Precedence.** Defaults < config file < environment variables < CLI flags (`--no-clean`).
 
 ## `spec`
 
-| Option           | Type                                         | Default    |                                                                                                       |
-| ---------------- | -------------------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------- |
-| `version`        | `'2.0' \| '3.0' \| '3.1' \| '3.2' \| 'auto'` | required   | The family the document must declare. A mismatch is an error; `'auto'` accepts any supported version. |
-| `input`          | `string`                                     | required   | Local path or `http(s)` URL of a JSON or YAML document.                                               |
-| `refs`           | object                                       |            | See below.                                                                                            |
-| `fetch.headers`  | `Record<string, string>`                     | `{}`       | Sent only to the origin of `input` (e.g. `Authorization` for a private spec).                         |
-| `fetch.timeout`  | `number` (ms)                                | `30000`    | Per request.                                                                                          |
-| `fetch.maxBytes` | `number`                                     | `52428800` | Maximum document size.                                                                                |
-| `fetch.poll`     | `boolean \| number` (ms)                     | loopback   | Poll remote documents for changes while watching; see below.                                          |
-| `overlays`       | `string[]`                                   | `[]`       | [Overlay](overlays.md) documents (paths relative to the config file, or URLs) applied in order.       |
+| Option           | Type                                         | Default    |                                                                                                                                                                |
+| ---------------- | -------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`        | `'2.0' \| '3.0' \| '3.1' \| '3.2' \| 'auto'` | required   | The family the document must declare. A mismatch is an error; `'auto'` accepts any supported version. Quote it in YAML (`'3.1'`): unquoted, `3.1` is a number. |
+| `input`          | `string`                                     | required   | Local path or `http(s)` URL of a JSON or YAML document.                                                                                                        |
+| `refs`           | object                                       |            | See below.                                                                                                                                                     |
+| `fetch.headers`  | `Record<string, string>`                     | `{}`       | Sent only to the origin of `input` (e.g. `Authorization` for a private spec).                                                                                  |
+| `fetch.timeout`  | `number` (ms)                                | `30000`    | Per request.                                                                                                                                                   |
+| `fetch.maxBytes` | `number`                                     | `52428800` | Maximum document size.                                                                                                                                         |
+| `fetch.poll`     | `boolean \| number` (ms)                     | loopback   | Poll remote documents for changes while watching; see below.                                                                                                   |
+| `overlays`       | `string[]`                                   | `[]`       | [Overlay](overlays.md) documents (paths relative to the config file, or URLs) applied in order.                                                                |
 
 `generate --watch` and the dashboard poll remote documents (an `http(s)` input and remote `$ref` targets) for changes: every `fetch.poll` milliseconds after the previous round, with conditional requests (`If-None-Match`, `If-Modified-Since`) under the same rules as loading them (credentials only to the origin of `input`, redirect checks, `timeout`, `maxBytes`). Servers that send no `ETag` or `Last-Modified` are compared by content, so an unchanged document never triggers a regeneration. A changed document regenerates (or reloads the dashboard) like a changed file; a server that is down is reported once and polled until it is back.
 
@@ -92,7 +92,7 @@ External `$ref`s are resolved according to a policy:
 
 | Option            | Type                           | Default                 |                                                                                                                                                                    |
 | ----------------- | ------------------------------ | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `directory`       | `string`                       | `'./src/generated/api'` | Must not contain the project root, the config file or the spec.                                                                                                    |
+| `directory`       | `string`                       | `'./src/generated/api'` | Must not contain the project root, the config file or the spec (symbolic links and letter case are resolved before checking).                                      |
 | `language`        | `'typescript' \| 'javascript'` | `'typescript'`          |                                                                                                                                                                    |
 | `declarations`    | `boolean`                      | `true`                  | JavaScript only: `.d.ts` next to each module. Runtime modules always have declarations.                                                                            |
 | `importExtension` | `'.js' \| '.ts' \| 'none'`     | `'.js'`                 | `.js` works with Node ESM, TypeScript `nodenext`/`bundler` and all major bundlers. `.ts` requires `allowImportingTsExtensions`. `none` suits older webpack setups. |
@@ -151,13 +151,13 @@ Operation names come from `operationId`, or from the method and path (`GET /pets
 
 ## `dashboard`
 
-| Option               | Default       |                                                                                                         |
-| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------- |
-| `host`               | `'127.0.0.1'` | Non-loopback hosts require `allowNetworkAccess: true`.                                                  |
-| `port`               | `4400`        | The next free port is used when taken (unless `--port` is given). `0` picks any free port.              |
-| `allowNetworkAccess` | `false`       |                                                                                                         |
-| `usage.include`      | `['src']`     | Directories or files scanned for usage.                                                                 |
-| `usage.exclude`      | `[]`          | Path fragments to skip (`node_modules`, build directories and the output directory are always skipped). |
+| Option               | Default       |                                                                                                                                                                                                                                                                                       |
+| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `host`               | `'127.0.0.1'` | Non-loopback hosts require `allowNetworkAccess: true`.                                                                                                                                                                                                                                |
+| `port`               | `4400`        | The next free port is used when taken (unless `--port` is given). `0` picks any free port.                                                                                                                                                                                            |
+| `allowNetworkAccess` | `false`       |                                                                                                                                                                                                                                                                                       |
+| `usage.include`      | `['src']`     | Directories or files scanned for usage.                                                                                                                                                                                                                                               |
+| `usage.exclude`      | `[]`          | Paths inside the project to skip, matched by whole segments: `legacy` skips every file or directory named `legacy`, `src/legacy` that directory, `*.test.ts` (with `*` within one segment) test files. `node_modules`, build directories and the output directory are always skipped. |
 
 ## `lint`
 

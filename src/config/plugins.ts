@@ -1,4 +1,6 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -18,6 +20,51 @@ function isReference(entry: PluginEntry): entry is PluginReference {
   return typeof entry === 'string' || Array.isArray(entry);
 }
 
+/** A reference to a local file rather than a package. */
+function isLocalSpecifier(specifier: string): boolean {
+  return (
+    specifier.startsWith('file:') ||
+    specifier.startsWith('./') ||
+    specifier.startsWith('../') ||
+    specifier === '.' ||
+    path.isAbsolute(specifier)
+  );
+}
+
+const moduleRequire = createRequire(import.meta.url);
+
+/**
+ * Removes a file from Node's CommonJS module cache, which is keyed by file name and ignores the
+ * query strings used to re-import changed ES modules.
+ */
+export function forgetCommonJsModule(file: string): void {
+  Reflect.deleteProperty(moduleRequire.cache, file);
+  try {
+    Reflect.deleteProperty(moduleRequire.cache, realpathSync(file));
+  } catch {
+    // The file does not exist; importing it reports that.
+  }
+}
+
+/**
+ * Imports a local plugin module. The URL carries a hash of the file's content, so a changed file
+ * is evaluated again when the configuration is reloaded (watch mode, dashboard) while an unchanged
+ * one comes from the module cache.
+ */
+async function importLocalModule(file: string): Promise<unknown> {
+  const url = pathToFileURL(file);
+  const content = await readFile(file);
+  url.searchParams.set('v', createHash('sha256').update(content).digest('hex').slice(0, 16));
+  forgetCommonJsModule(file);
+  return import(url.href);
+}
+
+export interface LoadedPlugins {
+  readonly plugins: SwaggerzPlugin[];
+  /** Plugin modules referenced by path (absolute, sorted), for watching. */
+  readonly files: string[];
+}
+
 /**
  * Loads plugin entries: plugin objects are kept, module references (`'./plugin.ts'`,
  * `'package'` or `[specifier, options]`) are imported with Node's module loader. A referenced
@@ -28,8 +75,9 @@ export async function loadPluginEntries(
   entries: readonly PluginEntry[],
   root: string,
   configFile?: string,
-): Promise<SwaggerzPlugin[]> {
+): Promise<LoadedPlugins> {
   const plugins: SwaggerzPlugin[] = [];
+  const files = new Set<string>();
   for (const [index, entry] of entries.entries()) {
     if (!isReference(entry)) {
       plugins.push(entry);
@@ -50,16 +98,25 @@ export async function loadPluginEntries(
       ]);
     };
 
-    const file = resolveSpecifier(specifier, root);
+    const local = isLocalSpecifier(specifier);
+    let file: string | undefined;
+    try {
+      file = resolveSpecifier(specifier, root);
+    } catch (error) {
+      return fail(
+        `could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
     if (file === undefined) {
       return fail(
         'module not found.',
         'Use a path relative to the config file (starting with ./) or install the package.',
       );
     }
+    if (local) files.add(file);
     let module: unknown;
     try {
-      module = await import(pathToFileURL(file).href);
+      module = local ? await importLocalModule(file) : await import(pathToFileURL(file).href);
     } catch (error) {
       return fail(
         `could not be imported: ${error instanceof Error ? error.message : String(error)}`,
@@ -91,17 +148,12 @@ export async function loadPluginEntries(
     }
     plugins.push(plugin as SwaggerzPlugin);
   }
-  return plugins;
+  return { plugins, files: [...files].sort() };
 }
 
 function resolveSpecifier(specifier: string, root: string): string | undefined {
   if (specifier.startsWith('file:')) return fileURLToPath(specifier);
-  if (
-    specifier.startsWith('./') ||
-    specifier.startsWith('../') ||
-    specifier === '.' ||
-    path.isAbsolute(specifier)
-  ) {
+  if (isLocalSpecifier(specifier)) {
     const file = path.resolve(root, specifier);
     return existsSync(file) ? file : undefined;
   }
@@ -121,7 +173,15 @@ function resolvePackageExport(specifier: string, root: string): string | undefin
     const packageDirectory = path.join(directory, 'node_modules', name);
     const manifestFile = path.join(packageDirectory, 'package.json');
     if (existsSync(manifestFile)) {
-      const manifest: unknown = JSON.parse(readFileSync(manifestFile, 'utf8'));
+      let manifest: unknown;
+      try {
+        manifest = JSON.parse(readFileSync(manifestFile, 'utf8'));
+      } catch (error) {
+        throw new Error(
+          `${manifestFile} is not valid JSON (${error instanceof Error ? error.message : String(error)})`,
+          { cause: error },
+        );
+      }
       if (!isRecord(manifest)) return undefined;
       if (manifest.exports !== undefined) {
         const target = exportTarget(manifest.exports, subpath);

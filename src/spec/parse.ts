@@ -36,21 +36,24 @@ export async function parseSpecification(options: ParseOptions): Promise<ParseRe
 
   // Overlays fix the document itself, so plugins and every later stage see the patched version.
   if (config.spec.overlays.length > 0) {
-    store.replaceRootData(
-      await applyOverlays(store.root.data, {
-        overlays: config.spec.overlays,
-        fetch: config.spec.fetch,
-        diagnostics,
-        ...(/^https?:\/\//i.test(config.spec.input)
-          ? { credentialOrigin: new URL(config.spec.input).origin }
-          : {}),
-      }),
-    );
+    const shifted = new WeakSet<object>();
+    const patched = await applyOverlays(store.root.data, {
+      overlays: config.spec.overlays,
+      fetch: config.spec.fetch,
+      diagnostics,
+      shifted,
+      ...(/^https?:\/\//i.test(config.spec.input)
+        ? { credentialOrigin: new URL(config.spec.input).origin }
+        : {}),
+    });
+    store.replaceRootData(patched, shifted);
   }
 
   if (options.beforeParse !== undefined) {
-    const replaced = await options.beforeParse(root.data);
-    if (replaced !== undefined) store.replaceRootData(replaced);
+    // The current root data: the patched document when overlays were applied.
+    const input = store.root.data;
+    const replaced = await options.beforeParse(input);
+    if (replaced !== undefined && replaced !== input) store.replaceRootData(replaced);
   }
 
   const detection = detectSpecVersion(store.root.data, root.location);
@@ -70,6 +73,7 @@ export async function parseSpecification(options: ParseOptions): Promise<ParseRe
     return { ir: undefined, store };
   }
 
+  if (detection.version === '2.0') store.enableSwagger2();
   if (detection.version === '3.1' || detection.version === '3.2') store.enableSchemaIds();
   if (detection.version === '3.2') store.enableSelf();
   await store.loadReferencedDocuments();

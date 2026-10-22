@@ -42,12 +42,20 @@ const DATA_KEYS = new Set(['example', 'default', 'enum', 'const']);
 
 type WalkMode = 'keywords' | 'names' | 'examples';
 
+export interface CollectRefsOptions {
+  /**
+   * Swagger 2.0: a Response Object's `examples` maps media types to literal payloads instead of
+   * names to Example Objects.
+   */
+  readonly swagger2?: boolean;
+}
+
 /**
  * Collects `$ref` strings with their location. The walk is context aware: names inside
  * `properties`, `paths`, etc. are not interpreted as keywords, and example/default payloads are
  * never scanned, so a literal `"$ref"` inside example data is not followed.
  */
-export function collectRefs(root: unknown): RefOccurrence[] {
+export function collectRefs(root: unknown, options: CollectRefsOptions = {}): RefOccurrence[] {
   const found: RefOccurrence[] = [];
   const stack: { node: unknown; pointer: string; mode: WalkMode }[] = [
     { node: root, pointer: '', mode: 'keywords' },
@@ -57,6 +65,8 @@ export function collectRefs(root: unknown): RefOccurrence[] {
     if (entry === undefined) break;
     const { node, pointer, mode } = entry;
     if (Array.isArray(node)) {
+      // Not an Example Object: example data.
+      if (mode === 'examples') continue;
       node.forEach((child, index) => {
         stack.push({
           node: child,
@@ -76,16 +86,18 @@ export function collectRefs(root: unknown): RefOccurrence[] {
     }
 
     if (typeof node.$ref === 'string') found.push({ ref: node.$ref, pointer });
+    // An Example Object may be a reference; nothing inside one is (`value` and `dataValue` are
+    // example data, `externalValue` a plain URL).
+    if (mode === 'examples') continue;
 
     for (const [key, child] of Object.entries(node)) {
       if (key === '$ref' || key.startsWith('x-') || DATA_KEYS.has(key)) continue;
-      // Inside an Example Object, `value` is example data.
-      if (mode === 'examples' && key === 'value') continue;
       const childPointer = appendPointer(pointer, key);
       if (key === 'examples') {
         // JSON Schema `examples` is an array of instances; OpenAPI `examples` maps names to
-        // Example Objects (which may themselves be references).
-        if (isRecord(child)) {
+        // Example Objects (which may themselves be references), Swagger 2.0 `examples` media types
+        // to payloads.
+        if (isRecord(child) && options.swagger2 !== true) {
           for (const [name, example] of Object.entries(child)) {
             stack.push({
               node: example,

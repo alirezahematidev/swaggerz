@@ -1,5 +1,5 @@
 import { styleText } from 'node:util';
-import { formatDiagnostic, summarize } from '../diagnostics/format.ts';
+import { formatDiagnostic, printable, summarize } from '../diagnostics/format.ts';
 import type { Diagnostic } from '../diagnostics/types.ts';
 import { pluralize } from '../utils/strings.ts';
 
@@ -15,15 +15,47 @@ export interface ReporterOptions {
 
 type Style = Parameters<typeof styleText>[0];
 
+const ESCAPE = '\u001b';
+
+/** The color and weight sequences {@link Reporter.paint} produces (after the escape character). */
+const STYLE_SEQUENCE = /^\[(?:1|2|22|31|32|33|34|36|39|90)m/;
+
+/**
+ * Escapes control characters in text printed to a terminal (see {@link printable}). With colors
+ * enabled, only the color and weight sequences that {@link Reporter.paint} produces are kept, so
+ * text from a specification cannot clear the screen, set the window title or write to the
+ * clipboard.
+ */
+export function terminalSafe(text: string, color: boolean): string {
+  if (!color || !text.includes(ESCAPE)) return printable(text);
+  const [first = '', ...rest] = text.split(ESCAPE);
+  return (
+    printable(first) +
+    rest
+      .map((part) => {
+        const style = STYLE_SEQUENCE.exec(part)?.[0];
+        return style === undefined
+          ? printable(`${ESCAPE}${part}`)
+          : `${ESCAPE}${style}${printable(part.slice(style.length))}`;
+      })
+      .join('')
+  );
+}
+
 /**
  * Terminal output. Human-readable output goes to stderr for diagnostics and stdout for results;
- * in `--json` mode only a single JSON document is written to stdout.
+ * in `--json` mode only a single JSON document is written to stdout. Human-readable output never
+ * contains control characters other than newlines, tabs and the reporter's own colors.
  */
 export class Reporter {
   readonly options: ReporterOptions;
 
   constructor(options: ReporterOptions) {
     this.options = options;
+  }
+
+  #write(stream: NodeJS.WritableStream, text: string): void {
+    stream.write(`${terminalSafe(text, this.options.color)}\n`);
   }
 
   paint(text: string, style: Style): string {
@@ -33,13 +65,13 @@ export class Reporter {
   /** Regular output (suppressed by `--quiet` and `--json`). */
   log(message = ''): void {
     if (this.options.quiet || this.options.json) return;
-    this.options.stdout.write(`${message}\n`);
+    this.#write(this.options.stdout, message);
   }
 
   /** Output shown only with `--verbose`. */
   debug(message: string): void {
     if (!this.options.verbose || this.options.json) return;
-    this.options.stderr.write(`${this.paint(message, 'dim')}\n`);
+    this.#write(this.options.stderr, this.paint(message, 'dim'));
   }
 
   success(message: string): void {
@@ -48,19 +80,19 @@ export class Reporter {
 
   warn(message: string): void {
     if (this.options.json) return;
-    this.options.stderr.write(`${this.paint('!', 'yellow')} ${message}\n`);
+    this.#write(this.options.stderr, `${this.paint('!', 'yellow')} ${message}`);
   }
 
   /** Errors are always printed (to stderr), except in JSON mode where they are part of the document. */
   error(message: string): void {
     if (this.options.json) return;
-    this.options.stderr.write(`${this.paint('✖', 'red')} ${message}\n`);
+    this.#write(this.options.stderr, `${this.paint('✖', 'red')} ${message}`);
   }
 
   /** Details of an error, such as the files it concerns (stderr; also printed with `--quiet`). */
   detail(message: string): void {
     if (this.options.json) return;
-    this.options.stderr.write(`${message}\n`);
+    this.#write(this.options.stderr, message);
   }
 
   json(value: unknown): void {
@@ -77,8 +109,9 @@ export class Reporter {
       if (diagnostic.severity === 'info' && !this.options.verbose && options.showInfo !== true)
         continue;
       if (diagnostic.severity === 'warning' && this.options.quiet) continue;
-      this.options.stderr.write(
-        `${formatDiagnostic(diagnostic, { cwd: this.options.cwd, color: this.options.color })}\n`,
+      this.#write(
+        this.options.stderr,
+        formatDiagnostic(diagnostic, { cwd: this.options.cwd, color: this.options.color }),
       );
     }
   }

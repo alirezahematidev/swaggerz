@@ -54,6 +54,14 @@ export class ImportManager {
     this.#locals.add(name);
   }
 
+  /**
+   * A reference to a global type (`Blob`, `Record`, `Date`, …): `globalThis.Blob` when this module
+   * declares a symbol of that name (a model called `Blob`), which would shadow the global.
+   */
+  global(name: string): string {
+    return this.#locals.has(name) ? `globalThis.${name}` : name;
+  }
+
   /** Relative specifier from this module to another generated module. */
   specifier(to: string): string {
     let relative = path.posix.relative(path.posix.dirname(this.#from), to);

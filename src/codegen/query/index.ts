@@ -25,7 +25,7 @@ export function generateQueryModule(
   const q = plan.symbol.query;
   if (q === undefined) return undefined;
   const isQuery = q.queryKey !== undefined;
-  const invalidations = isQuery ? [] : resolveInvalidations(plan, ctx);
+  const invalidations = isQuery ? [] : resolveInvalidations(plan);
   const exports = queryModuleExports(q, isQuery);
   const outputs = renderAll(q.module, ctx, (imports, lang) => {
     for (const entry of exports) imports.declare(entry.name);

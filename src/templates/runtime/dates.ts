@@ -63,7 +63,11 @@ function walk(value: unknown, shape: DateShape, mode: Mode): unknown {
   if ('discriminator' in shape) {
     if (!isObject(value)) return value;
     const tag = value[shape.discriminator];
-    const variant = typeof tag === 'string' ? shape.mapping[tag] : undefined;
+    // Own properties only: a tag such as `__proto__` must not reach `Object.prototype`.
+    const variant =
+      typeof tag === 'string' && Object.prototype.hasOwnProperty.call(shape.mapping, tag)
+        ? shape.mapping[tag]
+        : undefined;
     return variant === undefined ? value : walk(value, variant, mode);
   }
   // Without a discriminator, every variant's dates are converted.
