@@ -17,6 +17,11 @@ export interface FileWatcherOptions {
   /** A directory could not be watched, or `onChange` threw. Watching continues. */
   readonly onError?: (directory: string, error: unknown) => void;
   readonly debounceMs?: number;
+  /** Creates the platform watcher of a directory (`fs.watch`; replaced in tests). */
+  readonly watch?: (
+    directory: string,
+    listener: (event: string, name: string | null) => void,
+  ) => FSWatcher;
 }
 
 /**
@@ -28,6 +33,8 @@ export interface FileWatcherOptions {
 export class FileWatcher {
   readonly #options: FileWatcherOptions;
   readonly #watchers = new Map<string, FSWatcher>();
+  /** The directory each target is watched through, as of the last sync. */
+  #points = new Map<string, string>();
   #targets = new Set<string>();
   #pending = new Set<string>();
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -71,7 +78,15 @@ export class FileWatcher {
   }
 
   #sync(): void {
-    const directories = new Set([...this.#targets].map((file) => this.#watchPoint(file)));
+    const points = new Map([...this.#targets].map((file) => [file, this.#watchPoint(file)]));
+    // A file now watched through another directory (one appeared or was removed) may have changed
+    // before the new watcher started: it is reported, so the listener reads it again.
+    for (const [file, point] of points) {
+      const previous = this.#points.get(file);
+      if (previous !== undefined && previous !== point) this.#pending.add(file);
+    }
+    this.#points = points;
+    const directories = new Set(points.values());
     for (const [directory, watcher] of this.#watchers) {
       if (!directories.has(directory)) {
         watcher.close();
@@ -81,13 +96,20 @@ export class FileWatcher {
     for (const directory of directories) {
       if (this.#watchers.has(directory)) continue;
       try {
-        const watcher = watch(directory, (_event, name) => {
+        const watcher = (this.#options.watch ?? watch)(directory, (_event, name) => {
           this.#onEvent(directory, name);
         });
         watcher.on('error', (error) => {
           watcher.close();
           this.#watchers.delete(directory);
-          this.#options.onError?.(directory, error);
+          if (this.#closed) return;
+          // Windows reports the removal of a watched directory as an error (EPERM) and may drop
+          // the events before it: its files are reported as changed and watched again from the
+          // nearest directory that exists.
+          for (const [file, point] of this.#points)
+            if (point === directory) this.#pending.add(file);
+          if (existsSync(directory)) this.#options.onError?.(directory, error);
+          this.#schedule();
         });
         this.#watchers.set(directory, watcher);
       } catch (error) {
@@ -123,10 +145,11 @@ export class FileWatcher {
 
   #flush(): void {
     if (this.#closed || this.#running !== undefined || this.#pending.size === 0) return;
+    // Directories may have appeared or disappeared (for example a first output directory): the
+    // watchers move before the listener reads the files, so no later change is missed.
+    this.#sync();
     const files = [...this.#pending].sort();
     this.#pending.clear();
-    // Directories may have appeared or disappeared (for example a first output directory).
-    this.#sync();
     this.#running = (async () => {
       try {
         await this.#options.onChange(files);

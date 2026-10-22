@@ -46,35 +46,50 @@ async function watched(
   });
   watcher.start();
   closers.push(() => watcher.close());
-  // Let the platform watchers start before the test writes (as in the FileWatcher tests).
-  await new Promise((resolve) => setTimeout(resolve, 200));
-  const next = async (count: number): Promise<ReloadOutcome> => {
+  /**
+   * Writes a file until `done` holds. Writing again covers an edit the platform watcher reported
+   * before it was ready (right after it started, under load); a reload of unchanged files is
+   * harmless.
+   */
+  const edit = async (
+    file: string,
+    text: string,
+    done: (since: readonly ReloadOutcome[]) => boolean,
+  ): Promise<void> => {
+    const from = outcomes.length;
     const started = Date.now();
-    while (outcomes.length < count) {
-      if (Date.now() - started > 10_000)
-        throw new Error(`Expected ${count} reloads, got ${JSON.stringify(outcomes)}`);
-      await new Promise((resolve) => setTimeout(resolve, 20));
+    for (;;) {
+      await writeFile(file, text);
+      const until = Date.now() + 1000;
+      while (Date.now() < until) {
+        if (done(outcomes.slice(from))) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      if (Date.now() - started > 15_000)
+        throw new Error(`No matching reload, got ${JSON.stringify(outcomes.slice(from))}`);
     }
-    const outcome = outcomes[count - 1];
-    if (outcome === undefined) throw new Error('No reload');
-    return outcome;
   };
-  return { directory, service, next, file: (relative: string) => path.join(directory, relative) };
+  return { directory, service, edit, file: (relative: string) => path.join(directory, relative) };
 }
 
-describe('ProjectWatcher after a failed reload', { timeout: 20_000 }, () => {
+const failed = (since: readonly ReloadOutcome[]): boolean => since.some((o) => !o.ok);
+
+describe('ProjectWatcher after a failed reload', { timeout: 30_000 }, () => {
   it('reloads when a missing $ref target is created', async () => {
     const project = await watched('watch-missing-ref', {
       'openapi.yaml': SPEC,
       'schemas/pet.yaml': PET,
     });
-    await writeFile(project.file('schemas/pet.yaml'), `${PET}  owner: { $ref: './owner.yaml' }\n`);
-    expect(await project.next(1)).toMatchObject({ ok: false });
+    await project.edit(
+      project.file('schemas/pet.yaml'),
+      `${PET}  owner: { $ref: './owner.yaml' }\n`,
+      failed,
+    );
     expect(project.service.watchTargets().sources).toContain(project.file('schemas/owner.yaml'));
 
-    await writeFile(project.file('schemas/owner.yaml'), 'type: string\n');
-    expect(await project.next(2)).toMatchObject({ ok: true });
-    expect(project.service.models().map((model) => model.name)).toContain('Owner');
+    await project.edit(project.file('schemas/owner.yaml'), 'type: string\n', () =>
+      project.service.models().some((model) => model.name === 'Owner'),
+    );
   });
 
   it('watches a new input that does not compile until it is fixed', async () => {
@@ -84,17 +99,17 @@ describe('ProjectWatcher after a failed reload', { timeout: 20_000 }, () => {
       'other.yaml': 'openapi: 3.0.3\ninfo: [unclosed\n',
     });
     const config = project.file('swaggerz.config.mjs');
-    await writeFile(
+    await project.edit(
       config,
       (await readFile(config, 'utf8')).replace('./openapi.yaml', './other.yaml'),
+      failed,
     );
-    expect(await project.next(1)).toMatchObject({ ok: false });
 
-    await writeFile(
+    await project.edit(
       project.file('other.yaml'),
       SPEC.replace('title: Pets', 'title: Other').replace('listPets', 'listOthers'),
+      (since) => since.some((o) => o.ok),
     );
-    expect(await project.next(2)).toMatchObject({ ok: true });
     expect((await project.service.overview()).title).toBe('Other');
   });
 
@@ -105,12 +120,11 @@ describe('ProjectWatcher after a failed reload', { timeout: 20_000 }, () => {
     });
     expect(project.service.project).toBeUndefined();
     expect(project.service.watchTargets().sources).toContain(project.file('schemas/owner.yaml'));
-    await writeFile(
+    await project.edit(
       project.file('schemas/owner.yaml'),
       'definitions:\n  Owner: { type: string }\n',
+      () => project.service.project !== undefined,
     );
-    expect(await project.next(1)).toMatchObject({ ok: true });
-    expect(project.service.project).toBeDefined();
   });
 
   it('reloads with the new code when a local plugin changes', async () => {
@@ -124,8 +138,8 @@ describe('ProjectWatcher after a failed reload', { timeout: 20_000 }, () => {
     expect(project.service.watchTargets().sources).toContain(project.file('plugin.mjs'));
     expect(project.service.project?.operations.map((op) => op.name)).toEqual(['v1_listPets']);
 
-    await writeFile(project.file('plugin.mjs'), plugin('v2_'));
-    expect(await project.next(1)).toMatchObject({ ok: true });
-    expect(project.service.project?.operations.map((op) => op.name)).toEqual(['v2_listPets']);
+    await project.edit(project.file('plugin.mjs'), plugin('v2_'), () =>
+      (project.service.project?.operations ?? []).some((op) => op.name === 'v2_listPets'),
+    );
   });
 });

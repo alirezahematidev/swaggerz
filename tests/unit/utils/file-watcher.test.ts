@@ -1,7 +1,9 @@
+import { EventEmitter } from 'node:events';
+import type { FSWatcher } from 'node:fs';
 import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileWatcher } from '../../../src/utils/file-watcher.ts';
 
 let directory: string | undefined;
@@ -89,5 +91,39 @@ describe('FileWatcher', () => {
     await writeFile(`${file}.tmp`, 'b');
     await rename(`${file}.tmp`, file);
     expect(await next()).toEqual([file]);
+  });
+
+  it('reports the files of a directory whose watcher fails, as on Windows when it is removed', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'swaggerz-watch-'));
+    directory = root;
+    const manifest = path.join(root, 'out', 'api', '.manifest.json');
+    await mkdir(path.dirname(manifest), { recursive: true });
+    await writeFile(manifest, '{}');
+    const platform = new Map<string, EventEmitter>();
+    const changes: (readonly string[])[] = [];
+    watcher = new FileWatcher({
+      debounceMs: 20,
+      onChange: (changed) => {
+        changes.push(changed);
+      },
+      watch: (watched) => {
+        const fake = Object.assign(new EventEmitter(), { close: () => undefined });
+        platform.set(watched, fake);
+        return fake as unknown as FSWatcher;
+      },
+    });
+    watcher.set([manifest]);
+    expect([...platform.keys()]).toEqual([path.dirname(manifest)]);
+
+    // `clean` removed the directory; Windows reports EPERM instead of the deletions.
+    await rm(path.join(root, 'out'), { recursive: true, force: true });
+    platform
+      .get(path.dirname(manifest))
+      ?.emit('error', Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    await vi.waitFor(() => {
+      expect(changes).toEqual([[manifest]]);
+    });
+    // Watched again from the nearest directory that exists.
+    expect(platform.has(root)).toBe(true);
   });
 });

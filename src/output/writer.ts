@@ -117,21 +117,49 @@ type Existing =
   | { readonly state: 'blocked'; readonly reason: string }
   | { readonly state: 'unreadable'; readonly error: unknown };
 
-/** The first ancestor of `file` (output-relative) that exists but is not a directory. */
-async function blockingAncestor(directory: string, file: string): Promise<string> {
+/** What each output-relative directory path is, looked up once per planning run. */
+type DirectoryKinds = Map<string, Promise<'directory' | 'missing' | 'other'>>;
+
+function kindOf(
+  directory: string,
+  relative: string,
+  kinds: DirectoryKinds,
+): Promise<'directory' | 'missing' | 'other'> {
+  let kind = kinds.get(relative);
+  if (kind === undefined) {
+    kind = stat(path.join(directory, relative)).then(
+      (info) => (info.isDirectory() ? 'directory' : 'other'),
+      () => 'missing' as const,
+    );
+    kinds.set(relative, kind);
+  }
+  return kind;
+}
+
+/**
+ * The first ancestor of `file` (output-relative) that exists but is not a directory, if any.
+ * Windows reports a path below such a file as missing (`ENOENT`), not `ENOTDIR`.
+ */
+async function blockingAncestor(
+  directory: string,
+  file: string,
+  kinds: DirectoryKinds,
+): Promise<string | undefined> {
   const segments = file.split('/');
   for (let index = 1; index < segments.length; index++) {
     const relative = segments.slice(0, index).join('/');
-    try {
-      if (!(await stat(path.join(directory, relative))).isDirectory()) return relative;
-    } catch {
-      break;
-    }
+    const kind = await kindOf(directory, relative, kinds);
+    if (kind === 'other') return relative;
+    if (kind === 'missing') return undefined;
   }
-  return path.posix.dirname(file);
+  return undefined;
 }
 
-async function inspect(directory: string, file: string): Promise<Existing> {
+async function inspect(
+  directory: string,
+  file: string,
+  kinds: DirectoryKinds = new Map(),
+): Promise<Existing> {
   const target = path.join(directory, file);
   try {
     const info = await stat(target);
@@ -141,14 +169,13 @@ async function inspect(directory: string, file: string): Promise<Existing> {
     return { state: 'file', content: await readFile(target, 'utf8') };
   } catch (error) {
     const code = errorCode(error);
-    if (code === 'ENOENT') return { state: 'missing' };
-    if (code === 'ENOTDIR') {
-      return {
-        state: 'blocked',
-        reason: `${await blockingAncestor(directory, file)} is a file, not a directory`,
-      };
-    }
-    return { state: 'unreadable', error };
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return { state: 'unreadable', error };
+    const blocker = await blockingAncestor(directory, file, kinds);
+    if (blocker === undefined && code === 'ENOENT') return { state: 'missing' };
+    return {
+      state: 'blocked',
+      reason: `${blocker ?? path.posix.dirname(file)} is a file, not a directory`,
+    };
   }
 }
 
@@ -241,6 +268,7 @@ export async function planWrite(
   const notes: Diagnostic[] = [];
   const nextFiles: Record<string, string> = {};
   const produced = new Set(files.map((file) => file.path));
+  const kinds: DirectoryKinds = new Map();
 
   // Owned files whose path differs from a generated path only in letter case.
   const producedByCase = new Map(files.map((file) => [foldCase(file.path), file.path]));
@@ -265,7 +293,7 @@ export async function planWrite(
       changes.push({ path: file.path, kind: 'create', after: file.content });
       continue;
     }
-    const existing = await inspect(directory, file.path);
+    const existing = await inspect(directory, file.path, kinds);
     if (existing.state === 'missing') {
       changes.push({ path: file.path, kind: 'create', after: file.content });
     } else if (existing.state === 'blocked') {
@@ -295,7 +323,7 @@ export async function planWrite(
   for (const [file, hash] of [...owned.entries()].sort(([a], [b]) => compareStrings(a, b))) {
     if (produced.has(file)) continue;
     const target = path.join(directory, file);
-    const existing = await inspect(directory, file);
+    const existing = await inspect(directory, file, kinds);
     if (caseRenamed.has(file)) {
       changes.push({
         path: file,
@@ -334,7 +362,7 @@ export async function planWrite(
   const manifestPath = path.join(directory, MANIFEST_FILENAME);
   let manifestExists = previous !== undefined;
   if (!manifestExists) {
-    const existing = await inspect(directory, MANIFEST_FILENAME);
+    const existing = await inspect(directory, MANIFEST_FILENAME, kinds);
     if (existing.state === 'blocked')
       conflicts.push(blockedConflict(MANIFEST_FILENAME, manifestPath, existing.reason));
     manifestExists = existing.state !== 'missing';
@@ -590,6 +618,7 @@ export async function cleanOutput(
   if (manifest === undefined) return { deleted: [], kept: [], errors: [] };
   const candidates: string[] = [];
   const kept: Diagnostic[] = [];
+  const kinds: DirectoryKinds = new Map();
   const keptFiles = new Set<string>();
   const failure = (message: string): CleanResult => ({
     deleted: [],
@@ -607,7 +636,7 @@ export async function cleanOutput(
     compareStrings(a, b),
   )) {
     const target = path.join(directory, file);
-    const existing = await inspect(directory, file);
+    const existing = await inspect(directory, file, kinds);
     if (existing.state === 'missing' || existing.state === 'blocked') continue;
     if (existing.state === 'unreadable')
       return failure(`Could not read ${file}: ${errorMessage(existing.error)}`);
