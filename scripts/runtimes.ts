@@ -29,6 +29,8 @@ const SUITE = path.join(ROOT, 'tests', 'runtimes');
 const TOOLS = path.join(ROOT, '.runtimes');
 
 /** Exact versions installed when a runtime is not on PATH. */
+// Playwright: keep in step with the Playwright image of the `browsers` job in .github/workflows/ci.yml,
+// whose browsers this version then finds instead of downloading them.
 const VERSIONS = { deno: '2.9.6', bun: '1.3.13', playwright: '1.64.1', miniflare: '4.20260730.0' };
 const ALL = ['node', 'deno', 'bun', 'chromium', 'firefox', 'webkit', 'workerd'] as const;
 type Runtime = (typeof ALL)[number];
