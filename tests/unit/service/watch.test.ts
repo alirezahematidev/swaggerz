@@ -1,6 +1,8 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
+import type { FSWatcher } from 'node:fs';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProjectService, type ReloadOutcome } from '../../../src/service/project.ts';
 import { ProjectWatcher } from '../../../src/service/watch.ts';
 import { createProject } from '../../support/project.ts';
@@ -141,5 +143,43 @@ describe('ProjectWatcher after a failed reload', { timeout: 30_000 }, () => {
     await project.edit(project.file('plugin.mjs'), plugin('v2_'), () =>
       (project.service.project?.operations ?? []).some((op) => op.name === 'v2_listPets'),
     );
+  });
+});
+
+describe('ProjectWatcher and the output directory', () => {
+  it('notices a generation and a clean that no file event reports, as on Windows', async () => {
+    const directory = await createProject('watch-output-check', {
+      config: { spec: { version: '3.0', input: './openapi.yaml' } },
+      files: { 'openapi.yaml': SPEC, 'schemas/pet.yaml': PET },
+    });
+    const service = new ProjectService({ cwd: directory, env: {} });
+    await service.reload('start');
+    const changes: number[] = [];
+    const watcher = new ProjectWatcher(
+      service,
+      { outputChanged: (revision) => changes.push(revision) },
+      {
+        manifestCheckMs: 50,
+        // Platform watchers that never report anything.
+        watch: () =>
+          Object.assign(new EventEmitter(), { close: () => undefined }) as unknown as FSWatcher,
+      },
+    );
+    watcher.start();
+    closers.push(() => watcher.close());
+    const { manifest } = service.watchTargets();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(changes).toEqual([]);
+
+    await mkdir(path.dirname(manifest), { recursive: true });
+    await writeFile(manifest, '{}');
+    await vi.waitFor(() => {
+      expect(changes).toHaveLength(1);
+    });
+
+    await rm(path.dirname(manifest), { recursive: true, force: true });
+    await vi.waitFor(() => {
+      expect(changes).toHaveLength(2);
+    });
   });
 });

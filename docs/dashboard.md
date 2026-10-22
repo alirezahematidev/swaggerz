@@ -10,7 +10,7 @@ The dashboard compiles the specification with the same pipeline as `generate` an
 
 ## Live reload
 
-While the dashboard runs, it watches the config file, local plugin modules, every local document of the specification (including files reached through external `$ref`s), remote documents served from your machine, and the output manifest. Open pages update without a restart:
+While the dashboard runs, it watches the config file, local plugin modules, every local document of the specification (including files reached through external `$ref`s), remote documents served from your machine, and the output manifest (also checked every 2 seconds, since file events do not always arrive). Open pages update without a restart:
 
 - **Editing the specification or the config** recompiles it and refreshes whatever is on screen, keeping the selection, the open tab and the scroll position. A notification says what changed ("1 new operation, 2 updated models").
 - **Generating** (from the CLI, an editor task or the Generate page) refreshes the generation status.
