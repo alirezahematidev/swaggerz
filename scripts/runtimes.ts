@@ -189,7 +189,14 @@ async function playwright(): Promise<Record<'chromium' | 'firefox' | 'webkit', P
   execFileSync(
     process.execPath,
     [cli, 'install', ...(installDeps ? ['--with-deps'] : []), ...browsers],
-    { cwd: TOOLS, stdio: 'inherit' },
+    {
+      cwd: TOOLS,
+      stdio: 'inherit',
+      // System packages are installed with apt: never wait for an answer, and fail with a message
+      // instead of running into the CI job's time limit.
+      env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' },
+      timeout: 15 * 60_000,
+    },
   );
   return require('playwright') as Record<'chromium' | 'firefox' | 'webkit', PlaywrightBrowser>;
 }
