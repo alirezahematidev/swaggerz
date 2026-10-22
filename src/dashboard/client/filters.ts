@@ -1,4 +1,4 @@
-import type { ModelSummary, OperationSummary } from '../api-types.ts';
+import type { ModelSummary, OperationSummary } from '../../service/types.ts';
 
 export interface OperationFilter {
   readonly query: string;

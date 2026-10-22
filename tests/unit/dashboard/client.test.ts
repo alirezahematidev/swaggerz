@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ModelSummary, OperationSummary } from '../../../src/dashboard/api-types.ts';
+import type { ModelSummary, OperationSummary } from '../../../src/service/types.ts';
 import { filterModels, filterOperations, tokenize } from '../../../src/dashboard/client/filters.ts';
 import { href, parseRoute } from '../../../src/dashboard/client/routes.ts';
 

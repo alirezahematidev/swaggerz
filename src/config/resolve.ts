@@ -1,7 +1,7 @@
 import path from 'node:path';
 import type { SwaggerzPlugin } from '../plugins/types.ts';
-import type { ResolvedConfig } from './resolved.ts';
-import type { UserConfig } from './types.ts';
+import type { ResolvedConfig, ResolvedDataFetching } from './resolved.ts';
+import type { DataFetchingConfig, UserConfig } from './types.ts';
 
 export const DEFAULT_OUTPUT_DIRECTORY = './src/generated/api';
 export const DEFAULT_DASHBOARD_PORT = 4400;
@@ -38,8 +38,22 @@ export function resolveConfig(
     ]
   ).map((dir) => path.resolve(root, dir));
 
+  // `reactQuery` is an alias of `query` with the React adapter; validation rejects both at once.
   const reactQuery = config.features?.reactQuery ?? false;
+  const query =
+    config.features?.query ??
+    (reactQuery === false
+      ? false
+      : reactQuery === true
+        ? true
+        : { ...reactQuery, framework: 'react' });
+  const swr = config.features?.swr ?? false;
   const validation = config.features?.validation ?? false;
+  const dataFetching = (settings: DataFetchingConfig | true): ResolvedDataFetching => ({
+    queryMethods: (settings === true ? undefined : settings.queryMethods) ?? ['get', 'query'],
+    infinite: (settings === true ? undefined : settings.infinite) ?? {},
+    invalidates: (settings === true ? undefined : settings.invalidates) ?? {},
+  });
 
   return {
     root,
@@ -59,6 +73,9 @@ export function resolveConfig(
         maxBytes: config.spec.fetch?.maxBytes ?? 50 * 1024 * 1024,
         poll: resolvePoll(config.spec.fetch?.poll),
       },
+      overlays: (config.spec.overlays ?? []).map((overlay) =>
+        isRemoteUrl(overlay) ? overlay : path.resolve(root, overlay),
+      ),
     },
     output: {
       directory: path.resolve(root, config.output?.directory ?? DEFAULT_OUTPUT_DIRECTORY),
@@ -84,25 +101,24 @@ export function resolveConfig(
     },
     features: {
       jsdoc: config.features?.jsdoc ?? true,
-      reactQuery:
-        reactQuery === false
+      query:
+        query === false
           ? false
           : {
-              queryMethods: (reactQuery === true ? undefined : reactQuery.queryMethods) ?? [
-                'get',
-                'query',
-              ],
-              infinite: (reactQuery === true ? undefined : reactQuery.infinite) ?? {},
-              invalidates: (reactQuery === true ? undefined : reactQuery.invalidates) ?? {},
+              framework: (query === true ? undefined : query.framework) ?? 'react',
+              ...dataFetching(query),
             },
+      swr: swr === false ? false : dataFetching(swr),
       validation:
         validation === false
           ? false
-          : {
-              library: 'zod',
-              response: (validation === 'zod' ? undefined : validation.response) ?? true,
-              request: (validation === 'zod' ? undefined : validation.request) ?? false,
-            },
+          : typeof validation === 'string'
+            ? { library: validation, response: true, request: false }
+            : {
+                library: validation.library,
+                response: validation.response ?? true,
+                request: validation.request ?? false,
+              },
     },
     naming: {
       operations: config.naming?.operations ?? 'camelCase',
@@ -126,6 +142,7 @@ export function resolveConfig(
         exclude: config.dashboard?.usage?.exclude ?? [],
       },
     },
+    lint: { rules: config.lint?.rules ?? {} },
   };
 }
 

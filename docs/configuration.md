@@ -10,7 +10,7 @@ export default defineConfig({
 });
 ```
 
-A config can also export a function receiving `{ command }` (`'generate'`, `'validate'`, `'dashboard'`, …), synchronously or asynchronously:
+A config can also export a function receiving `{ command }` (`'generate'`, `'validate'`, `'lint'`, `'dashboard'`, `'mcp'`, …), synchronously or asynchronously:
 
 ```ts
 export default defineConfig(async ({ command }) => ({
@@ -63,6 +63,7 @@ Data configs cannot contain functions, so inline `hooks` are only available in T
 | `fetch.timeout`  | `number` (ms)                                | `30000`    | Per request.                                                                                          |
 | `fetch.maxBytes` | `number`                                     | `52428800` | Maximum document size.                                                                                |
 | `fetch.poll`     | `boolean \| number` (ms)                     | loopback   | Poll remote documents for changes while watching; see below.                                          |
+| `overlays`       | `string[]`                                   | `[]`       | [Overlay](overlays.md) documents (paths relative to the config file, or URLs) applied in order.       |
 
 `generate --watch` and the dashboard poll remote documents (an `http(s)` input and remote `$ref` targets) for changes: every `fetch.poll` milliseconds after the previous round, with conditional requests (`If-None-Match`, `If-Modified-Since`) under the same rules as loading them (credentials only to the origin of `input`, redirect checks, `timeout`, `maxBytes`). Servers that send no `ETag` or `Last-Modified` are compared by content, so an unchanged document never triggers a regeneration. A changed document regenerates (or reloads the dashboard) like a changed file; a server that is down is reported once and polled until it is back.
 
@@ -96,7 +97,7 @@ External `$ref`s are resolved according to a policy:
 | `declarations`    | `boolean`                      | `true`                  | JavaScript only: `.d.ts` next to each module. Runtime modules always have declarations.                                                                            |
 | `importExtension` | `'.js' \| '.ts' \| 'none'`     | `'.js'`                 | `.js` works with Node ESM, TypeScript `nodenext`/`bundler` and all major bundlers. `.ts` requires `allowImportingTsExtensions`. `none` suits older webpack setups. |
 | `clean`           | `boolean`                      | `true`                  | Delete generated files that are no longer produced (never hand-edited ones).                                                                                       |
-| `barrel`          | `boolean`                      | `true`                  | `index`, `react-query/index`, `zod/index`.                                                                                                                         |
+| `barrel`          | `boolean`                      | `true`                  | `index`, plus `<hooks library>/index` and `<schema library>/index` when enabled.                                                                                   |
 | `groupBy`         | `'tag' \| 'none'`              | `'tag'`                 | Operation directories by first tag (`default` when untagged; nested OpenAPI 3.2 tags in nested directories, `pets/cats`) or a single `operations/` directory.      |
 | `models`          | `'all' \| 'used'`              | `'all'`                 | `'used'` omits schemas no operation references.                                                                                                                    |
 | `webhooks`        | `boolean`                      | `true`                  | Payload, response and handler types for webhooks (`webhooks/`) and callbacks (`callbacks/`). See [generated code](generated-code.md#webhooks-and-callbacks).       |
@@ -117,11 +118,13 @@ External `$ref`s are resolved according to a policy:
 
 ## `features`
 
-| Option       | Default |                                                                                                                                                                                                                                                                                                           |
-| ------------ | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `jsdoc`      | `true`  | Documentation comments (deprecations are always kept).                                                                                                                                                                                                                                                    |
-| `reactQuery` | `false` | `true`, or `{ queryMethods?: HttpMethod[] /* default ['get', 'query'] */; infinite?: Record<name, { pageParam }>; invalidates?: Record<name, string[]> }`. Keys are generated operation names or `operationId`s; invalidation targets are operation names/ids or tags. See [React Query](react-query.md). |
-| `validation` | `false` | `'zod'` or `{ library: 'zod'; response?: boolean (true); request?: boolean (false) }`.                                                                                                                                                                                                                    |
+| Option       | Default |                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------ | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `jsdoc`      | `true`  | Documentation comments (deprecations are always kept).                                                                                                                                                                                                                                                                                                                                           |
+| `query`      | `false` | `true` (React), or `{ framework?: 'react' \| 'vue' \| 'svelte' \| 'solid' /* default 'react' */; queryMethods?: HttpMethod[] /* default ['get', 'query'] */; infinite?: Record<name, { pageParam }>; invalidates?: Record<name, string[]> }`. Keys are generated operation names or `operationId`s; invalidation targets are operation names/ids or tags. See [data fetching](data-fetching.md). |
+| `reactQuery` | `false` | Alias of `query` with `framework: 'react'` (same options except `framework`). Set either `query` or `reactQuery`.                                                                                                                                                                                                                                                                                |
+| `swr`        | `false` | `true`, or `{ queryMethods?, infinite?, invalidates? }` as for `query`: SWR hooks. Cannot be combined with `query`/`reactQuery`.                                                                                                                                                                                                                                                                 |
+| `validation` | `false` | `'zod'`, `'valibot'`, `'arktype'`, or `{ library: 'zod' \| 'valibot' \| 'arktype'; response?: boolean (true); request?: boolean (false) }`.                                                                                                                                                                                                                                                      |
 
 ## `naming`
 
@@ -155,6 +158,12 @@ Operation names come from `operationId`, or from the method and path (`GET /pets
 | `allowNetworkAccess` | `false`       |                                                                                                         |
 | `usage.include`      | `['src']`     | Directories or files scanned for usage.                                                                 |
 | `usage.exclude`      | `[]`          | Path fragments to skip (`node_modules`, build directories and the output directory are always skipped). |
+
+## `lint`
+
+| Option  | Default | Description                                                                                                                                                                                            |
+| ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `rules` | `{}`    | Severity per rule of `swaggerz lint`: `'off'`, `'info'`, `'warning'` or `'error'`, e.g. `{ 'operation-id': 'error', 'unused-model': 'off' }`. Unknown rule names are rejected. See [linting](lint.md). |
 
 ## `plugins` and `hooks`
 

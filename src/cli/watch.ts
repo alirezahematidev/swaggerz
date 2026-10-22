@@ -9,8 +9,9 @@ import { EXIT, option, relative, type CommandContext } from './context.ts';
 const DEBOUNCE_MS = 120;
 
 /**
- * Watches the config file and every local document of the specification (including external
- * `$ref` targets), polls remote documents (`spec.fetch.poll`), and regenerates on change.
+ * Watches the config file, every local document of the specification (including external
+ * `$ref` targets) and local overlays, polls remote documents (`spec.fetch.poll`), and regenerates
+ * on change.
  * Failures are reported and watching continues.
  */
 export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
@@ -33,6 +34,8 @@ export async function watchAndRegenerate(ctx: CommandContext): Promise<number> {
       const files = new Set<string>(configFile === undefined ? [] : [configFile]);
       if (loaded.file !== undefined) files.add(loaded.file);
       if (!/^https?:/i.test(loaded.config.spec.input)) files.add(loaded.config.spec.input);
+      for (const overlay of loaded.config.spec.overlays)
+        if (!/^https?:/i.test(overlay)) files.add(overlay);
       for (const doc of result.store?.documents ?? []) {
         if (doc.url.startsWith('file:')) files.add(doc.location);
       }

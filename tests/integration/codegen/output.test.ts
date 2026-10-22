@@ -16,7 +16,10 @@ describe('naming and escaping edge cases', () => {
       spec: { version: '3.0', input: fixture('edge-cases-3.0.yaml') },
       types: { enums: 'const' },
     });
-    const files = (await listFiles(directory, '.ts')).map((f) => path.relative(directory, f));
+    // Output-relative paths with `/`, as on every platform the manifest records them.
+    const files = (await listFiles(directory, '.ts')).map((f) =>
+      path.relative(directory, f).split(path.sep).join('/'),
+    );
     expect(files).toContain('items-things/list.ts');
     expect(files).toContain('items-things/list2.ts');
     expect(files).toContain('models-api/delete-items-by-id.ts');

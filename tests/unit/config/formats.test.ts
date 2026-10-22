@@ -56,7 +56,7 @@ describe('config file formats', () => {
       });
       expect(loaded.config.output.directory).toBe(path.join(dir, 'src', 'api'));
       expect(loaded.config.client.adapter).toBe('axios');
-      expect(loaded.config.features.reactQuery).not.toBe(false);
+      expect(loaded.config.features.query).toMatchObject({ framework: 'react' });
     }),
   );
 

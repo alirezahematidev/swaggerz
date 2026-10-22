@@ -1,0 +1,8 @@
+name: swaggerz
+queries:
+  - uses: security-extended
+paths-ignore:
+  # Specifications and generated or bundled code, not sources.
+  - fixtures
+  - dist
+  - '**/generated'

@@ -66,8 +66,8 @@ export interface SwaggerzPlugin {
   jsdoc?(block: JsDocBlock, target: JsDocTarget): JsDocBlock | void;
 
   /**
-   * Customize the static prefix of a React Query key. The request parameters are always
-   * appended as the final element.
+   * Customize the static prefix of a query key (TanStack Query or SWR hooks). The request
+   * parameters are always appended as the final element.
    */
   queryKey?(operation: OperationIR, prefix: readonly string[]): readonly string[] | void;
 

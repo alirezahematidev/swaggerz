@@ -5,7 +5,7 @@ import type {
   GenerateResponse,
   PreviewChange,
   PreviewResponse,
-} from '../../api-types.ts';
+} from '../../../service/types.ts';
 import { api, useResource } from '../api.ts';
 import { Async } from '../components/async.tsx';
 import { DiagnosticsList } from '../components/diagnostics.tsx';

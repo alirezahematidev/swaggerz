@@ -18,27 +18,27 @@ The sources are run directly by Node.js (type stripping): `node src/cli/bin.ts g
 
 ## Scripts
 
-| Script                                                | Purpose                                                                                                   |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `pnpm typecheck`                                      | Type-checks the sources, the runtime templates (browser-only lib), the dashboard client and its tests     |
-| `pnpm lint` / `pnpm format`                           | oxlint (type-aware rules via oxlint-tsgolint) / oxfmt                                                     |
-| `pnpm test`, `test:unit`, `test:integration`          | Vitest; the global setup builds the runtime templates and the dashboard bundle                            |
-| `pnpm test:smoke`                                     | Generates a JavaScript client and runs it on the current Node.js (CI runs it on Node.js 18–24)            |
-| `pnpm test:runtimes [runtime…]`                       | Runs generated clients in Node.js, Deno, Bun, Chromium, Firefox, WebKit and workerd (installed on demand) |
-| `pnpm corpus [name…] [--update]`                      | Compiles and type-checks 24 public API descriptions and compares the diagnostics with a baseline          |
-| `pnpm test:pack`                                      | Packs the tarball and uses it in a fresh project: `init`, `generate`, `tsc`, a real request, the API      |
-| `pnpm compat`                                         | Type-checks generated clients with the oldest and newest supported TypeScript, React Query, axios, Zod    |
-| `pnpm bench`                                          | Compiler benchmarks on synthetic specifications ([docs/benchmarks.md](docs/benchmarks.md))                |
-| `pnpm example:<name>`, `pnpm example <name> [script]` | Builds swaggerz, generates the example's client and runs it (`dev`/`start`) or the given script           |
-| `pnpm examples:check`                                 | Builds swaggerz, then generates and type-checks every example                                             |
-| `node scripts/verify-examples.ts`                     | Installs the packed tarball into each example and runs its `generate`, `check` and `start` scripts        |
+| Script                                                | Purpose                                                                                                                           |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm typecheck`                                      | Type-checks the sources, the runtime templates (browser-only lib), the dashboard client and its tests                             |
+| `pnpm lint` / `pnpm format`                           | oxlint (type-aware rules via oxlint-tsgolint) / oxfmt                                                                             |
+| `pnpm test`, `test:unit`, `test:integration`          | Vitest; the global setup builds the runtime templates and the dashboard bundle                                                    |
+| `pnpm test:smoke`                                     | Generates a JavaScript client and runs it on the current Node.js (CI runs it on Node.js 18–24)                                    |
+| `pnpm test:runtimes [runtime…]`                       | Runs generated clients in Node.js, Deno, Bun, Chromium, Firefox, WebKit and workerd (installed on demand)                         |
+| `pnpm corpus [name…] [--update]`                      | Compiles and type-checks 24 public API descriptions and compares the diagnostics with a baseline                                  |
+| `pnpm test:pack`                                      | Packs the tarball and uses it in a fresh project: `init`, `generate`, `tsc`, a real request, the API                              |
+| `pnpm compat`                                         | Type-checks generated clients with the oldest supported TypeScript, TanStack Query adapters, SWR, axios, Zod, Valibot and ArkType |
+| `pnpm bench`                                          | Compiler benchmarks on synthetic specifications ([docs/benchmarks.md](docs/benchmarks.md))                                        |
+| `pnpm example:<name>`, `pnpm example <name> [script]` | Builds swaggerz, generates the example's client and runs it (`dev`/`start`) or the given script                                   |
+| `pnpm examples:check`                                 | Builds swaggerz, then generates and type-checks every example                                                                     |
+| `node scripts/verify-examples.ts`                     | Installs the packed tarball into each example and runs its `generate`, `check` and `start` scripts                                |
 
 `test:pack`, `compat`, `test:runtimes`, `corpus` and `verify-examples` download packages or documents (network).
 
 ## Tests
 
 - **Unit tests** (`tests/unit`) cover the parser, naming, the dependency graph, printers, the diff algorithm, serialization and config validation.
-- **Integration tests** (`tests/integration`) generate clients from the fixtures and then type-check them with the TypeScript compiler API under the strictest settings, run them against a local HTTP server, render React Query hooks with Testing Library, bundle them with esbuild, Rollup and Vite to verify tree-shaking, drive the CLI as a subprocess and exercise the dashboard server and UI.
+- **Integration tests** (`tests/integration`) generate clients from the fixtures and then type-check them with the TypeScript compiler API under the strictest settings, run them against a local HTTP server, render React Query and SWR hooks with Testing Library, run Vue Query composables, drive the MCP server with the official SDK clients, bundle them with esbuild, Rollup and Vite to verify tree-shaking, drive the CLI as a subprocess and exercise the dashboard server and UI.
 
 Guidelines:
 
@@ -78,15 +78,19 @@ Pushing the `v<version>` tag starts the release workflow, which:
 
 1. checks that the tag matches the `package.json` version and points to a commit on `main`;
 2. builds and runs `pnpm check` and `pnpm test:pack`;
-3. publishes to npm with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) and provenance, using the `next` dist-tag for pre-releases;
+3. publishes to npm with provenance, using the `next` dist-tag for pre-releases. npm authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) when it is configured for the workflow, and otherwise with the `NPM_TOKEN` repository secret;
 4. creates the GitHub release with that version's section of `CHANGELOG.md`.
 
 `publishConfig.provenance` is set, so `npm publish` fails outside a supported CI environment — an additional guard against accidental local publishing.
 
-Before the first release, a maintainer must:
+The first version, `0.1.0`, already has its changelog entry, so it is tagged by hand once `main` is green: `git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0`. The workflow publishes it with `NPM_TOKEN` (an npm granular access token with read and write access to the package). Afterwards, configure the package's trusted publisher on npmjs.com (this repository, workflow `release.yml`, environment `npm`) and delete the token, so no long-lived credential is left. Later releases use `pnpm release`.
 
-- create the `alirezahematidev/swaggerz` repository (or update `repository` in `package.json`, the guard in `release.yml` and the links in `.github/ISSUE_TEMPLATE/config.yml`);
-- configure the package's trusted publisher on npmjs.com for this repository and the `release.yml` workflow, and create the `npm` environment in the repository settings (add required reviewers to gate publishing);
-- tag the first version by hand, since `0.1.0` and its changelog entry already exist: `git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0`. Later releases use `pnpm release`.
+## Repository settings
 
-npm configures trusted publishers in the settings of an existing package. If the name is not registered yet, a maintainer publishes the first version once by hand from a clean checkout of the `v0.1.0` tag (`pnpm check`, `pnpm test:pack`, then `npm publish --provenance=false`), configures the trusted publisher, and only then pushes the tag; the workflow skips versions that are already on npm. Every later version goes through the workflow.
+The workflows in `.github/workflows` check every change: `ci.yml` (tests on Linux, macOS and Windows, generated clients in every runtime, the corpus, oldest and newest dependencies, the packed package, the examples; the `CI passed` job sums them up), `codeql.yml` (code scanning), `dependency-review.yml` (vulnerable or copyleft dependencies in pull requests), `scorecard.yml` (OpenSSF Scorecard) and `zizmor.yml` (audits the workflows). Actions are pinned to commit SHAs, checkouts do not keep credentials, and every job has least-privilege permissions; Dependabot updates actions and npm dependencies after a cooldown.
+
+Settings that live outside the repository, configured once by an admin:
+
+- **Rulesets** (Settings → Rules → Rulesets → New ruleset → Import a ruleset): [`.github/rulesets/main.json`](.github/rulesets/main.json) protects `main` — pull requests with one approval from a code owner, resolved conversations, squash merges, linear and signed history, no force pushes or deletion, and the required checks `CI passed`, CodeQL and dependency review; [`.github/rulesets/release-tags.json`](.github/rulesets/release-tags.json) lets only admins create, move or delete `v*` tags, which trigger publishing. Repository admins can bypass both, so a maintainer can push release commits and tags.
+- **Advanced Security** (Settings → Advanced Security): dependency graph, Dependabot alerts and security updates, secret scanning with push protection, and private vulnerability reporting (see [SECURITY.md](SECURITY.md)). Code scanning uses `codeql.yml`, so leave CodeQL's default setup off.
+- **Environment** `npm` (Settings → Environments): optionally add required reviewers to approve each publish.

@@ -6,11 +6,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SwaggerzError } from '../diagnostics/bag.ts';
 import { TOOL_NAME } from '../meta.ts';
-import { FileWatcher } from '../utils/file-watcher.ts';
 import { isLoopback } from '../utils/net.ts';
-import { RemoteWatcher } from '../loader/remote-watcher.ts';
-import type { ServerEvent } from './api-types.ts';
-import { DashboardState } from './state.ts';
+import type { ServerEvent } from '../service/types.ts';
+import { ProjectService } from '../service/project.ts';
+import { ProjectWatcher } from '../service/watch.ts';
 
 export interface DashboardOptions {
   readonly cwd: string;
@@ -32,7 +31,7 @@ export interface DashboardServer {
   readonly url: string;
   readonly origin: string;
   readonly token: string;
-  readonly state: DashboardState;
+  readonly state: ProjectService;
   close(): Promise<void>;
 }
 
@@ -173,7 +172,7 @@ function tokenMatches(expected: string, header: string | undefined): boolean {
 
 /** Starts the local dashboard server. Throws `SwaggerzError` for configuration problems. */
 export async function startDashboard(options: DashboardOptions): Promise<DashboardServer> {
-  const state = new DashboardState({
+  const state = new ProjectService({
     cwd: options.cwd,
     env: options.env,
     ...(options.configFile === undefined ? {} : { configFile: options.configFile }),
@@ -202,28 +201,17 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     for (const client of clients) client.write(message);
   };
 
-  let watcher: FileWatcher | undefined;
-  let remote: RemoteWatcher | undefined;
-  const watchFiles = (): void => {
-    if (watcher === undefined) return;
-    const { sources, manifest, remote: polled, interval } = state.watchTargets();
-    watcher.set([...sources, manifest]);
-    remote?.set(polled, interval);
-    state.setWatching([...sources, ...polled.map((document) => document.url)]);
-  };
-  // Reloads from the file watcher, the remote watcher and the Reload button never overlap.
-  let queue: Promise<unknown> = Promise.resolve();
-  const serial = <T>(task: () => Promise<T>): Promise<T> => {
-    const next = queue.then(task);
-    queue = next.catch(() => undefined);
-    return next;
-  };
-  const reloadAfterChange = (changed: readonly string[]): Promise<void> =>
-    serial(async () => {
-      const outcome = await state.reload('watch', changed);
-      watchFiles();
-      broadcast({ type: 'reload', trigger: 'watch', ...outcome });
-    });
+  const watcher = new ProjectWatcher(state, {
+    reloaded: (outcome, trigger) => {
+      broadcast({ type: 'reload', trigger, ...outcome });
+    },
+    outputChanged: (revision) => {
+      broadcast({ type: 'output', revision });
+    },
+    remote: (event) => {
+      broadcast({ type: 'remote', ...event });
+    },
+  });
 
   const api: Record<string, (req: IncomingMessage, url: URL) => Promise<unknown>> = {
     'GET /api/overview': () => state.overview(),
@@ -258,13 +246,10 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
       }
       return state.generate();
     },
-    'POST /api/reload': () =>
-      serial(async () => {
-        const outcome = await state.reload('manual');
-        watchFiles();
-        broadcast({ type: 'reload', trigger: 'manual', ...outcome });
-        return state.overview();
-      }),
+    'POST /api/reload': async () => {
+      await watcher.reload('manual');
+      return state.overview();
+    },
   };
 
   const assets = assetIndex();
@@ -379,37 +364,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     for (const client of clients) client.write(': heartbeat\n\n');
   }, HEARTBEAT_MS);
   heartbeat.unref();
-  if (options.watch !== false) {
-    watcher = new FileWatcher({
-      debounceMs: 150,
-      onChange: async (files) => {
-        const { manifest } = state.watchTargets();
-        const sources = files.filter((file) => file !== manifest);
-        if (sources.length === 0) {
-          broadcast({ type: 'output', revision: state.outputChanged() });
-          return;
-        }
-        await reloadAfterChange(sources);
-      },
-    });
-    remote = new RemoteWatcher({
-      onChange: reloadAfterChange,
-      onError: (url, error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        broadcast({
-          type: 'remote',
-          revision: state.remoteFailed(url, message),
-          url,
-          reachable: false,
-          error: message,
-        });
-      },
-      onRecover: (url) => {
-        broadcast({ type: 'remote', revision: state.remoteRecovered(url), url, reachable: true });
-      },
-    });
-    watchFiles();
-  }
+  if (options.watch !== false) watcher.start();
 
   return {
     url: `${origin}/?token=${token}`,
@@ -418,7 +373,7 @@ export async function startDashboard(options: DashboardOptions): Promise<Dashboa
     state,
     close: async () => {
       clearInterval(heartbeat);
-      await Promise.all([watcher?.close(), remote?.close()]);
+      await watcher.close();
       for (const client of clients) client.end();
       clients.clear();
       await new Promise<void>((resolve, reject) => {

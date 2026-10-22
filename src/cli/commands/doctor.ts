@@ -1,5 +1,7 @@
 import { access, constants } from 'node:fs/promises';
 import path from 'node:path';
+import { dataFetching } from '../../analysis/project.ts';
+import { QUERY_LABELS, QUERY_PACKAGES } from '../../codegen/query/index.ts';
 import type { LoadedConfig } from '../../config/load.ts';
 import { SwaggerzError } from '../../diagnostics/bag.ts';
 import { formatDiagnostic } from '../../diagnostics/format.ts';
@@ -24,25 +26,45 @@ interface Check {
 export const PEER_REQUIREMENTS = {
   axios: '1.0.0',
   '@tanstack/react-query': '5.0.0',
+  '@tanstack/vue-query': '5.0.0',
+  '@tanstack/svelte-query': '6.0.0',
+  '@tanstack/solid-query': '5.0.0',
   react: '18.0.0',
+  // `toValue` and `MaybeRefOrGetter` are Vue 3.3 additions.
+  vue: '3.3.0',
+  svelte: '5.0.0',
+  'solid-js': '1.8.0',
+  // The generic order of SWR's mutation types changed in 2.2.
+  swr: '2.2.0',
   typescript: '5.0.0',
   // Recursive getter schemas fail to type-check with Zod 4.0.0-4.0.14 on TypeScript 6+.
   zod: '4.0.15',
+  valibot: '1.0.0',
+  arktype: '2.0.0',
 } as const;
 
 const MINIMUM_NODE = '22.18.0';
 
+/** The UI framework each data-fetching library needs next to it. */
+const FRAMEWORK_PACKAGES = {
+  'react-query': 'react',
+  'vue-query': 'vue',
+  'svelte-query': 'svelte',
+  'solid-query': 'solid-js',
+  swr: 'react',
+} as const;
+
 /** Packages checked with a minimum version rather than a same-major (caret) range. */
-const MINIMUM_ONLY = new Set<string>(['react', 'typescript']);
+const MINIMUM_ONLY = new Set<string>(['react', 'typescript', 'solid-js']);
 
 async function dependencyCheck(
   name: keyof typeof PEER_REQUIREMENTS,
   root: string,
   required: boolean,
   reason: string,
+  minimum: string = PEER_REQUIREMENTS[name],
 ): Promise<Check> {
   const version = await installedVersion(name, root);
-  const minimum = PEER_REQUIREMENTS[name];
   const range = MINIMUM_ONLY.has(name) ? `>=${minimum}` : `^${minimum}`;
   if (version === undefined) {
     return {
@@ -160,17 +182,31 @@ async function runChecks(ctx: CommandContext): Promise<Check[]> {
   const root = config.root;
   if (config.client.adapter === 'axios')
     checks.push(await dependencyCheck('axios', root, true, 'required by the axios adapter'));
-  if (config.features.reactQuery !== false) {
-    checks.push(
-      await dependencyCheck('@tanstack/react-query', root, true, 'required by React Query hooks'),
-    );
-    checks.push(await dependencyCheck('react', root, true, 'required by React Query hooks'));
+  const fetching = dataFetching(config);
+  if (fetching !== undefined) {
+    const reason = `required by ${QUERY_LABELS[fetching.library]} hooks`;
+    const framework = FRAMEWORK_PACKAGES[fetching.library];
+    checks.push(await dependencyCheck(QUERY_PACKAGES[fetching.library], root, true, reason));
+    checks.push(await dependencyCheck(framework, root, true, reason));
   }
-  if (config.features.validation !== false)
-    checks.push(await dependencyCheck('zod', root, true, 'required by Zod schemas'));
-  if (config.output.language === 'typescript') {
+  const validation = config.features.validation;
+  if (validation !== false)
     checks.push(
-      await dependencyCheck('typescript', root, false, 'used to compile the generated client'),
+      await dependencyCheck(validation.library, root, true, 'required by the generated schemas'),
+    );
+  if (config.output.language === 'typescript') {
+    // ArkType's types need TypeScript 5.4 (verified by `pnpm compat`).
+    const arktype = validation !== false && validation.library === 'arktype';
+    checks.push(
+      await dependencyCheck(
+        'typescript',
+        root,
+        false,
+        arktype
+          ? 'used to compile the generated client; ArkType needs 5.4'
+          : 'used to compile the generated client',
+        arktype ? '5.4.0' : PEER_REQUIREMENTS.typescript,
+      ),
     );
   }
   return checks;

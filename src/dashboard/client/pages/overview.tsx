@@ -1,6 +1,6 @@
 import { ArrowUpRight, Boxes, FileCode2, Route, ShieldCheck } from 'lucide-react';
 import type { ReactNode } from 'react';
-import type { ChangedItem, OverviewResponse, SessionInfo } from '../../api-types.ts';
+import type { ChangedItem, OverviewResponse, SessionInfo } from '../../../service/types.ts';
 import { ChangeBadge } from '../components/change.tsx';
 import { DiagnosticsList } from '../components/diagnostics.tsx';
 import { MetaList, Mono, PageHeader, Stat } from '../components/page.tsx';
@@ -299,8 +299,12 @@ export function Overview({ data }: { data: OverviewResponse }) {
                     <Mono>{data.config.output}</Mono>
                     <Badge tone="outline">{data.config.language}</Badge>
                     <Badge tone="outline">{data.config.adapter}</Badge>
-                    {data.config.reactQuery ? <Badge tone="outline">React Query</Badge> : null}
-                    {data.config.validation === 'zod' ? <Badge tone="outline">Zod</Badge> : null}
+                    {data.config.query === undefined ? null : (
+                      <Badge tone="outline">{data.config.query}</Badge>
+                    )}
+                    {data.config.validation === undefined ? null : (
+                      <Badge tone="outline">{data.config.validation}</Badge>
+                    )}
                   </span>,
                 ],
                 ['Input', <Mono key="i">{data.config.input}</Mono>],

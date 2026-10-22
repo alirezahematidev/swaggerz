@@ -1,4 +1,4 @@
-import type { SchemaIR } from '../../api-types.ts';
+import type { SchemaIR } from '../../../service/types.ts';
 import { cn } from '../lib/cn.ts';
 import { href } from '../router.ts';
 import { Badge } from './ui/badge.tsx';

@@ -1,4 +1,4 @@
-import type { ChangedItem, ReloadDelta, ServerEvent } from '../../api-types.ts';
+import type { ChangedItem, ReloadDelta, ServerEvent } from '../../../service/types.ts';
 import { cn } from '../lib/cn.ts';
 import { Badge } from './ui/badge.tsx';
 import type { ToastMessage } from './ui/toast.tsx';

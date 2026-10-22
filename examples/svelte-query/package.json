@@ -1,0 +1,24 @@
+{
+  "name": "swaggerz-example-svelte-query",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "swaggerz generate",
+    "dev": "vite",
+    "build": "vite build",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc -p tsconfig.node.json && vite build",
+    "dashboard": "swaggerz dashboard"
+  },
+  "dependencies": {
+    "@tanstack/svelte-query": "^6.3.0",
+    "svelte": "^5.46.4"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@types/node": "^24.0.0",
+    "svelte-check": "^4.7.0",
+    "swaggerz": "workspace:*",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.0"
+  }
+}

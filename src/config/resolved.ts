@@ -1,4 +1,12 @@
 import type { StandardHttpMethod } from '../ir/types.ts';
+import type { LintSeverity, QueryFramework, ValidationLibrary } from './types.ts';
+
+/** Resolved options of a data-fetching integration (TanStack Query or SWR). */
+export interface ResolvedDataFetching {
+  readonly queryMethods: readonly StandardHttpMethod[];
+  readonly infinite: Readonly<Record<string, { readonly pageParam: string }>>;
+  readonly invalidates: Readonly<Record<string, readonly string[]>>;
+}
 
 /**
  * Fully defaulted configuration used internally by the compiler. Paths are absolute.
@@ -26,6 +34,8 @@ export interface ResolvedConfig {
       /** Which remote documents are polled for changes while watching, and how often (ms). */
       readonly poll: { readonly hosts: 'loopback' | 'all' | 'none'; readonly interval: number };
     };
+    /** Overlay documents applied in order: absolute paths or URLs. */
+    readonly overlays: readonly string[];
   };
   readonly output: {
     /** Absolute path. */
@@ -52,16 +62,16 @@ export interface ResolvedConfig {
   };
   readonly features: {
     readonly jsdoc: boolean;
-    readonly reactQuery:
-      | false
-      | {
-          readonly queryMethods: readonly StandardHttpMethod[];
-          readonly infinite: Readonly<Record<string, { readonly pageParam: string }>>;
-          readonly invalidates: Readonly<Record<string, readonly string[]>>;
-        };
+    /** TanStack Query hooks (`features.query` or its alias `features.reactQuery`). */
+    readonly query: false | (ResolvedDataFetching & { readonly framework: QueryFramework });
+    readonly swr: false | ResolvedDataFetching;
     readonly validation:
       | false
-      | { readonly library: 'zod'; readonly response: boolean; readonly request: boolean };
+      | {
+          readonly library: ValidationLibrary;
+          readonly response: boolean;
+          readonly request: boolean;
+        };
   };
   readonly naming: {
     readonly operations: 'camelCase' | 'PascalCase' | 'snake_case' | 'preserve';
@@ -81,5 +91,9 @@ export interface ResolvedConfig {
     readonly port: number;
     readonly allowNetworkAccess: boolean;
     readonly usage: { readonly include: readonly string[]; readonly exclude: readonly string[] };
+  };
+  readonly lint: {
+    /** Severities configured per rule; rules not listed keep their defaults. */
+    readonly rules: Readonly<Record<string, LintSeverity>>;
   };
 }

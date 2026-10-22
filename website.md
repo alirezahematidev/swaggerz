@@ -33,8 +33,11 @@ Decision details:
   config-files            TypeScript, JavaScript, JSON and YAML configs; $schema; env overrides
 /docs/guides/
   fetch-and-axios         transports, middleware, timeouts, cancellation, errors
-  react-query             hooks, query keys, infinite queries, invalidation, bodiless (null) responses
-  zod                     validation of requests and responses
+  data-fetching           React, Vue, Svelte, Solid (TanStack Query) and SWR hooks, keys, infinite queries, invalidation
+  validation              Zod, Valibot and ArkType schemas, validation of requests and responses
+  overlays                patching third-party specifications
+  lint                    what in a specification makes the client worse
+  mcp                     the MCP server for coding agents
   dates                   types.dates: 'Date', revival and encoding
   read-write-models       readOnly/writeOnly split and Input models
   bodies-and-uploads      multiple media types, form data, binary, XML as string

@@ -1,6 +1,6 @@
 import { CircleAlert, Info, TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
-import type { Diagnostic } from '../../api-types.ts';
+import type { Diagnostic } from '../../../service/types.ts';
 import { cn } from '../lib/cn.ts';
 import { Empty } from './ui/states.tsx';
 import { TabCount, Tabs, TabsList, TabsTrigger } from './ui/tabs.tsx';

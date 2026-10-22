@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from '../config/resolved.ts';
+import type { ResolvedConfig, ResolvedDataFetching } from '../config/resolved.ts';
 import type { DiagnosticBag } from '../diagnostics/bag.ts';
 import {
   wireMethod,
@@ -23,7 +23,8 @@ import type {
   ModelSymbol,
   OperationSymbol,
   ProjectModel,
-  ReactQueryGroup,
+  QueryGroup,
+  QueryLibrary,
   WebhookSymbol,
 } from './types.ts';
 
@@ -41,11 +42,27 @@ const RESERVED_MODULE_ROOTS = [
   'runtime',
   'models',
   'react-query',
+  'vue-query',
+  'svelte-query',
+  'solid-query',
+  'swr',
   'zod',
+  'valibot',
+  'arktype',
   'webhooks',
   'callbacks',
   'dates',
 ];
+
+/** The enabled data-fetching integration and its options, if any. */
+export function dataFetching(
+  config: ResolvedConfig,
+): { readonly library: QueryLibrary; readonly options: ResolvedDataFetching } | undefined {
+  const { query, swr } = config.features;
+  if (query !== false) return { library: `${query.framework}-query`, options: query };
+  if (swr !== false) return { library: 'swr', options: swr };
+  return undefined;
+}
 
 export interface NamingHooks {
   operationName?: (operation: OperationIR, suggested: string) => string | undefined;
@@ -111,11 +128,12 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     const aliases = definition.aliases.map((alias) =>
       exports.claim(toIdentifier(alias, config.naming.models)),
     );
-    const validation = config.features.validation !== false;
-    const zodName = validation ? exports.claim(`${name}Schema`) : undefined;
-    const zodModule = validation
-      ? modules.claim(`zod/${toFileName(name, fileStyle)}`, '-')
-      : undefined;
+    const validation = config.features.validation;
+    const schemaName = validation === false ? undefined : exports.claim(`${name}Schema`);
+    const schemaModule =
+      validation === false
+        ? undefined
+        : modules.claim(`${validation.library}/${toFileName(name, fileStyle)}`, '-');
     const dates = withDates.has(definition.id)
       ? {
           datesName: exports.claim(`${name}Dates`),
@@ -129,8 +147,8 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       module,
       aliases,
       used: used.has(definition.id),
-      ...(zodName === undefined ? {} : { zodName }),
-      ...(zodModule === undefined ? {} : { zodModule }),
+      ...(schemaName === undefined ? {} : { schemaName }),
+      ...(schemaModule === undefined ? {} : { schemaModule }),
       ...dates,
     });
   }
@@ -138,7 +156,10 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
 
   // Operations -------------------------------------------------------------------------------
   const operations: OperationSymbol[] = [];
-  const reactQuery = config.features.reactQuery;
+  const fetching = dataFetching(config);
+  // Svelte and Solid name their primitives `createQuery`/`createMutation`; the others `use…`.
+  const createStyle = fetching?.library === 'svelte-query' || fetching?.library === 'solid-query';
+  const tanstack = fetching !== undefined && fetching.library !== 'swr';
   for (const operation of ir.operations) {
     const base = operation.operationId ?? nameFromPath(operation.method, operation.path);
     const suggested = toIdentifier(base, config.naming.operations);
@@ -174,14 +195,15 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       config.naming.parameters,
     );
 
-    let reactQuerySymbols: OperationSymbol['reactQuery'];
-    if (reactQuery !== false) {
-      const isQuery = (reactQuery.queryMethods as readonly string[]).includes(operation.method);
+    let querySymbols: OperationSymbol['query'];
+    if (fetching !== undefined) {
+      const settings = fetching.options;
+      const isQuery = (settings.queryMethods as readonly string[]).includes(operation.method);
       const infiniteConfig =
-        reactQuery.infinite[name] ??
+        settings.infinite[name] ??
         (operation.operationId === undefined
           ? undefined
-          : reactQuery.infinite[operation.operationId]);
+          : settings.infinite[operation.operationId]);
       const pageParam = isQuery
         ? resolvePageParam(operation, infiniteConfig?.pageParam, diagnostics)
         : undefined;
@@ -190,24 +212,35 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
         ...groupPrefix,
         name,
       ];
-      reactQuerySymbols = {
-        module: modules.claim(`react-query/${group}/${fileName}`, '-'),
-        hook: exports.claim(`use${pascal}`),
+      const hook = createStyle
+        ? `create${pascal}${isQuery ? 'Query' : 'Mutation'}`
+        : `use${pascal}`;
+      querySymbols = {
+        library: fetching.library,
+        module: modules.claim(`${fetching.library}/${group}/${fileName}`, '-'),
+        hook: exports.claim(hook),
         keyPrefix,
         ...(isQuery
           ? {
               queryKey: exports.claim(`${camel}QueryKey`),
               queryKeyType: exports.claim(`${pascal}QueryKey`),
-              queryOptions: exports.claim(`${camel}QueryOptions`),
+              // SWR has no option objects: the key and the fetcher are the hook's arguments.
+              ...(tanstack ? { queryOptions: exports.claim(`${camel}QueryOptions`) } : {}),
             }
-          : { mutationOptions: exports.claim(`${camel}MutationOptions`) }),
+          : tanstack
+            ? { mutationOptions: exports.claim(`${camel}MutationOptions`) }
+            : {}),
         ...(pageParam !== undefined
           ? {
               pageParam,
-              infiniteHook: exports.claim(`use${pascal}Infinite`),
+              infiniteHook: exports.claim(
+                createStyle ? `create${pascal}InfiniteQuery` : `use${pascal}Infinite`,
+              ),
               infiniteQueryKey: exports.claim(`${camel}InfiniteQueryKey`),
               infiniteQueryKeyType: exports.claim(`${pascal}InfiniteQueryKey`),
-              infiniteQueryOptions: exports.claim(`${camel}InfiniteQueryOptions`),
+              ...(tanstack
+                ? { infiniteQueryOptions: exports.claim(`${camel}InfiniteQueryOptions`) }
+                : {}),
               pageParamType: exports.claim(`${pascal}PageParam`),
             }
           : {}),
@@ -225,13 +258,13 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       parameterProperties: properties,
       bodyProperty: body,
       contentTypeProperty: contentType,
-      ...(reactQuerySymbols === undefined ? {} : { reactQuery: reactQuerySymbols }),
+      ...(querySymbols === undefined ? {} : { query: querySymbols }),
     });
   }
   operations.sort((a, b) => compareStrings(a.group, b.group) || compareStrings(a.name, b.name));
 
-  const reactQueryGroups: ReactQueryGroup[] = [];
-  if (reactQuery !== false && config.output.groupBy === 'tag') {
+  const queryGroups: QueryGroup[] = [];
+  if (fetching !== undefined && config.output.groupBy === 'tag') {
     // Every group with operations, and the groups of their parent tags (OpenAPI 3.2), whose
     // `all` key matches the queries of every nested group.
     const prefixes = new Map<string, readonly string[]>();
@@ -244,9 +277,9 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       });
     }
     for (const [group, prefix] of [...prefixes].sort(([a], [b]) => compareStrings(a, b))) {
-      reactQueryGroups.push({
+      queryGroups.push({
         group,
-        module: modules.claim(`react-query/${group}/keys`, '-'),
+        module: modules.claim(`${fetching.library}/${group}/keys`, '-'),
         // A valid identifier even for groups such as `1-click-applications`.
         name: exports.claim(toIdentifier(`${group} keys`, 'camelCase')),
         prefix,
@@ -303,7 +336,7 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
   }
 
   return {
-    reactQueryGroups,
+    queryGroups,
     webhooks,
     ir,
     graph,
@@ -355,7 +388,7 @@ function resolvePageParam(
   if (pageParam === undefined) return undefined;
   if (!operation.parameters.some((p) => p.in === 'query' && p.name === pageParam)) {
     diagnostics.error({
-      code: 'react-query/invalid-page-param',
+      code: 'query/invalid-page-param',
       message: `Infinite query for ${wireMethod(operation.method)} ${operation.path}: "${pageParam}" is not a query parameter of the operation.`,
       hint: `Use one of: ${
         operation.parameters

@@ -2,26 +2,27 @@
 
 ## Layout
 
-| Path                                                            | Content                                                                                    |
-| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `client.ts`                                                     | `client` (the default instance) and `RequestOptions`                                       |
-| `runtime/types.ts`                                              | Transport contract, client and option types                                                |
-| `runtime/client.ts`                                             | `createClient()` — URL building, auth, middleware, retries, error mapping                  |
-| `runtime/middleware.ts`                                         | `retry()` and `refreshAuth()` middleware (tree-shaken when unused)                         |
-| `runtime/serialization.ts`                                      | Parameter and body serialization                                                           |
-| `runtime/errors.ts`                                             | `ApiError`, `RequestError`, type guards                                                    |
-| `runtime/signal.ts`                                             | Timeout and signal composition                                                             |
-| `runtime/fetch.ts` or `runtime/axios.ts`                        | The selected transport                                                                     |
-| `runtime/dates.ts`                                              | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                              |
-| `models/<model>.ts`                                             | One type per schema (plus `const` enum objects when enabled)                               |
-| `models/<model>-input.ts`                                       | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`) |
-| `dates/<model>.ts`                                              | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                       |
-| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`  | Payload, request, response and handler types (`output.webhooks`)                           |
-| `<tag>/<operation>.ts`                                          | One function per operation with its types and an error guard (`isGetPetByIdApiError`)      |
-| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts` | Hooks, option factories, key factories                                                     |
-| `zod/<model>.ts`                                                | Zod schemas                                                                                |
-| `index.ts`, `react-query/index.ts`, `zod/index.ts`              | Barrels                                                                                    |
-| `.swaggerz-manifest.json`                                       | Generator ownership manifest                                                               |
+| Path                                                                | Content                                                                                                                                                     |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client.ts`                                                         | `client` (the default instance) and `RequestOptions`                                                                                                        |
+| `runtime/types.ts`                                                  | Transport contract, client and option types                                                                                                                 |
+| `runtime/client.ts`                                                 | `createClient()` — URL building, auth, middleware, retries, error mapping                                                                                   |
+| `runtime/middleware.ts`                                             | `retry()` and `refreshAuth()` middleware (tree-shaken when unused)                                                                                          |
+| `runtime/serialization.ts`                                          | Parameter and body serialization                                                                                                                            |
+| `runtime/errors.ts`                                                 | `ApiError`, `RequestError`, type guards                                                                                                                     |
+| `runtime/signal.ts`                                                 | Timeout and signal composition                                                                                                                              |
+| `runtime/fetch.ts` or `runtime/axios.ts`                            | The selected transport                                                                                                                                      |
+| `runtime/dates.ts`                                                  | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                                                                                               |
+| `models/<model>.ts`                                                 | One type per schema (plus `const` enum objects when enabled)                                                                                                |
+| `models/<model>-input.ts`                                           | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`)                                                                  |
+| `dates/<model>.ts`                                                  | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                                                                                        |
+| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`      | Payload, request, response and handler types (`output.webhooks`)                                                                                            |
+| `<tag>/<operation>.ts`                                              | One function per operation with its types and an error guard (`isGetPetByIdApiError`)                                                                       |
+| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts`     | Hooks, option factories, key factories ([data fetching](data-fetching.md)); `vue-query/`, `svelte-query/`, `solid-query/` or `swr/` for the other libraries |
+| `zod/<model>.ts`                                                    | Schemas ([validation](#validation)); `valibot/` or `arktype/` for the other libraries                                                                       |
+| `arktype/support.ts`                                                | ArkType only: the reference and intersection helpers the schemas use                                                                                        |
+| `index.ts`, `<hooks library>/index.ts`, `<schema library>/index.ts` | Barrels                                                                                                                                                     |
+| `.swaggerz-manifest.json`                                           | Generator ownership manifest                                                                                                                                |
 
 Every file starts with `/* eslint-disable */` and `// @generated by swaggerz. Do not edit…`. Output is deterministic: no timestamps or versions in files; the generator version is only recorded in the manifest.
 
@@ -95,13 +96,13 @@ export function addPet(params: AddPetParams, options?: RequestOptions): Promise<
 - **`style: cookie`** sends one cookie per array item or object property, separated by `; `, without percent-encoding (values must already be valid cookie values).
 - **Sequential media types** described only by `itemSchema` (`application/jsonl`, `application/x-ndjson`, `application/json-seq`, `text/event-stream`) are typed and read as text; the item models are generated so you can parse items yourself (`operation/item-schema`). Pass `parseAs: 'stream'` to read the body as it arrives.
 - **Nested tags.** With `output.groupBy: 'tag'`, an operation tagged `cats` whose tag has `parent: pets` lives in `pets/cats/`, and its React Query keys start with `['pets', 'cats']`, so invalidating `petsKeys.all` also invalidates the nested tag's queries.
-- **`discriminator.defaultMapping`**: the default schema is a union member without a discriminator value, for payloads without the property or with an unmapped value; Zod validation accepts them.
+- **`discriminator.defaultMapping`**: the default schema is a union member without a discriminator value, for payloads without the property or with an unmapped value; schema validation accepts them.
 
 ## Dates
 
 With `types.dates: 'Date'`, `format: date` and `format: date-time` strings are typed as `Date` everywhere: models, parameters, bodies, webhook payloads. For each model that contains dates, a `dates/<model>.ts` module describes where they are (`AccountDates`), and operations convert at the boundary:
 
-- responses: parsed JSON is validated first (when Zod validation is enabled, against the wire format: `z.iso.datetime({ offset: true })` / `z.iso.date()`), then strings become `Date` objects (`reviveDates`);
+- responses: parsed JSON is validated first (when validation is enabled, against the wire format: `z.iso.datetime({ offset: true })` / `z.iso.date()` with Zod, `v.isoTimestamp()` / `v.isoDate()` with Valibot, ISO dates with ArkType), then strings become `Date` objects (`reviveDates`);
 - requests: bodies and date parameters are encoded before validation and serialization (`date-time` → ISO string, `date` → `YYYY-MM-DD` in UTC).
 
 Unions, recursion, arrays, maps and discriminated subtypes are followed. Encoding copies the body (your objects are not modified) and passes through values that are not `Date` objects; reviving leaves strings that are not valid dates as strings.
@@ -124,6 +125,20 @@ export type AccountClosedWebhookHandler = (
 ```
 
 Callbacks are named after their operation and callback (`CreateAccountAccountEventCallbackHandler` in `callbacks/create-account-account-event.ts`). No server code is generated: use the types to annotate your own route handlers. They are exported from the main barrel.
+
+## Validation
+
+With `features.validation`, every model gets a schema module in the library's directory, exporting `<Model>Schema` typed with the model it validates (`unknown` for models containing dates with `types.dates: 'Date'`, whose schemas check the wire format):
+
+| Library | Module           | Schema type            | Objects                                                                   | References                                                     | Operation validation    |
+| ------- | ---------------- | ---------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------- |
+| Zod 4   | `zod/pet.ts`     | `z.ZodType<Pet>`       | `z.looseObject`, `z.strictObject`, `.catchall()`                          | Getters in objects, `z.lazy()` elsewhere                       | `Schema.parse(data)`    |
+| Valibot | `valibot/pet.ts` | `v.GenericSchema<Pet>` | `v.looseObject`, `v.strictObject`, `v.objectWithRest`; `v.exactOptional`  | `v.lazy()` with an explicitly typed getter                     | `v.parse(Schema, data)` |
+| ArkType | `arktype/pet.ts` | `Type<Pet>`            | `type({...})` (unknown keys kept), `.onUndeclaredKey('reject')`, `rest()` | `lazy()` from `arktype/support.ts`, resolved during validation | `Schema.assert(data)`   |
+
+All three keep unknown properties, enforce `additionalProperties: false` and typed additional properties, discriminators (including OpenAPI 3.2 default mappings), `minLength`/`maxLength`, numeric bounds and `multipleOf`, tuple items, and the assertions TypeScript cannot express (`not`, `if`/`then`/`else`, `dependentSchemas`, `dependentRequired`) as refinements (`.refine()`, `v.check()`, `.narrow()`). Formats and patterns are documentation only.
+
+ArkType resolves definitions eagerly and rejects contradictory intersections (`string & number`) when they are defined, which would make importing a module throw. The generated `arktype/support.ts` therefore provides `lazy()` (a reference resolved when data is validated, keeping the target's error paths), `allOf()` (an intersection that falls back to checking every member when ArkType cannot combine them) and `rest()` (typed additional properties). ArkType's types need TypeScript 5.4 or later.
 
 ## Runtime contract
 

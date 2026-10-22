@@ -5,20 +5,28 @@
   </picture>
 </h1>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/swaggerz"><img src="https://img.shields.io/npm/v/swaggerz" alt="npm version"></a>
+  <a href="https://github.com/alirezahematidev/swaggerz/actions/workflows/ci.yml"><img src="https://github.com/alirezahematidev/swaggerz/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/alirezahematidev/swaggerz"><img src="https://api.scorecard.dev/projects/github.com/alirezahematidev/swaggerz/badge" alt="OpenSSF Scorecard"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/npm/l/swaggerz" alt="MIT license"></a>
+</p>
+
 Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0**, **OpenAPI 3.0**, **3.1** and **3.2** specifications.
 
 - **One module per operation.** Applications bundle only the endpoints they import. Measured with esbuild, Rollup, Vite and webpack: one operation of a 1,000-operation client costs ~13 KB (shared runtime) + ~0.2 KB per extra operation.
 - **TypeScript or JavaScript.** Strict TypeScript, or plain ES modules with JSDoc and optional `.d.ts` files — same runtime behavior.
 - **Fetch or axios.** Interchangeable transports behind one contract; bring your own axios instance and interceptors.
-- **Optional TanStack Query v5 hooks**, query/mutation option factories, key factories, infinite queries and invalidation — never imported unless enabled.
-- **Optional Zod v4 schemas** and runtime validation of requests and responses.
+- **Optional data-fetching hooks**: TanStack Query v5 for **React, Vue, Svelte and Solid**, or **SWR** — option and key factories, infinite queries and invalidation, never imported unless enabled.
+- **Optional schemas and runtime validation** of requests and responses with **Zod 4, Valibot 1 or ArkType 2**.
+- **OpenAPI Overlays** (1.0–1.2) fix third-party specifications without forking them.
 - **Self-contained output.** The generated client has no runtime dependency on this package.
 - **Safe, deterministic regeneration.** Identical input produces identical output; unchanged files are not rewritten; files you own are never overwritten.
 - **Local dashboard** to explore operations, models, dependency graphs, static usage in your code and generation diffs.
+- **MCP server for coding agents**: Claude Code, Cursor and others look up the exact generated function, its types and an example call instead of guessing from the spec.
+- **A linter for what matters to the client**: missing operationIds, untyped responses, inline schemas and other things that make the generated code worse.
 - **Accurate types for what specs actually say**: separate request and response models for `readOnly`/`writeOnly`, every request media type, declared `304`s, per-operation servers, webhook and callback handler types, optional `Date` conversion.
 - **Plugin API** with typed lifecycle hooks; plugins can be referenced by module from any config format.
-
-> **Status: pre-release.** swaggerz has not been published to npm yet, so the install commands below will work once the first version is released ([CONTRIBUTING.md](CONTRIBUTING.md#releases)).
 
 ## Contents
 
@@ -29,8 +37,11 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - [CLI](#cli)
 - [Generated code](#generated-code)
 - [HTTP client: fetch and axios](#http-client-fetch-and-axios)
-- [React Query](#react-query)
-- [Runtime validation with Zod](#runtime-validation-with-zod)
+- [Data fetching: TanStack Query and SWR](#data-fetching-tanstack-query-and-swr)
+- [Runtime validation: Zod, Valibot, ArkType](#runtime-validation-zod-valibot-arktype)
+- [Overlays](#overlays)
+- [Linting](#linting)
+- [MCP server for coding agents](#mcp-server-for-coding-agents)
 - [Tree-shaking](#tree-shaking)
 - [JavaScript output and JSDoc](#javascript-output-and-jsdoc)
 - [Dashboard](#dashboard)
@@ -40,7 +51,7 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - [Security](#security)
 - [Contributing](#contributing)
 
-Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [React Query](docs/react-query.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover React with TanStack Query, a plain JavaScript Node.js project and custom plugins. Proposals for upcoming features ([next.md](next.md)) and the plan for a [docs website](website.md) are in the repository root.
+Detailed guides live in [`docs/`](docs): [architecture](docs/architecture.md), [design decisions](docs/decisions.md), [configuration](docs/configuration.md), [generated code](docs/generated-code.md), [data fetching](docs/data-fetching.md), [overlays](docs/overlays.md), [linting](docs/lint.md), [MCP server](docs/mcp.md), [plugins](docs/plugins.md), [dashboard](docs/dashboard.md), [compatibility](docs/compatibility.md), [diagnostics](docs/diagnostics.md), [benchmarks](docs/benchmarks.md) and the [roadmap](docs/roadmap.md). Runnable [examples](examples) cover TanStack Query for React, Vue, Svelte and Solid, SWR, Zod, Valibot and ArkType validation, a plain JavaScript Node.js project and custom plugins. The plan for a [docs website](website.md) is in the repository root.
 
 ## Supported specifications
 
@@ -66,12 +77,20 @@ npm install --save-dev swaggerz
 
 The generated client needs no runtime dependency on `swaggerz`. Depending on the options you enable, your application needs:
 
-| Option                       | Dependency                       | Tested versions |
-| ---------------------------- | -------------------------------- | --------------- |
-| `client.adapter: 'axios'`    | `axios`                          | 1.0.0 – 1.x     |
-| `features.reactQuery`        | `@tanstack/react-query`, `react` | 5.0.0 – 5.x     |
-| `features.validation: 'zod'` | `zod`                            | 4.0.15 – 4.x    |
-| TypeScript output            | `typescript`                     | 5.0 – 7.x       |
+| Option                                    | Dependency                          | Tested versions               |
+| ----------------------------------------- | ----------------------------------- | ----------------------------- |
+| `client.adapter: 'axios'`                 | `axios`                             | 1.0.0 – 1.x                   |
+| `features.query` (React, the default)     | `@tanstack/react-query`, `react`    | 5.0.0 – 5.x                   |
+| `features.query: { framework: 'vue' }`    | `@tanstack/vue-query`, `vue`        | 5.0.0 – 5.x, Vue 3.3+         |
+| `features.query: { framework: 'svelte' }` | `@tanstack/svelte-query`, `svelte`  | 6.0.0 – 6.x, Svelte 5.25+     |
+| `features.query: { framework: 'solid' }`  | `@tanstack/solid-query`, `solid-js` | 5.0.0 – 5.x                   |
+| `features.swr`                            | `swr`, `react`                      | 2.2.0 – 2.x                   |
+| `features.validation: 'zod'`              | `zod`                               | 4.0.15 – 4.x                  |
+| `features.validation: 'valibot'`          | `valibot`                           | 1.0.0 – 1.x                   |
+| `features.validation: 'arktype'`          | `arktype`                           | 2.0.0 – 2.x (TypeScript 5.4+) |
+| TypeScript output                         | `typescript`                        | 5.0 – 7.x                     |
+
+The CLI is installed as `swaggerz` and as the shorter alias `sz` (`npx sz generate`).
 
 ## Quick start
 
@@ -141,12 +160,13 @@ In TypeScript and JavaScript, `defineConfig()` gives full autocomplete and type 
 
 | Option                                                          | Default                                        | Description                                                                                |
 | --------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `spec.version`                                                  | — (required)                                   | `'2.0'`, `'3.0'`, `'3.1'` or `'auto'`                                                      |
+| `spec.version`                                                  | — (required)                                   | `'2.0'`, `'3.0'`, `'3.1'`, `'3.2'` or `'auto'`                                             |
 | `spec.input`                                                    | — (required)                                   | File path (relative to the config file) or `http(s)` URL                                   |
 | `spec.refs.external`                                            | `'local'`                                      | `'none'`, `'local'` (files in allowed directories) or `'remote'` (plus allow-listed hosts) |
 | `spec.refs.allowedDirectories`                                  | project root + spec directory                  | Directories external `$ref`s may read                                                      |
 | `spec.refs.allowedHosts`                                        | `[]`                                           | Hosts remote `$ref`s may fetch (`'*.example.com'` supported)                               |
 | `spec.fetch`                                                    | 30 s timeout, 50 MiB                           | `headers`, `timeout`, `maxBytes` for remote documents; `poll` for watching them            |
+| `spec.overlays`                                                 | `[]`                                           | [Overlay](#overlays) files or URLs applied in order before parsing                         |
 | `output.directory`                                              | `./src/generated/api`                          | Output directory                                                                           |
 | `output.language`                                               | `'typescript'`                                 | `'typescript'` or `'javascript'`                                                           |
 | `output.declarations`                                           | `true`                                         | Emit `.d.ts` next to JavaScript files                                                      |
@@ -162,8 +182,10 @@ In TypeScript and JavaScript, `defineConfig()` gives full autocomplete and type 
 | `client.operationServers`                                       | `true`                                         | Send operations with their own `servers` to that server                                    |
 | `client.headers`, `client.timeout`, `client.includeCredentials` | —                                              | Client defaults                                                                            |
 | `client.responseStyle`                                          | `'data'`                                       | `'data'` resolves with the body; `'full'` with `{ data, status, headers }`                 |
-| `features.reactQuery`                                           | `false`                                        | `true` or `{ queryMethods, infinite, invalidates }`                                        |
-| `features.validation`                                           | `false`                                        | `'zod'` or `{ library: 'zod', response, request }`                                         |
+| `features.query`                                                | `false`                                        | `true` (React) or `{ framework, queryMethods, infinite, invalidates }`                     |
+| `features.reactQuery`                                           | `false`                                        | Alias of `features.query` with `framework: 'react'`                                        |
+| `features.swr`                                                  | `false`                                        | `true` or `{ queryMethods, infinite, invalidates }` (not together with `query`)            |
+| `features.validation`                                           | `false`                                        | `'zod'`, `'valibot'`, `'arktype'` or `{ library, response, request }`                      |
 | `features.jsdoc`                                                | `true`                                         | Generate documentation comments                                                            |
 | `naming.operations` / `models` / `files` / `parameters`         | camelCase / PascalCase / kebab-case / preserve | Naming conventions                                                                         |
 | `naming.inputSuffix`                                            | `'Input'`                                      | Suffix of request-side model variants (`PetInput`)                                         |
@@ -172,6 +194,7 @@ In TypeScript and JavaScript, `defineConfig()` gives full autocomplete and type 
 | `types.readWrite`                                               | `'split'`                                      | Separate request (`…Input`) and response models, or `'merged'`                             |
 | `types.dates`                                                   | `'string'`                                     | `'Date'` types `date`/`date-time` as `Date` and converts at runtime                        |
 | `dashboard`                                                     | `127.0.0.1:4400`                               | `host`, `port`, `allowNetworkAccess`, `usage.include`/`exclude`                            |
+| `lint.rules`                                                    | —                                              | Severity per [lint rule](#linting): `'off'`, `'info'`, `'warning'` or `'error'`            |
 | `plugins`, `hooks`                                              | —                                              | Plugin objects or module references; see [plugins](#plugins-and-customization)             |
 
 Environment variables override the config file: `SWAGGERZ_SPEC_INPUT`, `SWAGGERZ_SPEC_VERSION`, `SWAGGERZ_OUTPUT_DIRECTORY`, `SWAGGERZ_OUTPUT_LANGUAGE`, `SWAGGERZ_CLIENT_ADAPTER`, `SWAGGERZ_CLIENT_BASE_URL`. The full reference is in [docs/configuration.md](docs/configuration.md).
@@ -181,13 +204,15 @@ Config files (and the plugins they reference) are **trusted project code** and r
 ## CLI
 
 ```
-swaggerz <command> [options]
+swaggerz <command> [options]        (alias: sz)
 
   init        Create a config file for this project (TypeScript, JavaScript, JSON or YAML).
   generate    Generate the API client from the specification.  (alias: gen)
   validate    Validate config and spec and generate in memory, without writing files.
+  lint        Report what in the specification makes the generated client worse.
   inspect     Print a summary of the operations and models that would be generated.
   dashboard   Start the local dashboard.
+  mcp         Run an MCP server on stdio for coding agents.
   clean       Remove generated files (only files recorded in the output manifest).
   doctor      Check Node.js, config, spec, output directory and dependency versions.
 ```
@@ -206,6 +231,8 @@ swaggerz <command> [options]
 | `--no-clean`                                                                                              | `generate`          | Keep generated files that are no longer produced                                                        |
 | `--operations`, `--models`, `--filter <text>`                                                             | `inspect`           | Narrow the listing                                                                                      |
 | `--host`, `--port`, `--open`, `--no-watch`                                                                | `dashboard`         | Bind address, browser opening, live reload off                                                          |
+| `--max-warnings <n>`, `--rules`                                                                           | `lint`              | Fail above n warnings; list the rules and their severities                                              |
+| `--allow-write`, `--no-watch`                                                                             | `mcp`               | Offer the `generate` tool; do not reload on changes                                                     |
 | `--spec`, `--spec-version`, `--output`, `--language`, `--adapter`, `--react-query`, `--format`, `--force` | `init`              | Initial values; `--format ts\|js\|json\|yaml` picks the config format                                   |
 
 Exit codes: `0` success · `1` failed checks, invalid specification or generation errors · `2` invalid usage or configuration · `3` internal error.
@@ -222,9 +249,9 @@ src/generated/api/
 ├── models/pet.ts            # one module per model (plus pet-input.ts for readOnly/writeOnly)
 ├── pet/get-pet-by-id.ts     # one module per operation, grouped by tag
 ├── webhooks/, callbacks/     # payload and handler types
-├── react-query/             # only when enabled (separate barrel)
-├── zod/                     # only when enabled (separate barrel)
-└── .swaggerz-manifest.json      # files owned by the generator (with content hashes)
+├── react-query/             # hooks when enabled: or vue-query/, svelte-query/, solid-query/, swr/
+├── zod/                     # schemas when enabled: or valibot/, arktype/ (separate barrel)
+└── .swaggerz-manifest.json  # files owned by the generator (with content hashes)
 ```
 
 An operation module (abridged):
@@ -371,21 +398,31 @@ client.setConfig({ transport: createAxiosTransport(http) });
 
 HTTP errors still reject with `ApiError`; the `AxiosError` is preserved as `error.cause` and the `AxiosResponse` as `error.response`. Only the selected adapter is generated, so axios is never bundled with the fetch adapter. Bodies are serialized by the generated runtime before reaching axios.
 
-## React Query
+## Data fetching: TanStack Query and SWR
 
-Enable TanStack Query v5 support:
+Enable TanStack Query v5 hooks for React (the default), Vue, Svelte or Solid, or SWR hooks:
 
 ```ts
 features: {
-  reactQuery: {
+  query: {
+    framework: 'react',                                    // 'react' | 'vue' | 'svelte' | 'solid'
     queryMethods: ['get', 'query'],                        // default
     infinite: { listPets: { pageParam: 'cursor' } },       // infinite query hooks
     invalidates: { createPet: ['listPets'], deletePet: ['pet'] }, // operation names or tags
   },
+  // or: swr: { infinite: …, invalidates: … }
 },
 ```
 
-For each query operation: `use<Name>(params, options?, queryClient?)`, `<name>QueryOptions(params, requestOptions?)`, `<name>QueryKey(params)`; for mutations: `use<Name>(options?, queryClient?)` and `<name>MutationOptions()`; per tag, a key factory such as `petKeys.all`.
+`features.reactQuery` still works as an alias of `query` with the React adapter. For each query operation the generator emits a key function (`getPetByIdQueryKey`), an option factory for `queryClient.fetchQuery` and prefetching (`getPetByIdQueryOptions`) and a hook; for mutations a hook and `addPetMutationOptions`; per tag, a key factory such as `petKeys.all`.
+
+| Library      | Directory       | Query                                                 | Mutation                               | Parameters and options         |
+| ------------ | --------------- | ----------------------------------------------------- | -------------------------------------- | ------------------------------ |
+| React Query  | `react-query/`  | `useGetPetById(params, options?, client?)`            | `useAddPet(options?, client?)`         | Values                         |
+| Vue Query    | `vue-query/`    | `useGetPetById(params, options?, client?)`            | `useAddPet(options?, client?)`         | Values, refs or getters        |
+| Svelte Query | `svelte-query/` | `createGetPetByIdQuery(() => params, () => options?)` | `createAddPetMutation(() => options?)` | Accessors (runes)              |
+| Solid Query  | `solid-query/`  | `createGetPetByIdQuery(() => params, () => options?)` | `createAddPetMutation(() => options?)` | Accessors (signals)            |
+| SWR          | `swr/`          | `useGetPetById(params, options?)`                     | `useAddPet(options?)` (`trigger`)      | Values; `enabled: false` skips |
 
 ```tsx
 import {
@@ -406,15 +443,68 @@ const addPet = useAddPet({
 await queryClient.prefetchQuery(getPetByIdQueryOptions({ petId: 1 }));
 ```
 
-Query keys contain a static prefix (tag, operation) and **all** request parameters, so different parameters never share cache entries. React Query's `AbortSignal` is passed to the request, so cancelled queries cancel the HTTP request. `TData` is inferred from `select`, and errors are typed as the operation's `ApiError` union (narrowed by `status`) or `RequestError`. Hooks live in `react-query/`; operation modules and the main barrel never import React. See [docs/react-query.md](docs/react-query.md).
+```ts
+// Vue: parameters follow refs and getters
+const id = ref(1);
+const { data } = useGetPetById(() => ({ petId: id.value }));
+// Svelte 5 and Solid: accessors are read reactively
+const pet = createGetPetByIdQuery(() => ({ petId }));
+// SWR
+const { data, error } = useGetPetById({ petId: 1 });
+const { trigger } = useAddPet();
+```
 
-## Runtime validation with Zod
+Query keys contain a static prefix (tag, operation) and **all** request parameters, so different parameters never share cache entries. TanStack Query's `AbortSignal` is passed to the request, so cancelled queries cancel the HTTP request. `TData` is inferred from `select`, and errors are typed as the operation's `ApiError` union (narrowed by `status`) or `RequestError`. Hooks live in their own directory; operation modules and the main barrel never import a UI framework. See [docs/data-fetching.md](docs/data-fetching.md).
+
+## Runtime validation: Zod, Valibot, ArkType
 
 ```ts
 features: { validation: { library: 'zod', response: true, request: true } },
+// library: 'zod' (4) | 'valibot' (1) | 'arktype' (2); or simply validation: 'valibot'
 ```
 
-Generates `zod/<model>.ts` (`PetSchema`, …) and validates successful responses (and request bodies when `request: true`) in every operation. Failures reject with `RequestError` (`kind: 'validation'`, `cause` = `ZodError`); invalid request bodies are never sent. Unknown properties are preserved (`z.looseObject`); `additionalProperties: false` is enforced, and so are `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` (which TypeScript types cannot express). Formats and patterns are documentation only, except `date`/`date-time` with `types.dates: 'Date'`, which are checked before conversion. Recursive and mutually recursive schemas use Zod 4 getters. Zod is only imported by `zod/` modules and, when validation is enabled, by operations.
+Generates `<library>/<model>.ts` (`PetSchema`, …) and validates successful responses (and request bodies when `request: true`) in every operation. Failures reject with `RequestError` (`kind: 'validation'`, `cause` = the library's error: `ZodError`, `ValiError` or ArkType's `TraversalError`); invalid request bodies are never sent. Unknown properties are preserved; `additionalProperties: false` is enforced, and so are `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` (which TypeScript types cannot express). Formats and patterns are documentation only, except `date`/`date-time` with `types.dates: 'Date'`, which are checked before conversion. Recursive and mutually recursive schemas are supported by all three libraries. Each schema is typed with the model it validates (`ZodType<Pet>`, `GenericSchema<Pet>`, `Type<Pet>`). The library is only imported by its directory and, when validation is enabled, by operations.
+
+## Overlays
+
+[OpenAPI Overlays](https://spec.openapis.org/overlay/latest) patch a specification you do not own — a missing `operationId`, a wrong type, an internal endpoint to hide — in a separate file that keeps working when the upstream document changes:
+
+```ts
+spec: { version: '3.1', input: 'https://api.example.com/openapi.json', overlays: ['./fixes.overlay.yaml'] },
+```
+
+```yaml
+overlay: 1.1.0
+info: { title: Fixes, version: 1.0.0 }
+actions:
+  - target: $.paths['/internal/metrics']
+    remove: true
+  - target: $.paths['/pets'].get
+    update: { operationId: listPets }
+  - target: $..[?@.format == 'int64']
+    update: { format: int32 }
+```
+
+Overlay Specification 1.0, 1.1 (`copy`, primitive targets) and 1.2 (reusable actions) are supported for Swagger 2.0 and every OpenAPI version, with RFC 9535 JSONPath (filters and functions included). Overlays apply to the root document before anything else reads it; local overlay files are watched like the specification. Targets that match nothing are reported with the line in the overlay. See [docs/overlays.md](docs/overlays.md).
+
+## Linting
+
+```sh
+npx swaggerz lint                    # findings as warnings and notes
+npx swaggerz lint --max-warnings 0   # fail CI on warnings
+```
+
+`swaggerz lint` reports the compiler's diagnostics plus what in the specification makes the generated client worse: operations without an `operationId` (their names change when the path does), success responses without a schema (`unknown`), inline request and response objects, untyped or duplicate schemas, unused models, undeclared tags and missing servers. It is not a style linter — Spectral and Redocly cover that. Severities are configurable with `lint.rules`; see [docs/lint.md](docs/lint.md).
+
+## MCP server for coding agents
+
+`swaggerz mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server for Claude Code, Cursor, Copilot and other agents. It answers from the same compiled project as the generated code, so agents call the client correctly instead of guessing from the spec:
+
+```json
+{ "mcpServers": { "swaggerz": { "command": "npx", "args": ["swaggerz", "mcp"] } } }
+```
+
+Tools: `api_overview`, `find_operations`, `get_operation` (the exact declaration, import line and an example call), `get_model`, `check`, `preview_generation`, `find_usages`, and `generate` with `--allow-write` (after the user confirms, when the client can ask). Operations and models are also resources (`swaggerz://operations/getPetById`), updated live when the specification changes. Protocol versions 2026-07-28 (stateless) and 2025-11-25 back to 2024-11-05 are supported, with no extra dependency. See [docs/mcp.md](docs/mcp.md).
 
 ## Tree-shaking
 
@@ -531,7 +621,7 @@ Hooks: `beforeParse`, `afterNormalize`, `operationName`, `modelName`, `jsdoc`, `
 
 - `int64` maps to `number`; values beyond 2^53 lose precision when the response JSON is parsed.
 - XML bodies are not serialized or parsed: requests take an already serialized string (or `Blob`/`ArrayBuffer`), responses return text.
-- `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are enforced by the generated Zod schemas but cannot be expressed in TypeScript types, which may be wider than the schema. `$dynamicRef` and `$recursiveRef` are ignored with a warning.
+- `not`, `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` are enforced by the generated schemas but cannot be expressed in TypeScript types, which may be wider than the schema. `$dynamicRef` and `$recursiveRef` are ignored with a warning.
 - Webhooks and callbacks produce types only; no server or routing code is generated.
 - Watch mode recompiles the whole specification on change (only changed files are written).
 - OpenAPI 3.2 sequential media types (`itemSchema`: JSON Lines, server-sent events) are read and typed as text; typed streaming is not generated yet.
@@ -545,6 +635,7 @@ Earlier versions of this list included `readOnly`/`writeOnly` handling, `Date` c
 - External `$ref`s are restricted by default to the project and spec directories; remote references need an explicit host allow-list, redirects are re-checked, credentials from `spec.fetch.headers` are only sent to the origin of `spec.input`, and remote documents may never reference local files.
 - The writer only overwrites or deletes files it owns (manifest), refuses unsafe output directories (the project root, the config or spec file) and refuses to write through symbolic links that leave the output directory.
 - The dashboard binds to loopback, requires a per-session token, rejects foreign `Host` and `Origin` headers, uses a strict Content Security Policy and renders spec content as text.
+- The MCP server only reads unless started with `--allow-write`; `generate` keeps the manifest rules and asks the user first when the client supports it. Text from the specification is returned in fields marked as data, never as instructions.
 - Config files and plugins are trusted code.
 
 Report vulnerabilities as described in [SECURITY.md](SECURITY.md).

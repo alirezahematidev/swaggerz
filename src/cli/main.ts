@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { SwaggerzError } from '../diagnostics/bag.ts';
-import { PACKAGE_NAME, PACKAGE_VERSION, TOOL_NAME } from '../meta.ts';
+import { PACKAGE_NAME, PACKAGE_VERSION, TOOL_ALIASES, TOOL_NAME } from '../meta.ts';
 import { suggest } from '../utils/strings.ts';
 import { commandHelp, parseCommandArgs, UsageError } from './args.ts';
 import { cleanCommand } from './commands/clean.ts';
@@ -9,6 +9,8 @@ import { doctorCommand } from './commands/doctor.ts';
 import { generateCommand } from './commands/generate.ts';
 import { initCommand } from './commands/init.ts';
 import { inspectCommand } from './commands/inspect.ts';
+import { lintCommand } from './commands/lint.ts';
+import { mcpCommand } from './commands/mcp.ts';
 import { validateCommand } from './commands/validate.ts';
 import { EXIT, type Command } from './context.ts';
 import { Reporter } from './reporter.ts';
@@ -17,8 +19,10 @@ export const COMMANDS: readonly Command[] = [
   initCommand,
   generateCommand,
   validateCommand,
+  lintCommand,
   inspectCommand,
   dashboardCommand,
+  mcpCommand,
   cleanCommand,
   doctorCommand,
 ];
@@ -38,6 +42,7 @@ function generalHelp(): string {
     `${TOOL_NAME} ${PACKAGE_VERSION} — typed API clients from Swagger/OpenAPI specifications`,
     '',
     `Usage: ${TOOL_NAME} <command> [options]`,
+    ...(TOOL_ALIASES.length === 0 ? [] : [`Alias: ${TOOL_ALIASES.join(', ')}`]),
     '',
     'Commands:',
     ...COMMANDS.map((c) => `  ${c.spec.name.padEnd(width)}  ${c.spec.summary}`),

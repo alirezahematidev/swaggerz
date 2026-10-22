@@ -19,7 +19,7 @@ import { literal, propertyAccess, propertyKey, quote, renderJsDoc } from './prin
 import { printType, type TypeContext } from './type-printer.ts';
 import type { GeneratedExport, JsDocBlock, JsDocTag } from './types.ts';
 import { combinedDateShape, dateShape } from './dates.ts';
-import { requestValidator, responseValidator } from './zod.ts';
+import { requestValidation, responseValidation, validatorFor } from './validation/index.ts';
 
 /** Bodies of media types the runtime cannot serialize are passed already encoded. */
 const RAW_BODY = 'string | Blob | ArrayBuffer | ArrayBufferView';
@@ -501,20 +501,19 @@ export function generateOperation(plan: OperationPlan, ctx: EmitContext): Module
       const method = full ? 'send' : 'request';
       const typeArg = lang === 'ts' ? `<${names.response}>` : '';
       const validation = ctx.config.features.validation;
+      const validator = validatorFor(ctx);
       const validators: string[] = [];
-      if (validation !== false && validation.request && plan.body !== undefined) {
-        const optionalParams = plan.hasParams && !plan.paramsRequired;
-        const selected = selectedMediaType(plan.body, (property) =>
-          propertyAccess('params', property, optionalParams),
-        );
-        validators.push(
-          `validateBody: (body) => ${requestValidator(plan, imports, ctx, selected) ?? ''}.parse(body)`,
-        );
-      }
-      if (validation !== false && validation.response) {
-        validators.push(
-          `validateResponse: (data) => ${responseValidator(plan, imports, ctx)}.parse(data)`,
-        );
+      if (validator !== undefined && validation !== false) {
+        if (validation.request && plan.body !== undefined) {
+          const optionalParams = plan.hasParams && !plan.paramsRequired;
+          const selected = selectedMediaType(plan.body, (property) =>
+            propertyAccess('params', property, optionalParams),
+          );
+          const validate = requestValidation(plan, imports, ctx, validator, selected);
+          if (validate !== undefined) validators.push(`validateBody: ${validate}`);
+        }
+        if (validation.response)
+          validators.push(`validateResponse: ${responseValidation(plan, imports, ctx, validator)}`);
       }
       const conversions: string[] = [];
       const parameterShapes = new Map<ParameterIR, string>();

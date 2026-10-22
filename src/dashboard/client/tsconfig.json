@@ -18,5 +18,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": [".", "../api-types.ts"]
+  "include": [".", "../../service/types.ts"]
 }

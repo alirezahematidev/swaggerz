@@ -1,6 +1,6 @@
 import { Boxes, Code2, GitFork, ListTree, Route } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
-import type { ModelDetail, ModelSummary } from '../../api-types.ts';
+import type { ModelDetail, ModelSummary } from '../../../service/types.ts';
 import { ApiRequestError, useResource } from '../api.ts';
 import { Async } from '../components/async.tsx';
 import { ChangeBadge } from '../components/change.tsx';

@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from '../config/resolved.ts';
 import type { DiagnosticBag } from '../diagnostics/bag.ts';
 import type { ApiDocument } from '../ir/types.ts';
+import { applyOverlays } from '../loader/overlay.ts';
 import { DocumentStore } from '../loader/store.ts';
 import { ADAPTERS } from './adapters.ts';
 import { ParseContext } from './context.ts';
@@ -32,6 +33,20 @@ export async function parseSpecification(options: ParseOptions): Promise<ParseRe
     maxDocuments: config.spec.refs.maxDocuments,
   });
   const root = await store.loadRoot(config.spec.input);
+
+  // Overlays fix the document itself, so plugins and every later stage see the patched version.
+  if (config.spec.overlays.length > 0) {
+    store.replaceRootData(
+      await applyOverlays(store.root.data, {
+        overlays: config.spec.overlays,
+        fetch: config.spec.fetch,
+        diagnostics,
+        ...(/^https?:\/\//i.test(config.spec.input)
+          ? { credentialOrigin: new URL(config.spec.input).origin }
+          : {}),
+      }),
+    );
+  }
 
   if (options.beforeParse !== undefined) {
     const replaced = await options.beforeParse(root.data);

@@ -10,6 +10,7 @@ interface PackageIdentity {
   readonly name: string;
   readonly version: string;
   readonly bin: string;
+  readonly aliases: readonly string[];
 }
 
 function readPackageIdentity(): PackageIdentity {
@@ -26,12 +27,13 @@ function readPackageIdentity(): PackageIdentity {
   const name = 'name' in raw && typeof raw.name === 'string' ? raw.name : undefined;
   const version = 'version' in raw && typeof raw.version === 'string' ? raw.version : undefined;
   const binField = 'bin' in raw ? raw.bin : undefined;
-  const bin =
-    typeof binField === 'object' && binField !== null ? Object.keys(binField)[0] : undefined;
+  // The first `bin` entry is the tool name; further entries are aliases of the same CLI (`sz`).
+  const binNames = typeof binField === 'object' && binField !== null ? Object.keys(binField) : [];
+  const bin = binNames[0];
   if (name === undefined || version === undefined) {
     throw new Error('package.json is missing "name" or "version"');
   }
-  return { name, version, bin: bin ?? name.split('/').at(-1) ?? name };
+  return { name, version, bin: bin ?? name.split('/').at(-1) ?? name, aliases: binNames.slice(1) };
 }
 
 const identity = readPackageIdentity();
@@ -42,6 +44,8 @@ export const PACKAGE_NAME: string = identity.name;
 export const PACKAGE_VERSION: string = identity.version;
 /** The CLI binary name, also used for the config file name and environment variable prefix. */
 export const TOOL_NAME: string = identity.bin;
+/** Other names the CLI is installed under, e.g. `sz`. */
+export const TOOL_ALIASES: readonly string[] = identity.aliases;
 /** Config files are named `<tool>.config.{ts,mts,js,mjs,cts,cjs}`. */
 export const CONFIG_BASENAME = `${TOOL_NAME}.config`;
 /** Generated output ownership manifest. */

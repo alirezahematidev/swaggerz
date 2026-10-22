@@ -1,0 +1,23 @@
+{
+  "name": "swaggerz-example-solid-query",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "swaggerz generate",
+    "dev": "vite",
+    "build": "vite build",
+    "check": "tsc -p tsconfig.json && tsc -p tsconfig.node.json && vite build",
+    "dashboard": "swaggerz dashboard"
+  },
+  "dependencies": {
+    "@tanstack/solid-query": "^5.104.0",
+    "solid-js": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "swaggerz": "workspace:*",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.0",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

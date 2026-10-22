@@ -14,8 +14,11 @@ export interface ProjectModel {
   readonly models: readonly ModelSymbol[];
   readonly operationByKey: ReadonlyMap<string, OperationSymbol>;
   readonly modelById: ReadonlyMap<string, ModelSymbol>;
-  /** React Query key factories per operation group (empty when React Query is disabled). */
-  readonly reactQueryGroups: readonly ReactQueryGroup[];
+  /**
+   * Query key factories per operation group, for TanStack Query or SWR (empty when neither is
+   * enabled).
+   */
+  readonly queryGroups: readonly QueryGroup[];
   /** Webhooks and callbacks (empty when `output.webhooks` is false), sorted by module. */
   readonly webhooks: readonly WebhookSymbol[];
 }
@@ -42,7 +45,10 @@ export interface WebhookSymbol {
   };
 }
 
-export interface ReactQueryGroup {
+/** The data-fetching library hooks are generated for; also the name of their directory. */
+export type QueryLibrary = 'react-query' | 'vue-query' | 'svelte-query' | 'solid-query' | 'swr';
+
+export interface QueryGroup {
   readonly group: string;
   /** Module path of the group's key factory, e.g. `react-query/pet/keys`. */
   readonly module: string;
@@ -81,8 +87,11 @@ export interface OperationSymbol {
   readonly bodyProperty: string;
   /** Property selecting the request media type (used when the body offers several). */
   readonly contentTypeProperty: string;
-  readonly reactQuery?: {
+  /** TanStack Query or SWR symbols, when one of them is enabled. */
+  readonly query?: {
+    readonly library: QueryLibrary;
     readonly module: string;
+    /** `useGetPetById` (React, Vue, SWR) or `createGetPetByIdQuery` (Svelte, Solid). */
     readonly hook: string;
     /** Static query key prefix, e.g. `['pet', 'getPetById']`. */
     readonly keyPrefix: readonly string[];
@@ -111,9 +120,10 @@ export interface ModelSymbol {
   readonly aliases: readonly string[];
   /** Whether any operation (transitively) references this model. */
   readonly used: boolean;
-  /** Zod schema constant name, when validation is enabled. */
-  readonly zodName?: string;
-  readonly zodModule?: string;
+  /** Schema constant name (`PetSchema`), when validation is enabled. */
+  readonly schemaName?: string;
+  /** Module of the schema, e.g. `zod/pet`, `valibot/pet` or `arktype/pet`. */
+  readonly schemaModule?: string;
   /** `types.dates: 'Date'`: name and module of the model's date shape, if it contains dates. */
   readonly datesName?: string;
   readonly datesModule?: string;

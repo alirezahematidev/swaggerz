@@ -1,5 +1,5 @@
 {
   "//": "The UI test renders dashboard client components, so it uses the client (DOM + React) settings.",
   "extends": "../../../src/dashboard/client/tsconfig.json",
-  "include": ["ui.test.tsx", "../../../src/dashboard/client", "../../../src/dashboard/api-types.ts"]
+  "include": ["ui.test.tsx", "../../../src/dashboard/client", "../../../src/service/types.ts"]
 }

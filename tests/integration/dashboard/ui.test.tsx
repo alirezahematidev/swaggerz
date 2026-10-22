@@ -7,7 +7,7 @@ import type {
   OperationSummary,
   OverviewResponse,
   SchemaIR,
-} from '../../../src/dashboard/api-types.ts';
+} from '../../../src/service/types.ts';
 import { App } from '../../../src/dashboard/client/app.tsx';
 import {
   ChangeBadge,
@@ -38,8 +38,7 @@ const overview: OverviewResponse = {
     output: 'src/api',
     language: 'typescript',
     adapter: 'fetch',
-    reactQuery: false,
-    validation: 'zod',
+    validation: 'Zod',
   },
   counts: { operations: 1, models: 1, files: 10, tags: 1, deprecated: 0 },
   methods: { GET: 1 },

@@ -1,0 +1,9 @@
+{
+  "overlay": "1.0.0",
+  "info": { "title": "Swagger 2.0 fixes", "version": "1.0.0" },
+  "actions": [
+    { "target": "$.paths['/pet'].post", "update": { "operationId": "createPet" } },
+    { "target": "$.paths['/store/inventory']", "remove": true },
+    { "target": "$.definitions.Pet.properties.name", "update": { "minLength": 1 } }
+  ]
+}

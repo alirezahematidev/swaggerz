@@ -1,6 +1,6 @@
 import { ScanSearch } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { UsageReport } from '../../api-types.ts';
+import type { UsageReport } from '../../../service/types.ts';
 import { api } from '../api.ts';
 import { PageHeader, Stat } from '../components/page.tsx';
 import { Badge, type BadgeTone } from '../components/ui/badge.tsx';

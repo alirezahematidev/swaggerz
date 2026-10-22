@@ -17,6 +17,13 @@ export interface SpecConfig {
   refs?: RefsConfig;
   /** Options for fetching remote documents. */
   fetch?: FetchConfig;
+  /**
+   * OpenAPI Overlay documents (1.0, 1.1 or 1.2) applied in order to the root document before it
+   * is parsed: local paths relative to the config file, or `http(s)://` URLs. Use them to fix a
+   * third-party specification (a missing `operationId`, a wrong type, an internal endpoint to
+   * hide) without forking it.
+   */
+  overlays?: string[];
 }
 
 export interface RefsConfig {
@@ -115,7 +122,8 @@ export interface ClientConfig {
   responseStyle?: 'data' | 'full';
 }
 
-export interface ReactQueryConfig {
+/** Options shared by the data-fetching integrations (TanStack Query and SWR). */
+export interface DataFetchingConfig {
   /**
    * HTTP methods that produce query hooks; others produce mutation hooks. Default
    * `['get', 'query']` (`query` is OpenAPI 3.2's safe method with a body).
@@ -133,7 +141,28 @@ export interface ReactQueryConfig {
   invalidates?: Record<string, string[]>;
 }
 
-export interface ZodConfig {
+/** The TanStack Query adapters hooks can be generated for. */
+export type QueryFramework = 'react' | 'vue' | 'svelte' | 'solid';
+
+export interface QueryConfig extends DataFetchingConfig {
+  /**
+   * TanStack Query adapter: `'react'` (`@tanstack/react-query` 5), `'vue'`
+   * (`@tanstack/vue-query` 5), `'svelte'` (`@tanstack/svelte-query` 6, Svelte 5) or `'solid'`
+   * (`@tanstack/solid-query` 5). Default `'react'`.
+   */
+  framework?: QueryFramework;
+}
+
+/** React Query options: `features.query` with `framework: 'react'`. */
+export type ReactQueryConfig = DataFetchingConfig;
+
+/** SWR options. */
+export type SwrConfig = DataFetchingConfig;
+
+/** The schema libraries runtime validation can be generated for. */
+export type ValidationLibrary = 'zod' | 'valibot' | 'arktype';
+
+export interface ValidationOptions {
   /** Validate response bodies in generated operations. Default `true`. */
   response?: boolean;
   /** Validate request bodies before sending. Default `false`. */
@@ -141,12 +170,33 @@ export interface ZodConfig {
 }
 
 export interface FeaturesConfig {
-  /** Generate TanStack Query v5 hooks and option factories. Default `false`. */
+  /**
+   * Generate TanStack Query v5 hooks and option factories for a framework. `true` generates
+   * React hooks. Default `false`.
+   */
+  query?: boolean | QueryConfig;
+  /** Alias of `query` with `framework: 'react'`. Use one or the other. */
   reactQuery?: boolean | ReactQueryConfig;
+  /** Generate SWR hooks (`useSWR`, `useSWRMutation`, `useSWRInfinite`). Default `false`. */
+  swr?: boolean | SwrConfig;
   /** Generate JSDoc for every exported symbol. Default `true`. */
   jsdoc?: boolean;
-  /** Generate Zod schemas and optional runtime validation. Default `false`. */
-  validation?: false | 'zod' | ({ library: 'zod' } & ZodConfig);
+  /**
+   * Generate schemas with Zod 4, Valibot 1 or ArkType 2, and validate at runtime. Default
+   * `false`.
+   */
+  validation?: false | ValidationLibrary | ({ library: ValidationLibrary } & ValidationOptions);
+}
+
+/** Severity of a lint rule, or `'off'`. */
+export type LintSeverity = 'off' | 'info' | 'warning' | 'error';
+
+export interface LintConfig {
+  /**
+   * Severity per rule, e.g. `{ 'operation-id': 'error', 'inline-schema': 'off' }`. Rules not
+   * listed keep their default severity (see the diagnostics reference).
+   */
+  rules?: Record<string, LintSeverity>;
 }
 
 export interface NamingConfig {
@@ -227,6 +277,8 @@ export interface UserConfig {
   naming?: NamingConfig;
   types?: TypesConfig;
   dashboard?: DashboardConfig;
+  /** Options of `swaggerz lint`. */
+  lint?: LintConfig;
   /** Plugins run in array order within their `enforce` group (`pre`, default, `post`). */
   plugins?: PluginEntry[];
   /** Inline lifecycle hooks, run after all plugins of the default group. */

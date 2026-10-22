@@ -1,6 +1,6 @@
 # swaggerz
 
-A compiler from Swagger 2.0 / OpenAPI 3.0 / 3.1 / 3.2 documents to typed, tree-shakeable API clients (fetch or axios, optional TanStack Query v5 hooks and Zod 4 schemas). Ships as a CLI, a programmatic API and a local dashboard. Read [docs/architecture.md](docs/architecture.md) before changing the pipeline and [docs/decisions.md](docs/decisions.md) before revisiting a design choice.
+A compiler from Swagger 2.0 / OpenAPI 3.0 / 3.1 / 3.2 documents (optionally patched by OpenAPI Overlays) to typed, tree-shakeable API clients (fetch or axios, optional TanStack Query v5 hooks for React, Vue, Svelte or Solid, or SWR hooks, and Zod 4, Valibot 1 or ArkType 2 schemas). Ships as a CLI (`swaggerz`, alias `sz`), a programmatic API, a local dashboard, an MCP server for coding agents and a codegen-focused linter. Read [docs/architecture.md](docs/architecture.md) before changing the pipeline and [docs/decisions.md](docs/decisions.md) before revisiting a design choice.
 
 ## Commands
 
@@ -22,6 +22,7 @@ pnpm example:react-query                              # build, generate and run 
 pnpm examples:check                                   # build, then generate and type-check every example
 node scripts/verify-examples.ts                       # packs, installs and checks examples/* like a user (network)
 node dist/cli/bin.js dashboard --config <file>        # run the dashboard against a config
+node src/cli/bin.ts mcp --config <file>               # the MCP server on stdio (logs on stderr)
 ```
 
 The vitest global setup builds the runtime templates and the dashboard bundle once per run, so the first test run is slower.
@@ -29,10 +30,13 @@ The vitest global setup builds the runtime templates and the dashboard bundle on
 ## Layout
 
 - `src/config` — user config types, `defineConfig`, loading (`ts/mts/cts/js/mjs/cjs/json/yaml/yml`), plugin references, validation. `validate.ts` is the single source of truth for options: it drives runtime validation **and** the generated `config.schema.json`. Adding an option means updating `types.ts`, `validate.ts`, `resolved.ts`/`resolve.ts` and docs/configuration.md.
-- `src/loader` → `src/spec` (version adapters, schema converter) → `src/ir` (version-independent `ApiDocument`, `IR_VERSION`) → `src/analysis` (graph, naming, read/write split, `ProjectModel`) → `src/codegen` → `src/plugins` → `src/output` (manifest, atomic writes). `src/pipeline/compile.ts` wires them.
+- `src/loader` (including `jsonpath.ts` and `overlay.ts`, applied to the root document before parsing) → `src/spec` (version adapters, schema converter) → `src/ir` (version-independent `ApiDocument`, `IR_VERSION`) → `src/analysis` (graph, naming, read/write split, `ProjectModel`) → `src/codegen` → `src/plugins` → `src/output` (manifest, atomic writes). `src/pipeline/compile.ts` wires them.
 - `src/templates/runtime` — the runtime copied into every generated client. It must stay dependency-free and type-check against the browser-only `src/templates/tsconfig.json`.
-- `src/dashboard` — HTTP server (`server.ts`), state derived from `compile()`, usage scanner (oxc-parser/oxc-resolver, optional dependencies), and the React client in `client/` (Vite + Tailwind v4 + Radix primitives, shadcn-style components in `components/ui`).
-- `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions; `features-3.2.yaml` every OpenAPI 3.2 addition).
+- `src/codegen/query` — hooks per data-fetching library (`react.ts`, `vue.ts`, `accessor.ts` for Svelte and Solid, `swr.ts`) over shared keys in `common.ts`; `src/codegen/validation` — one schema printer per library (`zod.ts`, `valibot.ts`, `arktype.ts`) behind the `Validator` interface.
+- `src/service` — `ProjectService` (compiled project, change tracking, usage scanner with oxc-parser/oxc-resolver as optional dependencies), `ProjectWatcher`, and the API types shared with the dashboard client.
+- `src/dashboard` — HTTP server (`server.ts`) over `ProjectService`, and the React client in `client/` (Vite + Tailwind v4 + Radix primitives, shadcn-style components in `components/ui`).
+- `src/mcp` — the dependency-free MCP server (`server.ts`: protocol 2026-07-28 and 2025-11-25…2024-11-05) and its tools/resources (`tools.ts`). `src/lint` — the lint rules (`rules.ts` catalog, `lint.ts` checks).
+- `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed; the MCP tests drive `swaggerz mcp` with the official SDK clients), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions; `features-3.2.yaml` every OpenAPI 3.2 addition).
 - `examples/` — pnpm workspace packages (`swaggerz: workspace:*`), run from the root with `pnpm example:<name>`.
 - `brand/` — logo sources; `scripts/` — build, pack verification, compat, release notes.
 

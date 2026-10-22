@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { CodeVariant } from '../../api-types.ts';
+import type { CodeVariant } from '../../../service/types.ts';
 import { tokenize, type TokenKind } from '../filters.ts';
 import { cn } from '../lib/cn.ts';
 import { CopyButton } from './ui/copy-button.tsx';

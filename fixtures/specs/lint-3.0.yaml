@@ -1,0 +1,64 @@
+openapi: 3.0.3
+# One problem per lint rule (see src/lint/rules.ts).
+info:
+  title: Lint fixture
+  version: 1.0.0
+tags:
+  - name: pets
+paths:
+  /pets:
+    get:
+      tags: [pets]
+      operationId: list-pets
+      summary: List pets
+      responses:
+        '200':
+          description: Pets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+    post:
+      tags: [animals]
+      summary: Create a pet
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json: {}
+  /pets/{id}:
+    delete:
+      operationId: deletePet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '404':
+          description: Not found
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        name:
+          type: string
+    Animal:
+      type: object
+      properties:
+        name:
+          type: string
+    Anything:
+      description: Untyped.

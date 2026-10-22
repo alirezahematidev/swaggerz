@@ -13,7 +13,7 @@ import type {
   PreviewResponse,
   ServerEvent,
   UsageReport,
-} from '../../../src/dashboard/api-types.ts';
+} from '../../../src/service/types.ts';
 import { startDashboard, type DashboardServer } from '../../../src/dashboard/server.ts';
 import { SwaggerzError } from '../../../src/diagnostics/bag.ts';
 import { fixture } from '../../helpers.ts';

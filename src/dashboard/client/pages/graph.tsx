@@ -1,6 +1,6 @@
 import { ChevronsUpDown, Network } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { GraphResponse, OperationDetail, OperationSummary } from '../../api-types.ts';
+import type { GraphResponse, OperationDetail, OperationSummary } from '../../../service/types.ts';
 import { useResource } from '../api.ts';
 import { Async } from '../components/async.tsx';
 import { PageHeader } from '../components/page.tsx';

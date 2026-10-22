@@ -12,21 +12,29 @@ Generated clients target ES2020 and only use standard APIs: `fetch`, `Headers`, 
 | Chromium, Firefox, WebKit (Safari) | JavaScript, loaded as native ES modules      | Playwright                                |
 | workerd (Cloudflare Workers)       | JavaScript, bundled into a module worker     | miniflare                                 |
 
-The runtimes come from `PATH` or are installed into `.runtimes/` on demand; the project does not depend on them. The integration tests also run clients in Node.js and in happy-dom (React Query hooks). Other edge runtimes (Vercel, Netlify, Deno Deploy) implement the same web APIs but are not run. Generated modules are ES modules: in Node.js the consuming package needs `"type": "module"` (or a bundler). The runtime is type-checked against both a browser environment (`lib: ES2020 + DOM`, no Node types) and a Node.js environment (`@types/node`, no DOM, `NodeNext` resolution).
+The runtimes come from `PATH` or are installed into `.runtimes/` on demand; the project does not depend on them. The integration tests also run clients in Node.js and in happy-dom (React Query and SWR hooks), and the Vue Query composables in Node.js with Vue's reactivity. Other edge runtimes (Vercel, Netlify, Deno Deploy) implement the same web APIs but are not run. Generated modules are ES modules: in Node.js the consuming package needs `"type": "module"` (or a bundler). The runtime is type-checked against both a browser environment (`lib: ES2020 + DOM`, no Node types) and a Node.js environment (`@types/node`, no DOM, `NodeNext` resolution).
 
 ## Tested versions
 
-`pnpm compat` installs the oldest and newest supported versions side by side and type-checks generated clients (TypeScript output, JavaScript declarations, React Query hooks) with the strictest settings (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, `noUnused*`, `verbatimModuleSyntax`, `isolatedModules`):
+`pnpm compat` installs the oldest supported versions side by side and type-checks generated clients (TypeScript output, JavaScript declarations, the hooks of every data-fetching library, the schemas of every validation library) with TypeScript 5.0, 6 and 7; the newest versions are the repository's own dependencies, used by the integration tests. Both use the strictest settings (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, `noUnused*`, `verbatimModuleSyntax`, `isolatedModules`):
 
-| Dependency              | Oldest verified | Newest verified                 |
-| ----------------------- | --------------- | ------------------------------- |
-| TypeScript              | 5.0.4           | 6.0.3 and 7.0 (native compiler) |
-| `@tanstack/react-query` | 5.0.0           | 5.104                           |
-| axios                   | 1.0.0           | 1.20                            |
-| Zod                     | 4.0.15          | 4.6                             |
-| Node.js (generator)     | 22.18.0         | 24                              |
+| Dependency               | Oldest verified            | Newest verified                 |
+| ------------------------ | -------------------------- | ------------------------------- |
+| TypeScript               | 5.0.4 (5.4.5 with ArkType) | 6.0.3 and 7.0 (native compiler) |
+| `@tanstack/react-query`  | 5.0.0                      | 5.104                           |
+| `@tanstack/vue-query`    | 5.0.0 (Vue 3.3.4)          | 5.104 (Vue 3.5)                 |
+| `@tanstack/svelte-query` | 6.0.0 (Svelte 5.25)        | 6.3 (Svelte 5.57)               |
+| `@tanstack/solid-query`  | 5.0.0 (Solid 1.8)          | 5.104 (Solid 1.9)               |
+| SWR                      | 2.2.0                      | 2.5                             |
+| axios                    | 1.0.0                      | 1.20                            |
+| Zod                      | 4.0.15                     | 4.6                             |
+| Valibot                  | 1.0.0                      | 1.5                             |
+| ArkType                  | 2.0.0                      | 2.2.9                           |
+| Node.js (generator)      | 22.18.0                    | 24                              |
 
 The generator's own test suite and the packed-tarball check (`pnpm test:pack`) pass on Node.js 22.18.0 and 24, on macOS and on Linux (verified in a Debian container on arm64, including file watching, `generate --watch` and the dashboard's live reload). The CI matrix also runs the suite on Windows; the code paths that differ there (paths, case-insensitive file names, signals, `.cmd` launchers) were reviewed, and Windows is verified once that CI job has run. `erasableSyntaxOnly`, available from TypeScript 5.8, is enabled for the newer compilers to prove the output contains no enums or namespaces.
+
+ArkType's own types do not type-check with TypeScript 5.3 or older, so ArkType output is verified from TypeScript 5.4; `swaggerz doctor` requires 5.4 when ArkType is configured. SWR changed the order of its mutation types' generics in 2.2, which is therefore its minimum; Svelte Query 6 is the Svelte 5 (runes) adapter, so Svelte Query 5 (Svelte 3 and 4 stores) is not supported.
 
 Zod 4.0.0 – 4.0.14 cannot infer recursive schemas defined with getters (the pattern Zod 4 recommends and swaggerz generates) under TypeScript 6 and 7: the compiler reports `TS2615` ("circularly references itself in mapped type"). Zod 4.0.15 fixed this, so it is the minimum version; `swaggerz doctor` checks it when validation is enabled.
 
@@ -51,7 +59,7 @@ Zod 4.0.0 – 4.0.14 cannot infer recursive schemas defined with getters (the pa
 | `format: date`, `date-time`                                    |                ✓                |         ✓         |               ✓                |               ✓                | `string`, or `Date` with runtime conversion (`types.dates`)                                                                                                                               |
 | Operation and path `servers`                                   |                –                |         ✓         |               ✓                |               ✓                | Used per operation (`client.operationServers`)                                                                                                                                            |
 | `const`, `prefixItems`, boolean schemas                        |                –                | `const` (warning) |               ✓                |               ✓                |                                                                                                                                                                                           |
-| `not`, `if/then/else`, `dependentSchemas`, `dependentRequired` |              `not`              |       `not`       |               ✓                |               ✓                | Enforced by Zod schemas (`schema/assertion-keyword`); TypeScript types stay wider                                                                                                         |
+| `not`, `if/then/else`, `dependentSchemas`, `dependentRequired` |              `not`              |       `not`       |               ✓                |               ✓                | Enforced by the generated schemas (`schema/assertion-keyword`); TypeScript types stay wider                                                                                               |
 | `$dynamicRef`, `$recursiveRef`                                 |                –                |         –         |       ignored (warning)        |       ignored (warning)        | Types may be wider than the schema                                                                                                                                                        |
 | Security schemes                                               |      basic, apiKey, oauth2      |         ✓         |    ✓ (+ mutualTLS ignored)     |       ✓ (+ device flow)        |                                                                                                                                                                                           |
 | Webhooks, callbacks                                            |                –                |     callbacks     |               ✓                |               ✓                | Payload, response and handler types (`output.webhooks`)                                                                                                                                   |

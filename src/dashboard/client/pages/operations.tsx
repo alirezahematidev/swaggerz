@@ -1,6 +1,6 @@
 import { Code2, FileInput, FileOutput, Network, Route } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { OperationDetail, OperationIR, OperationSummary } from '../../api-types.ts';
+import type { OperationDetail, OperationIR, OperationSummary } from '../../../service/types.ts';
 import { ApiRequestError, useResource } from '../api.ts';
 import { Async } from '../components/async.tsx';
 import { ChangeBadge } from '../components/change.tsx';
@@ -543,7 +543,7 @@ function OperationView({
                     </span>,
                   ],
                   detail.hooks.length > 0 && [
-                    'React Query',
+                    detail.hooksLabel ?? 'Hooks',
                     <span key="h" className="flex flex-wrap gap-1">
                       {detail.hooks.map((hook) => (
                         <Mono key={hook}>{hook}</Mono>

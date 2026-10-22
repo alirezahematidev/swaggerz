@@ -56,7 +56,7 @@ The module's default export is a plugin object, or a factory called with the opt
 | `afterNormalize(ir, ctx)`                | After the document became the IR                                         | A modified IR, or nothing                 |
 | `operationName(operation, suggested)`    | Naming an operation (before uniqueness)                                  | A name, or `undefined`                    |
 | `modelName(definition, suggested)`       | Naming a model                                                           | A name, or `undefined`                    |
-| `queryKey(operation, prefix)`            | Building a React Query key prefix                                        | A new prefix, or nothing                  |
+| `queryKey(operation, prefix)`            | Building the query key prefix of TanStack Query or SWR hooks             | A new prefix, or nothing                  |
 | `jsdoc(block, target)`                   | Rendering documentation for an operation, model or hook                  | A modified `JsDocBlock`, or nothing       |
 | `resolveImport({ from, to, specifier })` | Writing a relative import between generated modules                      | A new specifier, or nothing               |
 | `beforeGenerate(ctx)`                    | After analysis                                                           | —                                         |

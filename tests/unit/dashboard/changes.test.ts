@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ChangeTracker, type Snapshot } from '../../../src/dashboard/changes.ts';
+import { ChangeTracker, type Snapshot } from '../../../src/service/changes.ts';
 
 function version(
   operations: Record<string, string>,

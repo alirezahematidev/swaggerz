@@ -7,6 +7,8 @@ Configuration            src/config        defineConfig, loading (native import)
     ↓
 Input loader             src/loader        file/URL reading, JSON/YAML parsing, size and redirect limits
     ↓
+Overlays                 src/loader/overlay  OpenAPI Overlay actions on the root document (RFC 9535 JSONPath)
+    ↓
 Version detection        src/spec/detect   `swagger`/`openapi` field → 2.0 | 3.0 | 3.1 | 3.2; mismatch with config is an error
     ↓
 Reference resolution     src/loader/store  external documents crawled under a security policy; pointers, anchors, $id, $self
@@ -19,7 +21,7 @@ Read/write split         src/analysis/read-write  request-side model variants fo
     ↓
 Semantic analysis        src/analysis      dependency graph, naming, symbol table, module layout (ProjectModel)
     ↓
-Code generation          src/codegen       models, operations, client, runtime, React Query, Zod, barrels
+Code generation          src/codegen       models, operations, client, runtime, hooks (query/), schemas (validation/), barrels
     ↓
 Plugins                  src/plugins       generate / transformFile / afterGenerate hooks
     ↓
@@ -30,23 +32,26 @@ Validation & writing     src/pipeline, src/output  path checks, manifest diff, a
 
 ## Modules
 
-| Directory           | Responsibility                                                                      | Depends on                        |
-| ------------------- | ----------------------------------------------------------------------------------- | --------------------------------- |
-| `config`            | User config types, `defineConfig`, loading, validation, defaults                    | `plugins/types` (types only)      |
-| `diagnostics`       | `Diagnostic`, `DiagnosticBag`, `SwaggerzError`, terminal formatting                 | —                                 |
-| `loader`            | Reading, parsing, JSON pointers, `$ref` crawling and resolution, line/column lookup | `diagnostics`                     |
-| `spec`              | Version detection, adapters, schema dialects and converter                          | `loader`, `ir`                    |
-| `ir`                | IR types and helpers (walkers, reference collection)                                | —                                 |
-| `analysis`          | Dependency graph, naming, project model                                             | `ir`, `config`                    |
-| `codegen`           | Printers, imports, type printer, generators                                         | `analysis`, `ir`, `config`        |
-| `templates/runtime` | Runtime emitted into clients (checked separately against a browser-only lib)        | —                                 |
-| `plugins`           | Plugin types and the runner                                                         | `codegen/types`, `analysis/types` |
-| `pipeline`          | `compile()` and `runGeneration()`                                                   | everything above                  |
-| `output`            | Manifest, write planning, atomic writing, diffs                                     | `codegen/types`                   |
-| `cli`               | Commands, argument parsing, reporter, watch mode                                    | `pipeline`, `config`              |
-| `dashboard`         | HTTP server, state derived from `compile()`, usage scanner, web client              | `pipeline`, `analysis`, `codegen` |
+| Directory           | Responsibility                                                                                          | Depends on                        |
+| ------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `config`            | User config types, `defineConfig`, loading, validation, defaults                                        | `plugins/types` (types only)      |
+| `diagnostics`       | `Diagnostic`, `DiagnosticBag`, `SwaggerzError`, terminal formatting                                     | —                                 |
+| `loader`            | Reading, parsing, JSON pointers, `$ref` crawling and resolution, line/column lookup, JSONPath, overlays | `diagnostics`                     |
+| `spec`              | Version detection, adapters, schema dialects and converter                                              | `loader`, `ir`                    |
+| `ir`                | IR types and helpers (walkers, reference collection)                                                    | —                                 |
+| `analysis`          | Dependency graph, naming, project model                                                                 | `ir`, `config`                    |
+| `codegen`           | Printers, imports, type printer, generators                                                             | `analysis`, `ir`, `config`        |
+| `templates/runtime` | Runtime emitted into clients (checked separately against a browser-only lib)                            | —                                 |
+| `plugins`           | Plugin types and the runner                                                                             | `codegen/types`, `analysis/types` |
+| `pipeline`          | `compile()` and `runGeneration()`                                                                       | everything above                  |
+| `output`            | Manifest, write planning, atomic writing, diffs                                                         | `codegen/types`                   |
+| `lint`              | Lint rules over a compiled project (`swaggerz lint`, the MCP `check` tool)                              | `analysis`, `ir`                  |
+| `service`           | `ProjectService` (a compiled project kept in step with its sources), change tracking, usage scanner     | `pipeline`, `analysis`, `codegen` |
+| `cli`               | Commands, argument parsing, reporter, watch mode                                                        | `pipeline`, `config`              |
+| `dashboard`         | HTTP server and web client over `ProjectService`                                                        | `service`                         |
+| `mcp`               | MCP server over stdio: protocol, tools and resources over `ProjectService`                              | `service`, `codegen`, `lint`      |
 
-There are no runtime import cycles between these modules. The dashboard and its assets are only loaded by the `dashboard` command.
+There are no runtime import cycles between these modules. The dashboard and its assets are only loaded by the `dashboard` command, the MCP server only by `mcp`.
 
 ## The intermediate representation
 

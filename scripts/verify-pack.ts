@@ -115,6 +115,14 @@ try {
 
   // 3. CLI workflow with a TypeScript config importing the package.
   check(npx('--version').trim() === `${pkg.name} ${pkg.version}`, 'CLI reports the packed version');
+  // Every other `bin` entry is an alias of the same CLI (`sz`).
+  for (const alias of typeof pkg.bin === 'string' ? [] : Object.keys(pkg.bin).slice(1)) {
+    check(
+      run('npx', ['--no-install', alias, '--version'], project).trim() ===
+        `${pkg.name} ${pkg.version}`,
+      `the ${alias} alias runs the CLI`,
+    );
+  }
   npx('init');
   check(
     (await readFile(path.join(project, `${bin}.config.ts`), 'utf8')).includes(`from '${pkg.name}'`),

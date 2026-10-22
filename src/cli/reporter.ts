@@ -67,11 +67,15 @@ export class Reporter {
     if (this.options.json) this.options.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
   }
 
-  /** Prints diagnostics: errors always, warnings unless quiet, info only when verbose. */
-  diagnostics(diagnostics: readonly Diagnostic[]): void {
+  /**
+   * Prints diagnostics: errors always, warnings unless quiet, info only when verbose (or when
+   * `showInfo` is set, for reports such as lint findings).
+   */
+  diagnostics(diagnostics: readonly Diagnostic[], options: { showInfo?: boolean } = {}): void {
     if (this.options.json) return;
     for (const diagnostic of diagnostics) {
-      if (diagnostic.severity === 'info' && !this.options.verbose) continue;
+      if (diagnostic.severity === 'info' && !this.options.verbose && options.showInfo !== true)
+        continue;
       if (diagnostic.severity === 'warning' && this.options.quiet) continue;
       this.options.stderr.write(
         `${formatDiagnostic(diagnostic, { cwd: this.options.cwd, color: this.options.color })}\n`,

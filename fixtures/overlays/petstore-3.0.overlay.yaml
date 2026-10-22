@@ -1,0 +1,32 @@
+# Overlay Specification 1.1 fixes for petstore-3.0.yaml: every action kind and selector style.
+overlay: 1.1.0
+info:
+  title: Petstore fixes
+  version: 1.0.0
+  description: Renames, hides and documents parts of the petstore without editing it.
+actions:
+  - target: $.info
+    description: Merge into an object.
+    update:
+      description: Patched by an overlay.
+  - target: $.paths['/store/inventory']
+    description: Hide an internal endpoint.
+    remove: true
+  - target: $.paths['/user/logout'].get
+    update:
+      operationId: signOut
+  - target: $.paths['/pet/{petId}'].get.parameters[?@.name == 'petId'].description
+    description: Replace a primitive value.
+    update: The identifier of the pet.
+  - target: $.paths.*[?@.operationId == 'deletePet'].tags
+    description: Concatenate arrays.
+    update: [admin]
+  - target: $.components.schemas
+    update:
+      PetSummary:
+        type: object
+  - target: $.components.schemas.PetSummary
+    description: Copy a node from the document.
+    copy: $.components.schemas.Category
+  - target: $..[?@.deprecated == true].deprecated
+    remove: true

@@ -16,7 +16,7 @@ import {
   CloudOff,
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ModelSummary, OperationSummary, OverviewResponse } from '../api-types.ts';
+import type { ModelSummary, OperationSummary, OverviewResponse } from '../../service/types.ts';
 import { api, usePending, useResource } from './api.ts';
 import { Async } from './components/async.tsx';
 import { Mark } from './components/brand.tsx';

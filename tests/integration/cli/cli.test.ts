@@ -90,9 +90,12 @@ describe('CLI basics', () => {
       'dashboard',
       'clean',
       'doctor',
+      'lint',
     ]) {
       expect(help.stdout).toContain(command);
     }
+    // package.json installs the CLI as `swaggerz` and as its alias `sz`.
+    expect(help.stdout).toContain('Alias: sz');
     expect((await run(['--version'], REPO_ROOT)).stdout.trim()).toBe(
       `${PACKAGE_NAME} ${PACKAGE_VERSION}`,
     );
@@ -274,6 +277,42 @@ describe('commands on a project', () => {
     expect(invalid.stderr).toContain('Did you mean "output"?');
   });
 
+  it('lint reports findings, honors lint.rules and fails on --max-warnings', async () => {
+    const project = await createProject('cli-lint', { spec: 'lint-3.0.yaml' });
+    const lint = await run(['lint'], project);
+    expect(lint.code).toBe(0);
+    expect(lint.stderr).toContain('warning lint/operation-id POST /pets has no operationId');
+    // Notes are part of the report, not only with --verbose.
+    expect(lint.stderr).toContain('info lint/inline-schema');
+    expect(lint.stdout).toContain('13 findings (0 errors, 3 warnings, 10 notes)');
+
+    const strict = await run(['lint', '--max-warnings', '0', '--json'], project);
+    expect(strict.code).toBe(1);
+    const report = JSON.parse(strict.stdout) as { ok: boolean; diagnostics: { code: string }[] };
+    expect(report.ok).toBe(false);
+    expect(report.diagnostics.map((d) => d.code)).toContain('lint/missing-servers');
+
+    const configured = await createProject('cli-lint-rules', {
+      spec: 'lint-3.0.yaml',
+      config: { lint: { rules: { 'operation-id': 'error', 'unused-model': 'off' } } },
+    });
+    const errors = await run(['lint'], configured);
+    expect(errors.code).toBe(1);
+    expect(errors.stderr).toContain('error lint/operation-id');
+    expect(errors.stderr).not.toContain('lint/unused-model');
+    const rules = JSON.parse((await run(['lint', '--rules', '--json'], configured)).stdout) as {
+      rules: { name: string; severity: string }[];
+    };
+    expect(rules.rules.find((r) => r.name === 'unused-model')?.severity).toBe('off');
+
+    const typo = await createProject('cli-lint-typo', {
+      config: { lint: { rules: { 'operation-ids': 'error' } } },
+    });
+    const invalid = await run(['lint'], typo);
+    expect(invalid.code).toBe(2);
+    expect(invalid.stderr).toContain('Did you mean "operation-id"?');
+  });
+
   it('doctor checks the versions of the dependencies the enabled features need', async () => {
     const installed = (version: string): string => JSON.stringify({ name: 'zod', version });
     const project = await createProject('cli-doctor', {
@@ -296,6 +335,17 @@ describe('commands on a project', () => {
     expect(await zodCheck()).toMatchObject({ status: 'ok' });
     await writeFile(path.join(project, 'node_modules/zod/package.json'), installed('3.25.0'));
     expect(await zodCheck()).toMatchObject({ status: 'fail' });
+
+    // The framework of the configured query integration and the configured schema library.
+    const vue = await createProject('cli-doctor-vue', {
+      config: { features: { query: { framework: 'vue' }, validation: 'valibot' } },
+    });
+    const { checks } = JSON.parse((await run(['doctor', '--json'], vue)).stdout) as {
+      checks: { name: string; status: string }[];
+    };
+    expect(checks.map((c) => c.name)).toEqual(
+      expect.arrayContaining(['@tanstack/vue-query', 'vue', 'valibot']),
+    );
   });
 });
 

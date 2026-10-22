@@ -4,10 +4,30 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Waits a week after a release, so a compromised or broken version can be pulled first.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ['*']
+
+  # The root lockfile covers the examples too (pnpm workspace packages).
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
+    # At least pnpm's `minimumReleaseAge`, which the lockfile must satisfy.
+    cooldown:
+      default-days: 3
     groups:
       development:
         dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # The build uses the TypeScript compiler API, which the native TypeScript 7 package does not
+      # ship; TypeScript 7 is verified separately by `pnpm compat`.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      # Types for the oldest supported Node.js (22), so code cannot use newer APIs by accident.
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']

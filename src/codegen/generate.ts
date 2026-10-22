@@ -4,15 +4,11 @@ import type { EmitContext, ModuleOutput } from './context.ts';
 import { generateModel } from './models.ts';
 import { planOperation, type OperationPlan } from './operation-plan.ts';
 import { generateOperation } from './operations.ts';
-import {
-  generateGroupKeys,
-  generateReactQueryBarrel,
-  generateReactQueryModule,
-} from './react-query.ts';
+import { generateQueryModules } from './query/index.ts';
 import { generateRuntimeFiles } from './runtime-files.ts';
 import { generateDatesModule } from './dates.ts';
 import { generateWebhookModule, webhookModules } from './webhooks.ts';
-import { generateZodBarrel, generateZodModel } from './zod.ts';
+import { generateValidationModules } from './validation/index.ts';
 import type { GeneratedFile } from './types.ts';
 
 export function planOperations(ctx: EmitContext): OperationPlan[] {
@@ -32,24 +28,8 @@ export function generateModules(ctx: EmitContext): ModuleOutput[] {
     if (dates !== undefined) modules.push(dates);
   }
   if (ctx.config.output.barrel) modules.push(generateBarrel(ctx, modules));
-  if (ctx.config.features.validation !== false) {
-    const schemas = ctx.project.models
-      .map((model) => generateZodModel(model, ctx))
-      .filter((m): m is ModuleOutput => m !== undefined);
-    modules.push(...schemas);
-    if (ctx.config.output.barrel) modules.push(generateZodBarrel(ctx, schemas));
-  }
-  if (ctx.config.features.reactQuery !== false) {
-    const reactQuery: ModuleOutput[] = [];
-    for (const plan of plans) {
-      const module = generateReactQueryModule(plan, ctx);
-      if (module !== undefined) reactQuery.push(module);
-    }
-    for (const group of ctx.project.reactQueryGroups)
-      reactQuery.push(generateGroupKeys(group, plans, ctx));
-    modules.push(...reactQuery);
-    if (ctx.config.output.barrel) modules.push(generateReactQueryBarrel(ctx, reactQuery));
-  }
+  modules.push(...generateValidationModules(ctx));
+  modules.push(...generateQueryModules(plans, ctx));
   return modules;
 }
 

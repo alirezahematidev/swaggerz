@@ -1,5 +1,8 @@
 import { HTTP_METHODS } from '../ir/types.ts';
+import { LINT_RULES } from '../lint/rules.ts';
 import { PACKAGE_NAME, TOOL_NAME } from '../meta.ts';
+import { isRecord } from '../utils/object.ts';
+import { suggest } from '../utils/strings.ts';
 import { t, type Check, type ConfigIssue, type JsonSchema } from './schema.ts';
 
 const caseStyles = ['camelCase', 'PascalCase', 'snake_case', 'preserve'] as const;
@@ -49,7 +52,7 @@ const pluginCheck = t.union(
   'a plugin object, a module path or [module path, options]',
 );
 
-const reactQueryCheck = t.object({
+const dataFetchingShape: Record<string, Check> = {
   queryMethods: t.doc(
     t.array(t.literal(...HTTP_METHODS)),
     'HTTP methods that produce query hooks; all others produce mutation hooks.',
@@ -73,7 +76,22 @@ const reactQueryCheck = t.object({
     t.record(t.array(t.string({ nonEmpty: true }))),
     'Queries to invalidate after a successful mutation, keyed by mutation name or `operationId`. Values are operation names, `operationId`s or tags.',
   ),
+};
+
+const reactQueryCheck = t.object(dataFetchingShape);
+
+const queryCheck = t.object({
+  framework: t.doc(
+    t.literal('react', 'vue', 'svelte', 'solid'),
+    "TanStack Query adapter: 'react' (@tanstack/react-query 5), 'vue' (@tanstack/vue-query 5), 'svelte' (@tanstack/svelte-query 6) or 'solid' (@tanstack/solid-query 5).",
+    { default: 'react' },
+  ),
+  ...dataFetchingShape,
 });
+
+const VALIDATION_LIBRARIES = ['zod', 'valibot', 'arktype'] as const;
+
+const lintRulesCheck = t.record(t.literal('off', 'info', 'warning', 'error'));
 
 const configCheck: Check = t.object(
   {
@@ -135,6 +153,10 @@ const configCheck: Check = t.object(
               ),
             }),
             'Options for fetching remote documents.',
+          ),
+          overlays: t.doc(
+            t.array(t.string({ nonEmpty: true })),
+            'OpenAPI Overlay documents (1.0, 1.1 or 1.2) applied in order to the specification before it is parsed: paths relative to the config file, or http(s) URLs.',
           ),
         },
         { required: ['version', 'input'] },
@@ -225,19 +247,32 @@ const configCheck: Check = t.object(
     ),
     features: t.doc(
       t.object({
+        query: t.doc(
+          t.union([t.boolean(), queryCheck], 'a boolean or TanStack Query options'),
+          'Generate TanStack Query v5 hooks and option factories for React, Vue, Svelte or Solid (true: React).',
+          { default: false },
+        ),
         reactQuery: t.doc(
           t.union([t.boolean(), reactQueryCheck], 'a boolean or React Query options'),
-          'Generate TanStack Query v5 hooks and option factories.',
+          "Alias of `query` with framework 'react'. Use one or the other.",
+          { default: false },
+        ),
+        swr: t.doc(
+          t.union([t.boolean(), t.object(dataFetchingShape)], 'a boolean or SWR options'),
+          'Generate SWR hooks (useSWR, useSWRMutation, useSWRInfinite).',
           { default: false },
         ),
         jsdoc: t.doc(t.boolean(), 'Generate documentation comments.', { default: true }),
         validation: t.doc(
           t.union(
             [
-              t.literal(false, 'zod'),
+              t.literal(false, ...VALIDATION_LIBRARIES),
               t.object(
                 {
-                  library: t.doc(t.literal('zod'), 'Validation library.'),
+                  library: t.doc(
+                    t.literal(...VALIDATION_LIBRARIES),
+                    "Schema library: 'zod' (4), 'valibot' (1) or 'arktype' (2).",
+                  ),
                   response: t.doc(t.boolean(), 'Validate response bodies.', { default: true }),
                   request: t.doc(t.boolean(), 'Validate request bodies before sending.', {
                     default: false,
@@ -246,9 +281,9 @@ const configCheck: Check = t.object(
                 { required: ['library'] },
               ),
             ],
-            "false, 'zod' or Zod options",
+            "false, 'zod', 'valibot', 'arktype' or validation options",
           ),
-          'Generate Zod 4 schemas and validate at runtime.',
+          'Generate schemas with Zod 4, Valibot 1 or ArkType 2 and validate at runtime.',
           { default: false },
         ),
       }),
@@ -326,6 +361,15 @@ const configCheck: Check = t.object(
       }),
       `Options of \`${TOOL_NAME} dashboard\`.`,
     ),
+    lint: t.doc(
+      t.object({
+        rules: t.doc(
+          lintRulesCheck,
+          "Severity per lint rule ('off', 'info', 'warning' or 'error'), e.g. { 'operation-id': 'error' }.",
+        ),
+      }),
+      `Options of \`${TOOL_NAME} lint\`.`,
+    ),
     plugins: t.doc(
       t.array(pluginCheck),
       'Plugins, run in order within their enforce group. In JSON and YAML configs, reference modules by path or package name.',
@@ -339,6 +383,47 @@ const configCheck: Check = t.object(
 export function validateUserConfig(value: unknown): ConfigIssue[] {
   const issues: ConfigIssue[] = [];
   configCheck(value, '', issues);
+  if (issues.length === 0 && isRecord(value)) issues.push(...crossFieldIssues(value));
+  return issues;
+}
+
+/** Combinations of options that are individually valid but not together. */
+function crossFieldIssues(config: Record<string, unknown>): ConfigIssue[] {
+  const issues: ConfigIssue[] = [];
+  const features = isRecord(config.features) ? config.features : {};
+  const enabled = (key: string): boolean => features[key] !== undefined && features[key] !== false;
+  if (features.query !== undefined && features.reactQuery !== undefined) {
+    issues.push({
+      path: 'features.reactQuery',
+      message: 'features.reactQuery is an alias of features.query; set only one of them.',
+      hint: "Move its options to features.query (with framework: 'react').",
+    });
+  }
+  if (enabled('swr') && (enabled('query') || enabled('reactQuery'))) {
+    issues.push({
+      path: 'features.swr',
+      message:
+        'SWR and TanStack Query hooks cannot be generated together (their hooks would share names).',
+      hint: 'Enable one of features.swr and features.query.',
+    });
+  }
+  const lint = isRecord(config.lint) ? config.lint : {};
+  const rules = isRecord(lint.rules) ? lint.rules : {};
+  for (const rule of Object.keys(rules)) {
+    if (LINT_RULES.some((known) => known.name === rule)) continue;
+    const guess = suggest(
+      rule,
+      LINT_RULES.map((known) => known.name),
+    );
+    issues.push({
+      path: `lint.rules.${rule}`,
+      message: 'Unknown lint rule.',
+      hint:
+        guess === undefined
+          ? `Rules: ${LINT_RULES.map((r) => r.name).join(', ')}.`
+          : `Did you mean "${guess}"?`,
+    });
+  }
   return issues;
 }
 

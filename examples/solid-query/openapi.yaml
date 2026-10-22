@@ -1,0 +1,174 @@
+openapi: 3.1.0
+info:
+  title: Tasks API
+  version: 1.0.0
+servers:
+  - url: /api
+tags:
+  - name: Tasks
+paths:
+  /tasks:
+    get:
+      operationId: listTasks
+      tags: [Tasks]
+      summary: Lists tasks, newest first.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: cursor
+          in: query
+          description: Opaque cursor from a previous page.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: A page of tasks.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskPage'
+    post:
+      operationId: createTask
+      tags: [Tasks]
+      summary: Creates a task.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewTask'
+      responses:
+        '201':
+          description: The created task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '422':
+          description: The task is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /tasks/{taskId}:
+    parameters:
+      - name: taskId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getTask
+      tags: [Tasks]
+      summary: Returns one task.
+      responses:
+        '200':
+          description: The task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          description: No such task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    patch:
+      operationId: updateTask
+      tags: [Tasks]
+      summary: Changes a task.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskUpdate'
+      responses:
+        '200':
+          description: The updated task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          description: No such task.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    delete:
+      operationId: deleteTask
+      tags: [Tasks]
+      summary: Deletes a task.
+      responses:
+        '204':
+          description: Deleted.
+components:
+  schemas:
+    TaskStatus:
+      type: string
+      enum: [todo, doing, done]
+    Task:
+      type: object
+      required: [id, title, status, createdAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+          minLength: 1
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        notes:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+    NewTask:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+          minLength: 1
+        notes:
+          type: [string, 'null']
+    TaskUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        notes:
+          type: [string, 'null']
+    TaskPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        nextCursor:
+          description: Cursor of the next page; absent on the last page.
+          type: string
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        detail:
+          type: string

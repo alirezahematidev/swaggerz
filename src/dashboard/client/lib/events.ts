@@ -1,4 +1,4 @@
-import type { ServerEvent } from '../../api-types.ts';
+import type { ServerEvent } from '../../../service/types.ts';
 import { authorization } from '../api.ts';
 
 /**
