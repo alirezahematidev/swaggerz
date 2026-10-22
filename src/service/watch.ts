@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { RemoteWatcher } from '../loader/remote-watcher.ts';
 import { FileWatcher } from '../utils/file-watcher.ts';
 import type { ProjectService, ReloadOutcome } from './project.ts';
@@ -41,8 +42,8 @@ export class ProjectWatcher {
     this.#files = new FileWatcher({
       debounceMs: 150,
       onChange: async (files) => {
-        const { manifest } = this.#service.watchTargets();
-        const sources = files.filter((file) => file !== manifest);
+        const output = this.#outputTargets();
+        const sources = files.filter((file) => !output.has(file));
         if (sources.length === 0) {
           // The service drops its cached generation status whether or not anyone listens.
           const revision = this.#service.outputChanged();
@@ -96,11 +97,21 @@ export class ProjectWatcher {
     return next;
   }
 
+  /**
+   * The output manifest, and the output directory itself: it is watched through its parent, so its
+   * creation or removal (a `clean` elsewhere) is noticed even when the platform stops reporting
+   * changes inside a removed directory (Windows).
+   */
+  #outputTargets(): Set<string> {
+    const { manifest } = this.#service.watchTargets();
+    return new Set([manifest, path.dirname(manifest)]);
+  }
+
   /** Points the watchers at the current sources, which a reload may have changed. */
   #watch(): void {
     if (this.#files === undefined) return;
-    const { sources, manifest, remote, interval } = this.#service.watchTargets();
-    this.#files.set([...sources, manifest]);
+    const { sources, remote, interval } = this.#service.watchTargets();
+    this.#files.set([...sources, ...this.#outputTargets()]);
     this.#remote?.set(remote, interval);
     this.#service.setWatching([...sources, ...remote.map((document) => document.url)]);
   }

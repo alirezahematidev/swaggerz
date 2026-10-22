@@ -11,6 +11,7 @@ import {
   ResourceUpdatedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MANIFEST_FILENAME } from '../../../src/meta.ts';
 import { REPO_ROOT } from '../../helpers.ts';
 import { createProject } from '../../support/project.ts';
 
@@ -519,28 +520,43 @@ describe('MCP 2025-11-25 (SDK v1)', () => {
         }
       ).status;
     expect(await status()).toBe('never');
+    /** Runs the CLI in the project and resolves with its exit code and output. */
     const run = (...args: string[]) =>
-      new Promise((resolve) => {
-        spawn(process.execPath, [BIN, ...args], { cwd: directory }).on('close', resolve);
+      new Promise<string>((resolve) => {
+        const child = spawn(process.execPath, [BIN, ...args], { cwd: directory });
+        let output = '';
+        child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
+        child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
+        child.on('close', (code) => {
+          resolve(`swaggerz ${args.join(' ')} exited with ${String(code)}: ${output.trim()}`);
+        });
       });
+    /** Waits for an update of the overview; a timeout reports what the server sees. */
+    const overviewUpdated = async (ran: string): Promise<void> => {
+      try {
+        await vi.waitFor(
+          () => {
+            expect(updated).toHaveBeenCalledWith('swaggerz://overview');
+          },
+          { timeout: 15_000 },
+        );
+      } catch (error) {
+        const overview = json(await client.callTool({ name: 'api_overview', arguments: {} }));
+        const manifest = await access(path.join(directory, 'src/generated/api', MANIFEST_FILENAME))
+          .then(() => 'present')
+          .catch(() => 'absent');
+        throw new Error(
+          `${String(error)}\n${ran}\nserver generation: ${JSON.stringify(overview.generation)}; manifest on disk: ${manifest}`,
+          { cause: error },
+        );
+      }
+    };
 
-    await run('generate');
-    await vi.waitFor(
-      () => {
-        expect(updated).toHaveBeenCalledWith('swaggerz://overview');
-      },
-      { timeout: 15_000 },
-    );
+    await overviewUpdated(await run('generate'));
     expect(await status()).toBe('up-to-date');
 
     updated.mockClear();
-    await run('clean');
-    await vi.waitFor(
-      () => {
-        expect(updated).toHaveBeenCalledWith('swaggerz://overview');
-      },
-      { timeout: 15_000 },
-    );
+    await overviewUpdated(await run('clean'));
     expect(await status()).toBe('never');
   });
 
