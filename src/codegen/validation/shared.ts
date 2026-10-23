@@ -39,6 +39,16 @@ export function wireType(model: ModelSymbol, imports: ImportManager): string {
 type ObjectSchema = Extract<SchemaIR, { kind: 'object' }>;
 
 /**
+ * RFC 3339 `date-time` (the separator and the UTC designator may be lower case), as a regular
+ * expression literal. Validators also check that the value is a real date (`Date.parse`).
+ */
+export const DATE_TIME_PATTERN =
+  '/^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:[Zz]|[+-]\\d{2}:\\d{2})$/';
+
+/** A predicate on a string: a date `Date.parse` understands. */
+export const VALID_DATE = '(value) => !Number.isNaN(Date.parse(value))';
+
+/**
  * Names every object inherits from `Object.prototype`. The libraries look properties up with
  * `key in value`, which finds them on objects that omit them, so optional properties with these
  * names need their own check.

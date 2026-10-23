@@ -155,6 +155,17 @@ const CASES: readonly Case[] = [
     // ArkType's types do not type-check with TypeScript 5.3 or older.
     minimumTypeScript: '5.4',
   },
+  // Date conversion makes the schemas validate the wire format of dates (RFC 3339 patterns).
+  ...(['zod', 'valibot', 'arktype'] as const).map((library): Case => ({
+    name: `${library}-dates`,
+    config: {
+      spec: { version: '3.1', input: fixture('advanced-3.1.yaml') },
+      types: { dates: 'Date' },
+      features: { validation: { library, request: true } },
+    },
+    consumer: "import * as api from './api';\nexport const client: object = api;\n",
+    ...(library === 'arktype' ? { minimumTypeScript: '5.4' as const } : {}),
+  })),
   {
     name: 'react-query-js',
     config: {

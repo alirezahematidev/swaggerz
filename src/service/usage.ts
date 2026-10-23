@@ -24,7 +24,9 @@ export interface UsageOptions {
   readonly maxFiles?: number;
 }
 
-const SOURCE_EXTENSIONS = /\.(m|c)?(t|j)sx?$/;
+const SOURCE_EXTENSIONS = /\.(?:(?:m|c)?(?:t|j)sx?|vue|svelte)$/;
+/** Single-file components: their `<script>` blocks are scanned, their templates for names. */
+const COMPONENT_EXTENSIONS = /\.(?:vue|svelte)$/;
 const ALWAYS_SKIPPED = new Set([
   'node_modules',
   '.git',
@@ -403,6 +405,52 @@ function parserLanguage(file: string): 'ts' | 'tsx' | 'jsx' {
   return 'jsx';
 }
 
+/** The code and the template of a Vue or Svelte single-file component. */
+interface ComponentParts {
+  /**
+   * The contents of every `<script>` block at its place, everything else blanked (line breaks are
+   * kept), so offsets and line numbers are those of the component file.
+   */
+  readonly code: string;
+  readonly lang: 'ts' | 'tsx' | 'jsx';
+  /** The markup outside `<script>` and `<style>` blocks, where imported names may be used too. */
+  readonly template: string;
+}
+
+const blank = (text: string): string => text.replace(/[^\n]/g, ' ');
+
+function componentParts(text: string): ComponentParts {
+  let code = '';
+  let template = '';
+  let lang: ComponentParts['lang'] = 'jsx';
+  let last = 0;
+  for (const match of text.matchAll(/(<(script|style)\b([^>]*)>)([\s\S]*?)<\/\2\s*>/gi)) {
+    const [whole, open = '', tag = '', attributes = '', content = ''] = match;
+    const outside = text.slice(last, match.index);
+    code += blank(outside);
+    template += outside;
+    if (tag.toLowerCase() === 'script') {
+      code += blank(open) + content + blank(whole.slice(open.length + content.length));
+      const declared = /\blang\s*=\s*["']?(tsx?|typescript)\b/i.exec(attributes)?.[1];
+      if (declared === 'tsx') lang = 'tsx';
+      else if (declared !== undefined && lang !== 'tsx') lang = 'ts';
+    } else {
+      code += blank(whole);
+    }
+    template += blank(whole);
+    last = match.index + whole.length;
+  }
+  code += blank(text.slice(last));
+  template += text.slice(last);
+  return { code, lang, template };
+}
+
+/** How often `name` occurs as an identifier in component markup (`{{ name(x) }}`, `<Name />`). */
+function templateUses(template: string, name: string): number {
+  const escaped = name.replace(/[$]/g, '\\$');
+  return [...template.matchAll(new RegExp(`(?<![\\w$.-])${escaped}(?![\\w$-])`, 'g'))].length;
+}
+
 /**
  * Statically scans application source files for imports of generated modules. Only static
  * imports can be attributed precisely; dynamic imports and escaping namespace objects are reported
@@ -470,9 +518,14 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
     } catch {
       continue;
     }
+    const component = COMPONENT_EXTENSIONS.test(file) ? componentParts(text) : undefined;
+    const code = component?.code ?? text;
     // Cheap pre-filter: files that never mention a module specifier cannot import the client.
-    if (!/\bimport\b|\brequire\s*\(|\bexport\b/.test(text)) continue;
-    const parsed = scanner.parse(file, text, { lang: parserLanguage(file), sourceType: 'module' });
+    if (!/\bimport\b|\brequire\s*\(|\bexport\b/.test(code)) continue;
+    const parsed = scanner.parse(file, code, {
+      lang: component?.lang ?? parserLanguage(file),
+      sourceType: 'module',
+    });
     const relativeFile = path.relative(options.root, file).split(path.sep).join('/');
     const lineStarts = [0];
     for (let index = 0; index < text.length; index++)
@@ -623,6 +676,13 @@ export async function scanUsage(options: UsageOptions): Promise<UsageReport> {
     };
     visit(program, undefined, '');
 
+    // Names a component's markup uses (Vue `<script setup>` imports are in scope there).
+    if (component !== undefined)
+      for (const local of new Set(pending.map((entry) => entry.local)))
+        identifiers.set(
+          local,
+          (identifiers.get(local) ?? 0) + templateUses(component.template, local),
+        );
     for (const entry of pending)
       record(entry.module, entry.imported, entry.location, identifiers.get(entry.local) ?? 0);
     for (const [local, module] of namespaces) {

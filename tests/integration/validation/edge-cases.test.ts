@@ -154,4 +154,38 @@ describe.each(LIBRARIES)('$library schemas', ({ library, accepts, emptyMemberAcc
     // An open object with patternProperties keeps other keys.
     expect(check('TagsSchema', { 'x-a': 's', other: 1 })).toBe(true);
   });
+
+  it('accept every RFC 3339 date-time when dates are converted', async () => {
+    const input = path.join(OUTPUT_ROOT, 'specs', 'validation-dates.yaml');
+    await mkdir(path.dirname(input), { recursive: true });
+    await writeFile(
+      input,
+      `openapi: 3.1.0
+info: { title: Dates, version: '1' }
+paths: {}
+components:
+  schemas:
+    Event:
+      type: object
+      properties:
+        at: { type: string, format: date-time }
+`,
+    );
+    const { directory } = await generateCase(`validation-dates-${library}`, {
+      spec: { version: '3.1', input },
+      types: { dates: 'Date' },
+      features: { validation: library },
+    });
+    expect(typecheck(await listFiles(directory, '.ts'), BROWSER)).toEqual([]);
+    const { EventSchema } = (await import(
+      pathToFileURL(path.join(directory, library, 'event.ts')).href
+    )) as { EventSchema: unknown };
+    const at = (value: string): boolean => accepts(EventSchema, { at: value });
+    expect(at('2026-01-01T10:00:00Z')).toBe(true);
+    expect(at('2026-01-01t10:00:00z')).toBe(true);
+    expect(at('2026-01-01T10:00:00.123+02:00')).toBe(true);
+    expect(at('2026-01-01')).toBe(false);
+    expect(at('2026-01-01T10:00:00')).toBe(false);
+    expect(at('2026-13-45T10:00:00Z')).toBe(false);
+  });
 });

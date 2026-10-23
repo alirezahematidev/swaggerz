@@ -38,6 +38,7 @@ import { looksLikeReference } from '../../loader/refs.ts';
 import { SchemaConverter } from '../schema/converter.ts';
 import type { SchemaDialect } from '../schema/dialects.ts';
 import {
+  checkTagParents,
   isBinaryMediaType,
   isHttpMethod,
   isValidStatus,
@@ -46,10 +47,10 @@ import {
   readExamplesMap,
   readExternalDocs,
   readInfo,
-  checkTagParents,
   readSecurity,
   readStringArray,
   readTags,
+  resolveServerUrl,
   singleExample,
   sortOperations,
   sortResponses,
@@ -248,7 +249,8 @@ export function readServers(cursor: Cursor): ServerIR[] {
       });
     }
     result.push({
-      url,
+      // Relative to the document that declares the server.
+      url: resolveServerUrl(url, cursor.doc.url),
       variables,
       ...stripUndefined({ name: str(server, 'name'), description: str(server, 'description') }),
     });

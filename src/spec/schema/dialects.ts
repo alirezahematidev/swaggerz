@@ -76,16 +76,54 @@ function readTypeKeyword(
   return list;
 }
 
-function legacyNumberConstraints(cursor: Cursor): NumberConstraints | undefined {
-  const minimum = num(cursor, 'minimum');
-  const maximum = num(cursor, 'maximum');
-  const exclusiveMin = bool(cursor, 'exclusiveMinimum') === true;
-  const exclusiveMax = bool(cursor, 'exclusiveMaximum') === true;
-  const multipleOf = num(cursor, 'multipleOf');
+/**
+ * Numeric bounds. `exclusiveMinimum`/`exclusiveMaximum` are booleans that make `minimum`/`maximum`
+ * exclusive in Swagger 2.0 and OpenAPI 3.0, and bounds of their own (numbers) from OpenAPI 3.1.
+ * Real documents use both forms in every version, so each bound accepts either; the form that is
+ * not the version's is reported.
+ */
+function numberConstraints(
+  cursor: Cursor,
+  ctx: ParseContext,
+  label: string,
+  form: 'boolean' | 'number',
+): NumberConstraints | undefined {
+  const raw = isRecord(cursor.value) ? cursor.value : {};
   const result: Record<string, number> = {};
-  if (minimum !== undefined) result[exclusiveMin ? 'exclusiveMinimum' : 'minimum'] = minimum;
-  if (maximum !== undefined) result[exclusiveMax ? 'exclusiveMaximum' : 'maximum'] = maximum;
+  let foreign = false;
+  for (const [bound, exclusive] of [
+    ['minimum', 'exclusiveMinimum'],
+    ['maximum', 'exclusiveMaximum'],
+  ] as const) {
+    const value = num(cursor, bound);
+    const flag = raw[exclusive];
+    if (typeof flag === 'boolean') {
+      foreign ||= form === 'number';
+      if (value !== undefined) result[flag ? exclusive : bound] = value;
+      continue;
+    }
+    if (value !== undefined) result[bound] = value;
+    const limit = num(cursor, exclusive);
+    if (limit !== undefined) {
+      foreign ||= form === 'boolean';
+      result[exclusive] = limit;
+    }
+  }
+  const multipleOf = num(cursor, 'multipleOf');
   if (multipleOf !== undefined) result.multipleOf = multipleOf;
+  if (foreign && form === 'number') {
+    ctx.warning(
+      'schema/exclusive-boolean',
+      `Boolean exclusiveMinimum/exclusiveMaximum are OpenAPI 3.0 syntax; in ${label} they are numbers.`,
+      cursor,
+    );
+  } else if (foreign) {
+    ctx.warning(
+      'schema/foreign-keyword',
+      `Numeric exclusiveMinimum/exclusiveMaximum are OpenAPI 3.1 syntax; in ${label} they are booleans. The number is used as an exclusive bound.`,
+      cursor,
+    );
+  }
   return Object.keys(result).length === 0 ? undefined : result;
 }
 
@@ -158,7 +196,7 @@ export const swagger2Dialect: SchemaDialect = {
     const nullable = bool(cursor, 'x-nullable') === true || bool(cursor, 'nullable') === true;
     return { types, nullable };
   },
-  readNumberConstraints: (cursor) => legacyNumberConstraints(cursor),
+  readNumberConstraints: (cursor, ctx) => numberConstraints(cursor, ctx, 'Swagger 2.0', 'boolean'),
   readExamples: singleExample,
   isBinaryString: (cursor) => str(cursor, 'format') === 'binary',
   readDiscriminator(cursor, ctx) {
@@ -207,7 +245,7 @@ export const oas30Dialect: SchemaDialect = {
     }
     return { types, nullable: bool(cursor, 'nullable') === true };
   },
-  readNumberConstraints: (cursor) => legacyNumberConstraints(cursor),
+  readNumberConstraints: (cursor, ctx) => numberConstraints(cursor, ctx, 'OpenAPI 3.0', 'boolean'),
   readExamples: singleExample,
   isBinaryString: (cursor) => str(cursor, 'format') === 'binary',
   readDiscriminator: objectDiscriminator,
@@ -237,29 +275,7 @@ function jsonSchemaDialect(label: string, discriminatorDefaults: boolean): Schem
       if (nonNull.length === 0) return { types: ['null'], nullable: false };
       return { types: nonNull, nullable: nonNull.length !== types.length };
     },
-    readNumberConstraints(cursor, ctx) {
-      const raw = isRecord(cursor.value) ? cursor.value : {};
-      if (typeof raw.exclusiveMinimum === 'boolean' || typeof raw.exclusiveMaximum === 'boolean') {
-        ctx.warning(
-          'schema/exclusive-boolean',
-          `Boolean exclusiveMinimum/exclusiveMaximum are OpenAPI 3.0 syntax; in ${label} they are numbers.`,
-          cursor,
-        );
-        return legacyNumberConstraints(cursor);
-      }
-      const result: Record<string, number> = {};
-      for (const key of [
-        'minimum',
-        'maximum',
-        'exclusiveMinimum',
-        'exclusiveMaximum',
-        'multipleOf',
-      ] as const) {
-        const value = num(cursor, key);
-        if (value !== undefined) result[key] = value;
-      }
-      return Object.keys(result).length === 0 ? undefined : result;
-    },
+    readNumberConstraints: (cursor, ctx) => numberConstraints(cursor, ctx, label, 'number'),
     readExamples(cursor) {
       const raw = isRecord(cursor.value) ? cursor.value.examples : undefined;
       const list = Array.isArray(raw) ? raw.map((value) => toJsonValue(value) ?? null) : [];

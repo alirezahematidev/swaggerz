@@ -45,6 +45,7 @@ import {
   readSecurity,
   readStringArray,
   readTags,
+  resolveServerUrl,
   sortOperations,
   sortResponses,
   stripUndefined,
@@ -125,13 +126,19 @@ export function normalizeSwagger2(ctx: ParseContext): ApiDocument {
 function readServers(root: Cursor): ServerIR[] {
   const host = str(root, 'host');
   const basePath = str(root, 'basePath') ?? '';
-  if (host === undefined) return basePath === '' ? [] : [{ url: basePath, variables: {} }];
+  // Without `host`, "the host serving the documentation is to be used".
+  const remote = /^https?:/i.test(root.doc.url);
+  if (host === undefined) {
+    if (remote) return [{ url: resolveServerUrl(basePath || '/', root.doc.url), variables: {} }];
+    return basePath === '' ? [] : [{ url: basePath, variables: {} }];
+  }
   const declared = readStringArray(child(root, 'schemes')).filter(
     (s) => s === 'https' || s === 'http',
   );
+  // Without `schemes`, the scheme the document was loaded with (https for local documents).
   const schemes =
     declared.length === 0
-      ? ['https']
+      ? [remote ? new URL(root.doc.url).protocol.slice(0, -1) : 'https']
       : [...declared].sort((a, b) => (a === b ? 0 : a === 'https' ? -1 : 1));
   return schemes.map((scheme) => ({ url: `${scheme}://${host}${basePath}`, variables: {} }));
 }

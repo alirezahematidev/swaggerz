@@ -22,6 +22,32 @@ import {
   type ParseContext,
 } from './context.ts';
 
+/**
+ * A server URL relative to a remote document (`/v1`, `v1`, `//host/v1`), resolved against the URL
+ * the document was loaded from, as OpenAPI specifies. Absolute URLs, URLs that start with a
+ * variable (`{scheme}://…`), and relative URLs of local documents (which a client resolves itself,
+ * for example against the page in a browser) are kept. Server variables survive the resolution.
+ */
+export function resolveServerUrl(url: string, documentUrl: string): string {
+  if (url === '' || !/^https?:/i.test(documentUrl)) return url;
+  if (/^[a-z][a-z\d+.-]*:/i.test(url) || url.startsWith('{')) return url;
+  const variables: string[] = [];
+  const masked = url.replace(
+    /\{[^{}]*\}/g,
+    (variable) => `swaggerz${variables.push(variable) - 1}var`,
+  );
+  let resolved: string;
+  try {
+    resolved = new URL(masked, documentUrl).href;
+  } catch {
+    return url;
+  }
+  return resolved.replace(
+    /swaggerz(\d+)var/g,
+    (_, index: string) => variables[Number(index)] ?? '',
+  );
+}
+
 export function operationLabel(method: string, path: string, operationId?: string): string {
   return `${method.toUpperCase()} ${path}${operationId === undefined ? '' : ` (${operationId})`}`;
 }

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CONFIG_EXTENSIONS, loadConfig } from '../../../src/config/load.ts';
 import type { JsonSchema } from '../../../src/config/schema.ts';
@@ -27,7 +28,8 @@ const ANSWERS: InitAnswers = {
   output: './src/api',
   language: 'typescript',
   adapter: 'axios',
-  reactQuery: true,
+  hooks: { query: 'react' },
+  validation: 'valibot',
 };
 
 describe('config file formats', () => {
@@ -57,6 +59,7 @@ describe('config file formats', () => {
       expect(loaded.config.output.directory).toBe(path.join(dir, 'src', 'api'));
       expect(loaded.config.client.adapter).toBe('axios');
       expect(loaded.config.features.query).toMatchObject({ framework: 'react' });
+      expect(loaded.config.features.validation).toMatchObject({ library: 'valibot' });
     }),
   );
 
@@ -263,6 +266,39 @@ describe('plugin references', () => {
         'cjs-v2',
         'pkg',
       ]);
+    }));
+
+  it('evaluates a config module again only when its content changed', () =>
+    withTempDir(async (dir) => {
+      const counter = `swaggerzConfigEvaluations${path.basename(dir).replace(/\W/g, '')}`;
+      const config = (input: string): string =>
+        `globalThis.${counter} = (globalThis.${counter} ?? 0) + 1;\nexport default { spec: { version: '3.0', input: '${input}' } };\n`;
+      await write(dir, 'swaggerz.config.mjs', config('a.yaml'));
+      const evaluations = (): unknown => (globalThis as Record<string, unknown>)[counter];
+      await loadConfig({ cwd: dir });
+      await loadConfig({ cwd: dir });
+      // A reload of an unchanged config reuses the module instead of keeping another copy.
+      expect(evaluations()).toBe(1);
+      await write(dir, 'swaggerz.config.mjs', config('b.yaml'));
+      const edited = await loadConfig({ cwd: dir });
+      expect(evaluations()).toBe(2);
+      expect(edited.config.spec.input).toBe(path.join(dir, 'b.yaml'));
+    }));
+
+  it('resolves npm-style file: plugin references from the project', () =>
+    withTempDir(async (dir) => {
+      const plugin = await write(dir, 'plugins/local.mjs', "export default { name: 'local' };\n");
+      await write(
+        dir,
+        'swaggerz.config.json',
+        JSON.stringify({
+          spec: { version: '3.0', input: 'spec.yaml' },
+          plugins: ['file:./plugins/local.mjs', pathToFileURL(plugin).href],
+        }),
+      );
+      const loaded = await loadConfig({ cwd: dir });
+      expect(loaded.plugins.map((p) => p.name)).toEqual(['local', 'local']);
+      expect(loaded.watchFiles).toEqual([plugin]);
     }));
 
   it('reports a malformed package.json of a plugin package as a load failure', () =>

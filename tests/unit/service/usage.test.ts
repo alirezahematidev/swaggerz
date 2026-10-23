@@ -43,6 +43,58 @@ async function scan(
 }
 
 describe('usage scanning', () => {
+  it('scans the scripts and templates of Vue and Svelte components', async () => {
+    const { entry, report } = await scan('usage-components', {
+      'src/Pet.vue': [
+        '<template>',
+        '  <p>{{ formatPet(pet) }}</p>',
+        '</template>',
+        '',
+        '<script setup lang="ts">',
+        "import { getPetById, formatPet, type Pet } from './generated/api/index.js';",
+        'const pet: Pet = await getPetById({ petId: 1 });',
+        '</script>',
+        '',
+        '<style scoped>',
+        'p { color: red; }',
+        '</style>',
+      ].join('\n'),
+      'src/Inventory.svelte': [
+        '<script>',
+        "  import { getInventory } from './generated/api/index.js';",
+        '  const inventory = getInventory();',
+        '</script>',
+        '',
+        '{#await inventory}<p>Loading…</p>{/await}',
+      ].join('\n'),
+    });
+    expect(report.scannedFiles).toBe(2);
+    expect(entry('getPetById')).toMatchObject({
+      status: 'used',
+      references: 1,
+      locations: [{ file: 'src/Pet.vue', line: 6, column: 10 }],
+    });
+    // `formatPet` is not generated; the template use of a generated name counts.
+    expect(entry('getInventory')).toMatchObject({
+      status: 'used',
+      references: 1,
+      locations: [{ file: 'src/Inventory.svelte', line: 2, column: 12 }],
+    });
+    expect(entry('addPet')?.status).toBe('unused');
+  });
+
+  it('counts names used only in a component template', async () => {
+    const { entry } = await scan('usage-template', {
+      'src/Pets.vue': [
+        '<script setup>',
+        "import { findPetsByStatus } from './generated/api/index.js';",
+        '</script>',
+        '<template><button @click="findPetsByStatus({ status: [] })">Find</button></template>',
+      ].join('\n'),
+    });
+    expect(entry('findPetsByStatus')).toMatchObject({ status: 'used', references: 1 });
+  });
+
   it('attributes imports through every barrel to the module defining the name', async () => {
     const { entry } = await scan(
       'usage-barrels',

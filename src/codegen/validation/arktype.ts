@@ -7,6 +7,7 @@ import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
 import {
   acceptsAnything,
+  DATE_TIME_PATTERN,
   intersectionMembers,
   isInheritedOptional,
   wireType,
@@ -135,7 +136,8 @@ function arkBase(schema: Exclude<SchemaIR, { kind: 'ref' }>, ac: ArkContext): st
       // converted after validation, so their format is checked here.
       const format = ac.ctx.config.types.dates === 'Date' ? dateFormat(schema) : undefined;
       if (format === 'date') return `${t()}('string.date.iso').and(/^\\d{4}-\\d{2}-\\d{2}$/)`;
-      if (format === 'date-time') return `${t()}('string.date.iso').and(/^\\d{4}-\\d{2}-\\d{2}T/)`;
+      if (format === 'date-time')
+        return `${t()}(${DATE_TIME_PATTERN}).narrow((value, ctx) => !Number.isNaN(Date.parse(value)) || ctx.mustBe('a valid date-time'))`;
       // JSON Schema counts characters (code points), ArkType's length UTF-16 code units: a string
       // is only counted when its code units could exceed the bound.
       let expression = `${t()}.string`;

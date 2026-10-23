@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { access, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -93,8 +94,6 @@ export function configNotFound(cwd: string): SwaggerzError {
   ]);
 }
 
-let importGeneration = 0;
-
 /**
  * Imports a config module with Node's own module loader. TypeScript files rely on Node's built-in
  * type stripping (Node >= 22.18), so no code is evaluated through `eval` or `new Function`.
@@ -102,9 +101,21 @@ let importGeneration = 0;
  */
 export async function importConfigModule(file: string): Promise<unknown> {
   const url = pathToFileURL(file);
-  // A unique query string bypasses the ESM cache so watch mode picks up edits; CommonJS modules
-  // are cached by file name instead.
-  url.searchParams.set('v', `${Date.now()}-${++importGeneration}`);
+  // A hash of the content in the URL makes an edited file evaluate again (watch mode, dashboard,
+  // MCP) while reloads of an unchanged file reuse the cached module: Node never frees modules, so
+  // a new URL per reload would keep a copy of the config for every reload. CommonJS modules are
+  // cached by file name instead.
+  try {
+    url.searchParams.set(
+      'v',
+      createHash('sha256')
+        .update(await readFile(file))
+        .digest('hex')
+        .slice(0, 16),
+    );
+  } catch {
+    // Unreadable: importing it reports why.
+  }
   forgetCommonJsModule(file);
   let module: unknown;
   try {

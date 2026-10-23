@@ -1,4 +1,6 @@
+import { existsSync, watch, type FSWatcher } from 'node:fs';
 import { stat } from 'node:fs/promises';
+import path from 'node:path';
 import { RemoteWatcher } from '../loader/remote-watcher.ts';
 import { FileWatcher, type FileWatcherOptions } from '../utils/file-watcher.ts';
 import type { ProjectService, ReloadOutcome } from './project.ts';
@@ -24,10 +26,16 @@ export interface ProjectWatcherEvents {
  */
 const MANIFEST_CHECK_MS = 2000;
 
+/** Changes inside the output directory (a generation writes many files) are reported together. */
+const OUTPUT_DEBOUNCE_MS = 300;
+
 export interface ProjectWatcherOptions {
   /** How often the output manifest is checked besides file events (milliseconds). */
   readonly manifestCheckMs?: number;
-  /** Creates the platform file watchers (`fs.watch`; replaced in tests). */
+  /**
+   * Creates the platform file watchers (`fs.watch`; replaced in tests). The output directory is
+   * watched with it too, recursively.
+   */
   readonly watch?: FileWatcherOptions['watch'];
 }
 
@@ -47,6 +55,9 @@ export class ProjectWatcher {
   #manifestTimer: ReturnType<typeof setInterval> | undefined;
   /** The output manifest's path, size and modification time when it was last looked at. */
   #manifest: Promise<string> | undefined;
+  /** Watches the generated files, so a hand edit makes the generation status stale. */
+  #output: { readonly directory: string; readonly watcher: FSWatcher } | undefined;
+  #outputTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     service: ProjectService,
@@ -102,6 +113,7 @@ export class ProjectWatcher {
     }, this.#options.manifestCheckMs ?? MANIFEST_CHECK_MS);
     // The check never keeps the process alive on its own.
     this.#manifestTimer.unref();
+    this.#watchOutput();
   }
 
   /** Reloads the project now, after any reload in progress. */
@@ -112,14 +124,52 @@ export class ProjectWatcher {
   async close(): Promise<void> {
     if (this.#manifestTimer !== undefined) clearInterval(this.#manifestTimer);
     this.#manifestTimer = undefined;
+    if (this.#outputTimer !== undefined) clearTimeout(this.#outputTimer);
+    this.#outputTimer = undefined;
+    this.#output?.watcher.close();
+    this.#output = undefined;
     await Promise.all([this.#files?.close(), this.#remote?.close()]);
   }
 
-  /** The output manifest changed: the service drops its cached generation status. */
+  /** The output changed: the service drops its cached generation status. */
   #outputChanged(): void {
     this.#manifest = this.#manifestState();
+    this.#watchOutput();
     const revision = this.#service.outputChanged();
     this.#events.outputChanged?.(revision);
+  }
+
+  /**
+   * Watches the output directory (recursively) while it exists, so changes to generated files,
+   * hand edits included, are noticed and not only changes to the manifest.
+   */
+  #watchOutput(): void {
+    if (this.#manifestTimer === undefined) return;
+    const directory = path.dirname(this.#service.watchTargets().manifest);
+    if (this.#output?.directory === directory) return;
+    this.#output?.watcher.close();
+    this.#output = undefined;
+    if (!existsSync(directory)) return;
+    try {
+      const listener = (): void => {
+        if (this.#outputTimer !== undefined) clearTimeout(this.#outputTimer);
+        this.#outputTimer = setTimeout(() => {
+          this.#outputTimer = undefined;
+          this.#outputChanged();
+        }, OUTPUT_DEBOUNCE_MS);
+      };
+      const watcher =
+        this.#options.watch?.(directory, listener) ??
+        watch(directory, { recursive: true }, listener);
+      watcher.on('error', () => {
+        // Removed (or no longer readable): the manifest check watches it again when it is back.
+        watcher.close();
+        if (this.#output?.watcher === watcher) this.#output = undefined;
+      });
+      this.#output = { directory, watcher };
+    } catch {
+      // Not watchable right now; the manifest check tries again.
+    }
   }
 
   async #manifestState(): Promise<string> {
@@ -139,8 +189,13 @@ export class ProjectWatcher {
     const [before, now] = await Promise.all([previous, this.#manifestState()]);
     // A file event (or a check) that ran meanwhile already handled it.
     if (this.#manifestTimer === undefined || this.#manifest !== previous) return;
-    if (now === before) return;
-    this.#outputChanged();
+    if (now !== before) {
+      this.#outputChanged();
+      return;
+    }
+    // The output directory may have been created or removed without the manifest changing.
+    const directory = path.dirname(this.#service.watchTargets().manifest);
+    if ((this.#output === undefined) === existsSync(directory)) this.#watchOutput();
   }
 
   #reload(trigger: ReloadTrigger, changed: readonly string[]): Promise<ReloadOutcome> {
@@ -160,6 +215,8 @@ export class ProjectWatcher {
     const { sources, manifest, remote, interval } = this.#service.watchTargets();
     this.#files.set([...sources, manifest]);
     this.#remote?.set(remote, interval);
+    // The output directory may have moved (a changed config).
+    this.#watchOutput();
     this.#service.setWatching([...sources, ...remote.map((document) => document.url)]);
   }
 }

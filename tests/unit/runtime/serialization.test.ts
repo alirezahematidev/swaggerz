@@ -132,12 +132,11 @@ describe('bodies', () => {
     });
   });
 
-  it('builds multipart bodies without a content type (the transport adds the boundary)', async () => {
+  it('builds multipart bodies of strings and files as FormData (the transport adds the boundary)', async () => {
     const { body, contentType } = serializeBody(
       {
         file: new Blob(['hi'], { type: 'text/plain' }),
         tags: ['a', 'b'],
-        meta: { x: 1 },
         bytes: new Uint8Array([65]),
       },
       'multipart/form-data',
@@ -145,10 +144,44 @@ describe('bodies', () => {
     expect(contentType).toBeUndefined();
     const form = body as FormData;
     expect(form.getAll('tags')).toEqual(['a', 'b']);
-    expect(form.get('meta')).toBe('{"x":1}');
     expect(await (form.get('file') as Blob).text()).toBe('hi');
     expect(await (form.get('bytes') as Blob).text()).toBe('A');
     expect(toFormData({ csv: [1, 2] }, { csv: { explode: false } }).get('csv')).toBe('1,2');
+  });
+
+  it('labels JSON and typed parts with a Content-Type, without making them files', async () => {
+    const { body, contentType } = serializeBody(
+      {
+        meta: { x: 1 },
+        note: 'hello',
+        csv: 'a,b',
+        file: new File(['png'], 'photo "1".png', { type: 'image/png' }),
+        bytes: new Uint8Array([65]),
+        'line\nbreak': 'v',
+      },
+      'multipart/form-data',
+      { csv: { contentType: 'text/csv' }, bytes: { contentType: 'image/png, image/jpeg' } },
+    );
+    expect(contentType).toMatch(/^multipart\/form-data; boundary=----swaggerz[\da-f]{24}$/);
+    const boundary = contentType?.split('boundary=')[1] ?? '';
+    const text = await (body as Blob).text();
+    expect(text.split(`--${boundary}`)).toEqual([
+      '',
+      '\r\nContent-Disposition: form-data; name="meta"\r\nContent-Type: application/json\r\n\r\n{"x":1}\r\n',
+      '\r\nContent-Disposition: form-data; name="note"\r\n\r\nhello\r\n',
+      '\r\nContent-Disposition: form-data; name="csv"\r\nContent-Type: text/csv\r\n\r\na,b\r\n',
+      '\r\nContent-Disposition: form-data; name="file"; filename="photo %221%22.png"\r\nContent-Type: image/png\r\n\r\npng\r\n',
+      // A list of allowed types names no single one: bytes are sent as such.
+      '\r\nContent-Disposition: form-data; name="bytes"; filename="blob"\r\nContent-Type: application/octet-stream\r\n\r\nA\r\n',
+      '\r\nContent-Disposition: form-data; name="line%0D%0Abreak"\r\n\r\nv\r\n',
+      '--\r\n',
+    ]);
+    // A standard multipart parser reads it back: the JSON part is a field, not an upload.
+    const form = await new Response(body as Blob, {
+      headers: { 'content-type': contentType ?? '' },
+    }).formData();
+    expect(form.get('meta')).toBe('{"x":1}');
+    expect((form.get('file') as File).name).toBe('photo "1".png');
   });
 
   it('applies the encoding style of object properties in urlencoded bodies', () => {

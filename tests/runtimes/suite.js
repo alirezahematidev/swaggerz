@@ -92,6 +92,31 @@ export async function runSuite(api, baseUrl, run) {
     assert(/name="tags"\r\n\r\nx\r\n/.test(echo), 'array parts');
   });
 
+  await test('multipart JSON parts are labeled, not uploaded as files', async () => {
+    const uploaded = await api.uploadFile(
+      {
+        petId: 1,
+        additionalMetadata: 'meta',
+        body: { meta: { a: 1 }, file: new Blob(['hello'], { type: 'text/plain' }) },
+      },
+      options,
+    );
+    const echo = uploaded.type ?? '';
+    assert(
+      echo.startsWith('multipart/form-data; boundary=----swaggerz'),
+      `content type was ${echo.split('\n')[0]}`,
+    );
+    assert(
+      /name="meta"\r\nContent-Type: application\/json\r\n\r\n\{"a":1\}\r\n/.test(echo),
+      'JSON part',
+    );
+    assert(
+      // Bun reports the Blob's type with its charset (`text/plain;charset=utf-8`).
+      /name="file"; filename="blob"\r\nContent-Type: text\/plain[^\r]*\r\n\r\nhello\r\n/.test(echo),
+      'file part',
+    );
+  });
+
   await test('binary responses are Blobs', async () => {
     const photo = await api.downloadPhoto({ petId: 1 }, options);
     assert(photo instanceof Blob && photo.size === 4, `got ${String(photo)}`);

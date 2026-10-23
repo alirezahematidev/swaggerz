@@ -136,6 +136,18 @@ export class StatusTypes {
   }
 
   /**
+   * The 2xx statuses no success response declares, which resolve too (every 2xx does), e.g.
+   * `Exclude<HttpStatus<2>, 200>`; `undefined` when a `2XX` range or a `default` success response
+   * covers them.
+   */
+  undeclaredSuccess(plan: OperationPlan): string | undefined {
+    const declared = plan.success.map((r) => r.response.status.toUpperCase());
+    if (declared.length === 0 || declared.some((s) => s === '2XX' || s === 'DEFAULT'))
+      return undefined;
+    return this.#range(2);
+  }
+
+  /**
    * Statuses no response declares and that do not resolve, e.g. `Exclude<HttpStatus<1 | 3 | 4 | 5>,
    * 404>`; `undefined` when there are none.
    */
@@ -183,6 +195,9 @@ export function responseTypes(
     const variants = plan.success.map(
       (r) => `${apiResponse}<${bodyType(r)}, ${statuses.of(r.response.status, true)}>`,
     );
+    // Undeclared 2xx statuses resolve as well; nothing describes their bodies.
+    const undeclared = statuses.undeclaredSuccess(plan);
+    if (undeclared !== undefined) variants.push(`${apiResponse}<unknown, ${undeclared}>`);
     response = variants.length === 0 ? `${apiResponse}<undefined>` : uniqueUnion(variants);
   } else {
     const types = plan.success.map(bodyType);

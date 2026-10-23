@@ -152,7 +152,13 @@ export async function loadPluginEntries(
 }
 
 function resolveSpecifier(specifier: string, root: string): string | undefined {
-  if (specifier.startsWith('file:')) return fileURLToPath(specifier);
+  // `file:///abs/plugin.mjs` is a URL; npm-style `file:./plugin.mjs` is a path relative to the
+  // project (as a URL it would point to the file system root).
+  if (specifier.startsWith('file://')) return fileURLToPath(specifier);
+  if (specifier.startsWith('file:')) {
+    const file = path.resolve(root, specifier.slice('file:'.length));
+    return existsSync(file) ? file : undefined;
+  }
   if (isLocalSpecifier(specifier)) {
     const file = path.resolve(root, specifier);
     return existsSync(file) ? file : undefined;

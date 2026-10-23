@@ -218,6 +218,66 @@ describe('remote documents', () => {
   });
 });
 
+describe('server URLs of remote documents', () => {
+  it('resolve relative server URLs against the document URL', async () => {
+    const documents: Record<string, unknown> = {
+      '/specs/openapi.json': {
+        openapi: '3.0.3',
+        info: { title: 'T', version: '1' },
+        servers: [
+          { url: '/v1' },
+          { url: 'v2/{tenant}', variables: { tenant: { default: 'acme' } } },
+          { url: '//cdn.example.com/x' },
+          { url: 'https://api.example.com/v3' },
+          { url: '{scheme}://api.example.com', variables: { scheme: { default: 'https' } } },
+        ],
+        paths: {},
+      },
+      '/specs/swagger.json': {
+        swagger: '2.0',
+        info: { title: 'T', version: '1' },
+        basePath: '/api',
+        paths: {},
+      },
+    };
+    const remote = await listen((req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(documents[req.url ?? '']));
+    });
+    try {
+      const parse = async (file: string): Promise<string[]> => {
+        const diagnostics = new DiagnosticBag();
+        const config = makeConfig({
+          spec: { version: 'auto', input: `http://127.0.0.1:${remote.port}${file}` },
+        });
+        const { ir } = await parseSpecification({ config, diagnostics });
+        return ir?.servers.map((server) => server.url) ?? [];
+      };
+      const origin = `http://127.0.0.1:${remote.port}`;
+      expect(await parse('/specs/openapi.json')).toEqual([
+        `${origin}/v1`,
+        `${origin}/specs/v2/{tenant}`,
+        'http://cdn.example.com/x',
+        'https://api.example.com/v3',
+        '{scheme}://api.example.com',
+      ]);
+      // Without `host`, the host serving the document, with the scheme it was loaded with.
+      expect(await parse('/specs/swagger.json')).toEqual([`${origin}/api`]);
+    } finally {
+      remote.server.close();
+    }
+  });
+
+  it('keep relative server URLs of local documents', async () => {
+    const { ir } = await parseText(`openapi: 3.0.3
+info: { title: T, version: '1' }
+servers: [{ url: /v1 }]
+paths: {}
+`);
+    expect(ir?.servers.map((server) => server.url)).toEqual(['/v1']);
+  });
+});
+
 describe('YAML', () => {
   it('rejects aliases that contain themselves instead of looping', () => {
     expect(() =>
@@ -426,6 +486,34 @@ paths:
 `);
     expect(errors(diagnostics)).toEqual([]);
     expect(ir?.operations.map((op) => op.path)).toEqual(['/pets']);
+  });
+
+  it('accepts both forms of exclusive bounds in every version', async () => {
+    const schema = (version: string): string => `openapi: ${version}
+info: { title: T, version: '1' }
+paths: {}
+components:
+  schemas:
+    Range:
+      type: number
+      minimum: 0
+      exclusiveMinimum: 1
+      maximum: 10
+      exclusiveMaximum: true
+`;
+    for (const [version, code] of [
+      ['3.0.3', 'schema/foreign-keyword'],
+      ['3.1.0', 'schema/exclusive-boolean'],
+    ] as const) {
+      const { ir, diagnostics } = await parseText(schema(version));
+      const range = ir?.schemas.find((s) => s.name === 'Range')?.schema;
+      expect(range?.kind === 'number' ? range.constraints : undefined).toEqual({
+        minimum: 0,
+        exclusiveMinimum: 1,
+        exclusiveMaximum: 10,
+      });
+      expect(codes(diagnostics)).toContain(code);
+    }
   });
 
   it('reads an unquoted YAML info.version as text, with a warning', async () => {

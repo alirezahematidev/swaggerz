@@ -128,6 +128,35 @@ describe('init', () => {
     expect(again.stderr).toContain('already exists');
     expect((await run(['init', '--force', '--language', 'cobol'], project)).code).toBe(2);
   });
+
+  it('picks hooks from the options or package.json, and validation from the options', async () => {
+    const project = await createProject('cli-init-features', {
+      files: {
+        'package.json': JSON.stringify({
+          dependencies: { '@tanstack/vue-query': '^5.0.0', valibot: '^1.0.0' },
+        }),
+      },
+    });
+    await rm(path.join(project, 'swaggerz.config.mjs'));
+    const config = async (...args: string[]): Promise<Record<string, unknown>> => {
+      expect((await run(['init', '--force', '--format', 'json', ...args], project)).code).toBe(0);
+      return JSON.parse(
+        await readFile(path.join(project, 'swaggerz.config.json'), 'utf8'),
+      ) as Record<string, unknown>;
+    };
+    // Hooks follow the dependencies; validation (it checks responses) is only enabled on request.
+    expect((await config()).features).toEqual({ query: { framework: 'vue' } });
+    expect((await config('--swr', '--validation', 'arktype')).features).toEqual({
+      swr: true,
+      validation: 'arktype',
+    });
+    expect((await config('--react-query', '--no-detect')).features).toEqual({
+      query: { framework: 'react' },
+    });
+    expect((await config('--no-detect')).features).toBeUndefined();
+    expect((await run(['init', '--force', '--query', 'svelte', '--swr'], project)).code).toBe(2);
+    expect((await run(['init', '--force', '--validation', 'yup'], project)).code).toBe(2);
+  });
 });
 
 describe('commands on a project', () => {

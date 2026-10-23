@@ -7,9 +7,11 @@ import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
 import {
   acceptsAnything,
+  DATE_TIME_PATTERN,
   isInheritedOptional,
   ownPropertiesFunction,
   wireType,
+  VALID_DATE,
   type Validator,
 } from './shared.ts';
 
@@ -153,7 +155,8 @@ function zodBase(
       // after validation, so their format is checked here.
       const format = zc.ctx.config.types.dates === 'Date' ? dateFormat(schema) : undefined;
       if (format === 'date') return `${z}.iso.date()`;
-      if (format === 'date-time') return `${z}.iso.datetime({ offset: true })`;
+      if (format === 'date-time')
+        return `${z}.string().regex(${DATE_TIME_PATTERN}).refine(${VALID_DATE}, 'Invalid date-time')`;
       let expression = `${z}.string()`;
       if (schema.constraints?.minLength !== undefined)
         expression += `.min(${schema.constraints.minLength})`;

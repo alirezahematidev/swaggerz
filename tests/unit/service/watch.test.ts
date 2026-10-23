@@ -3,6 +3,8 @@ import type { FSWatcher } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadConfig } from '../../../src/config/load.ts';
+import { runGeneration } from '../../../src/pipeline/generate.ts';
 import { ProjectService, type ReloadOutcome } from '../../../src/service/project.ts';
 import { ProjectWatcher } from '../../../src/service/watch.ts';
 import { createProject } from '../../support/project.ts';
@@ -181,5 +183,35 @@ describe('ProjectWatcher and the output directory', () => {
     await vi.waitFor(() => {
       expect(changes).toHaveLength(2);
     });
+  });
+
+  it('notices hand edits of generated files', async () => {
+    const directory = await createProject('watch-output-edit', {
+      config: { spec: { version: '3.0', input: './openapi.yaml' } },
+      files: { 'openapi.yaml': SPEC, 'schemas/pet.yaml': PET },
+    });
+    const service = new ProjectService({ cwd: directory, env: {} });
+    await service.reload('start');
+    const { config } = await loadConfig({ cwd: directory, env: {} });
+    expect((await runGeneration({ config })).ok).toBe(true);
+    const changes: number[] = [];
+    const watcher = new ProjectWatcher(service, {
+      outputChanged: (revision) => changes.push(revision),
+    });
+    watcher.start();
+    closers.push(() => watcher.close());
+    expect((await service.overview()).generation.status).toBe('up-to-date');
+    // Let the platform watcher of the output directory start before editing.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    const file = path.join(config.output.directory, 'index.ts');
+    await writeFile(file, `${await readFile(file, 'utf8')}// edited by hand\n`);
+    await vi.waitFor(
+      async () => {
+        expect(changes.length).toBeGreaterThan(0);
+        expect((await service.overview()).generation.status).toBe('stale');
+      },
+      { timeout: 10_000 },
+    );
   });
 });

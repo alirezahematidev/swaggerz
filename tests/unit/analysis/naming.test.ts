@@ -46,6 +46,17 @@ describe('toIdentifier', () => {
     expect(toFileName('GetPetByID', 'kebab-case')).toBe('get-pet-by-id');
     expect(toFileName('Items & Things', 'kebab-case')).toBe('items-things');
   });
+
+  it('avoids names Windows reserves for devices, in every style', () => {
+    expect(toFileName('Con', 'kebab-case')).toBe('con_');
+    expect(toFileName('aux', 'PascalCase')).toBe('Aux_');
+    expect(toFileName('NUL', 'snake_case')).toBe('nul_');
+    expect(toFileName('com1', 'camelCase')).toBe('com1_');
+    expect(toFileName('LPT9', 'kebab-case')).toBe('lpt9_');
+    // Only the whole name is reserved.
+    expect(toFileName('Console', 'kebab-case')).toBe('console');
+    expect(toFileName('aux data', 'kebab-case')).toBe('aux-data');
+  });
 });
 
 describe('NameRegistry', () => {

@@ -512,4 +512,36 @@ paths:
     expect(files).toContain('models-api/listC.ts');
     expect(typecheck(await listFiles(directory, '.ts'), BROWSER)).toEqual([]);
   });
+
+  it('never names a file or directory after a Windows device', async () => {
+    const input = await writeSpec(
+      'edge-devices',
+      `openapi: 3.1.0
+info: { title: Devices, version: '1' }
+paths:
+  /con:
+    get:
+      operationId: con
+      tags: [aux]
+      responses:
+        '200':
+          description: ok
+          content: { application/json: { schema: { $ref: '#/components/schemas/Nul' } } }
+components:
+  schemas:
+    Nul: { type: object, properties: { a: { type: string } } }
+`,
+    );
+    const { directory, result } = await generateCase('edge-devices', {
+      spec: { version: '3.1', input },
+    });
+    const files = result.files.map((file) => file.path);
+    expect(files).toContain('aux_/con_.ts');
+    expect(files).toContain('models/nul_.ts');
+    const reserved = /^(?:con|prn|aux|nul|com\d|lpt\d)$/i;
+    expect(
+      files.flatMap((file) => file.split('/').map((part) => part.replace(/\.[^.]*$/, ''))),
+    ).not.toContainEqual(expect.stringMatching(reserved));
+    expect(typecheck(await listFiles(directory, '.ts'), BROWSER)).toEqual([]);
+  });
 });

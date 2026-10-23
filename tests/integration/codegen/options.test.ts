@@ -78,8 +78,9 @@ describe('output options', () => {
       spec: petstore,
       client: { responseStyle: 'full' },
     });
+    // Undeclared 2xx statuses resolve too, with a body nothing describes.
     expect(await read(directory, 'pet/add-pet.ts')).toContain(
-      'export type AddPetResponse = ApiResponse<Pet, 201>;',
+      'export type AddPetResponse = ApiResponse<Pet, 201> | ApiResponse<unknown, Exclude<HttpStatus<2>, 201>>;',
     );
     expect(await read(directory, 'pet/delete-pet.ts')).toContain('ApiResponse<undefined, 204>');
     expect(typecheck(await listFiles(directory, '.ts'), BROWSER)).toEqual([]);
@@ -134,7 +135,7 @@ describe('output options', () => {
       ].join('\n'),
     );
     expect(range).toContain(
-      'export type RangeAndDefaultResponse = ApiResponse<string, 200> | ApiResponse<undefined, 304>;',
+      'export type RangeAndDefaultResponse = ApiResponse<string, 200> | ApiResponse<undefined, 304> | ApiResponse<unknown, Exclude<HttpStatus<2>, 200>>;',
     );
     // Every class is documented, so nothing is left for an "undocumented" member.
     const every = await read(directory, 'default/every-class.ts');
@@ -152,7 +153,11 @@ describe('output options', () => {
 export async function usage(error: unknown): Promise<void> {
   const response = await rangeAndDefault();
   if (response.status === 200) { const text: string = response.data; void text; }
-  else { const none: undefined = response.data; void none; }
+  else if (response.status === 304) { const none: undefined = response.data; void none; }
+  else { const other: 201 | 204 | 299 = response.status as 201 | 204 | 299; const body: unknown = response.data; void other; void body; }
+  // @ts-expect-error the body of an undeclared 2xx status is not described
+  const unchecked: string = response.data;
+  void unchecked;
   const status: 200 | 201 | 299 = (await everyClass()).status as 200 | 201 | 299;
   void status;
   if (isRangeAndDefaultApiError(error)) {

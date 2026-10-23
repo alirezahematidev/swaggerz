@@ -59,13 +59,18 @@ async function detectVersion(file: string): Promise<SpecVersion | undefined> {
   }
 }
 
+export type QueryFramework = 'react' | 'vue' | 'svelte' | 'solid';
+export type ValidationChoice = 'zod' | 'valibot' | 'arktype';
+
 export interface InitAnswers {
   readonly input: string;
   readonly version: SpecVersion | 'auto';
   readonly output: string;
   readonly language: 'typescript' | 'javascript';
   readonly adapter: 'fetch' | 'axios';
-  readonly reactQuery: boolean;
+  /** Data-fetching hooks: TanStack Query for a framework, or SWR. */
+  readonly hooks?: { readonly query: QueryFramework } | { readonly swr: true };
+  readonly validation?: ValidationChoice;
 }
 
 export type ConfigFormat = 'ts' | 'js' | 'json' | 'yaml';
@@ -73,8 +78,22 @@ export type ConfigFormat = 'ts' | 'js' | 'json' | 'yaml';
 /** Path of the JSON Schema shipped with the package, relative to a project root. */
 const SCHEMA_PATH = `./node_modules/${PACKAGE_NAME}/config.schema.json`;
 
+/** The `features` of a config with these answers. */
+function features(answers: InitAnswers): Record<string, unknown> {
+  const hooks = answers.hooks;
+  return {
+    ...(hooks === undefined
+      ? {}
+      : 'swr' in hooks
+        ? { swr: true }
+        : { query: { framework: hooks.query } }),
+    ...(answers.validation === undefined ? {} : { validation: answers.validation }),
+  };
+}
+
 /** Renders the starter config file in the given format. */
 export function configTemplate(answers: InitAnswers, format: ConfigFormat = 'ts'): string {
+  const chosen = features(answers);
   if (format === 'json') {
     return `${JSON.stringify(
       {
@@ -82,13 +101,38 @@ export function configTemplate(answers: InitAnswers, format: ConfigFormat = 'ts'
         spec: { version: answers.version, input: answers.input },
         output: { directory: answers.output, language: answers.language },
         client: { adapter: answers.adapter },
-        features: { reactQuery: answers.reactQuery },
+        ...(Object.keys(chosen).length === 0 ? {} : { features: chosen }),
       },
       null,
       2,
     )}\n`;
   }
+  const hooks = answers.hooks;
+  const framework = hooks !== undefined && 'query' in hooks ? hooks.query : undefined;
   if (format === 'yaml') {
+    const hooksLine =
+      hooks === undefined
+        ? '  # query: { framework: react }'
+        : 'swr' in hooks
+          ? '  swr: true'
+          : `  query: { framework: ${framework ?? 'react'} }`;
+    const validationLine =
+      answers.validation === undefined
+        ? '  # validation: zod'
+        : `  validation: ${answers.validation}`;
+    const block = [
+      'features:',
+      '  # Data-fetching hooks: TanStack Query v5 (framework react, vue, svelte or solid), or swr: true.',
+      hooksLine,
+      '  # Validate responses at runtime with zod, valibot or arktype.',
+      validationLine,
+    ];
+    // Without any feature the block is a comment: an empty `features:` is null in YAML.
+    const featuresBlock = (
+      Object.keys(chosen).length === 0
+        ? block.map((line) => `# ${line.replace(/^ {2}# /, '  ')}`)
+        : block
+    ).join('\n');
     return `# yaml-language-server: $schema=${SCHEMA_PATH}
 spec:
   # Swagger 2.0 ("2.0"), OpenAPI 3.0 ("3.0"), 3.1 ("3.1"), 3.2 ("3.2") or "auto".
@@ -101,15 +145,23 @@ output:
 client:
   # fetch (no dependencies) or axios.
   adapter: ${answers.adapter}
-features:
-  # TanStack Query v5 hooks, generated into <output>/react-query.
-  reactQuery: ${String(answers.reactQuery)}
+${featuresBlock}
 # Plugins are referenced by module path, e.g.
 # plugins:
 #   - ./plugins/my-plugin.ts
 #   - [./plugins/other.ts, { option: true }]
 `;
   }
+  const hooksLine =
+    hooks === undefined
+      ? "    // query: { framework: 'react' },"
+      : 'swr' in hooks
+        ? '    swr: true,'
+        : `    query: { framework: ${quote(framework ?? 'react')} },`;
+  const validationLine =
+    answers.validation === undefined
+      ? "    // validation: 'zod',"
+      : `    validation: ${quote(answers.validation)},`;
   return `import { defineConfig } from ${quote(PACKAGE_NAME)};
 
 export default defineConfig({
@@ -128,11 +180,49 @@ export default defineConfig({
     adapter: ${quote(answers.adapter)},
   },
   features: {
-    // TanStack Query v5 hooks, generated into <output>/react-query.
-    reactQuery: ${String(answers.reactQuery)},
+    // Data-fetching hooks: TanStack Query v5 (framework 'react', 'vue', 'svelte' or 'solid'), or
+    // \`swr: true\`.
+${hooksLine}
+    // Validate responses at runtime with 'zod', 'valibot' or 'arktype'.
+${validationLine}
   },
 });
 `;
+}
+
+/** The dependencies of the project's package.json (all kinds), or none. */
+async function dependencies(cwd: string): Promise<Set<string>> {
+  try {
+    const manifest: unknown = JSON.parse(await readFile(path.join(cwd, 'package.json'), 'utf8'));
+    const names = new Set<string>();
+    if (typeof manifest !== 'object' || manifest === null) return names;
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies'] as const) {
+      const entries: unknown = (manifest as Record<string, unknown>)[field];
+      if (typeof entries === 'object' && entries !== null)
+        for (const name of Object.keys(entries)) names.add(name);
+    }
+    return names;
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * The data-fetching hooks for the library the project already depends on (the first that
+ * matches). Validation is never detected: it checks responses at runtime, which an existing
+ * dependency (zod for forms, say) does not ask for.
+ */
+function detectHooks(installed: ReadonlySet<string>): InitAnswers['hooks'] {
+  const framework = (
+    [
+      ['@tanstack/react-query', 'react'],
+      ['@tanstack/vue-query', 'vue'],
+      ['@tanstack/svelte-query', 'svelte'],
+      ['@tanstack/solid-query', 'solid'],
+    ] as const
+  ).find(([name]) => installed.has(name))?.[1];
+  if (framework !== undefined) return { query: framework };
+  return installed.has('swr') ? { swr: true } : undefined;
 }
 
 function choice<T extends string>(
@@ -146,6 +236,35 @@ function choice<T extends string>(
     throw new UsageError(`--${name} must be one of ${allowed.join(', ')}.`);
   }
   return value as T;
+}
+
+/** Hooks (from the options, or else detected from package.json) and validation. */
+async function chosenFeatures(
+  ctx: CommandContext,
+  cwd: string,
+): Promise<Pick<InitAnswers, 'hooks' | 'validation'>> {
+  let query = choice(ctx, 'query', ['react', 'vue', 'svelte', 'solid'] as const);
+  if (flag(ctx, 'react-query')) {
+    if (query !== undefined && query !== 'react')
+      throw new UsageError('--react-query and --query select different frameworks.');
+    query = 'react';
+  }
+  const swr = flag(ctx, 'swr');
+  if (swr && query !== undefined)
+    throw new UsageError('Choose TanStack Query (--query) or SWR (--swr), not both.');
+  const validation = choice(ctx, 'validation', ['zod', 'valibot', 'arktype'] as const);
+  const hooks =
+    query !== undefined
+      ? { query }
+      : swr
+        ? ({ swr: true } as const)
+        : flag(ctx, 'no-detect')
+          ? undefined
+          : detectHooks(await dependencies(cwd));
+  return {
+    ...(hooks === undefined ? {} : { hooks }),
+    ...(validation === undefined ? {} : { validation }),
+  };
 }
 
 export const initCommand: Command = {
@@ -179,7 +298,22 @@ export const initCommand: Command = {
         value: 'fetch|axios',
         description: 'HTTP adapter (default: fetch).',
       },
-      'react-query': { type: 'boolean', description: 'Generate TanStack Query hooks.' },
+      query: {
+        type: 'string',
+        value: 'react|vue|svelte|solid',
+        description: 'Generate TanStack Query hooks for a framework (default: detected).',
+      },
+      'react-query': { type: 'boolean', description: 'Same as --query react.' },
+      swr: { type: 'boolean', description: 'Generate SWR hooks (default: detected).' },
+      validation: {
+        type: 'string',
+        value: 'zod|valibot|arktype',
+        description: 'Validate responses at runtime with this library.',
+      },
+      'no-detect': {
+        type: 'boolean',
+        description: "Do not pick the hooks from package.json's dependencies.",
+      },
       format: {
         type: 'string',
         value: 'ts|js|json|yaml',
@@ -219,7 +353,7 @@ export const initCommand: Command = {
         choice(ctx, 'language', ['typescript', 'javascript'] as const) ??
         (typescriptProject ? 'typescript' : 'javascript'),
       adapter: choice(ctx, 'adapter', ['fetch', 'axios'] as const) ?? 'fetch',
-      reactQuery: flag(ctx, 'react-query'),
+      ...(await chosenFeatures(ctx, cwd)),
     };
     const format =
       choice(ctx, 'format', ['ts', 'js', 'json', 'yaml'] as const) ??

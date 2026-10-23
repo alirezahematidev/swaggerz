@@ -7,10 +7,12 @@ import { inheritedDiscriminators } from '../models.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
 import {
   acceptsAnything,
+  DATE_TIME_PATTERN,
   intersectionMembers,
   isInheritedOptional,
   ownPropertiesFunction,
   wireType,
+  VALID_DATE,
   type Validator,
 } from './shared.ts';
 
@@ -131,7 +133,8 @@ function valibotBase(
       // converted after validation, so their format is checked here.
       const format = vc.ctx.config.types.dates === 'Date' ? dateFormat(schema) : undefined;
       if (format === 'date') return `${n}.pipe(${n}.string(), ${n}.isoDate())`;
-      if (format === 'date-time') return `${n}.pipe(${n}.string(), ${n}.isoTimestamp())`;
+      if (format === 'date-time')
+        return `${n}.pipe(${n}.string(), ${n}.regex(${DATE_TIME_PATTERN}), ${n}.check(${VALID_DATE}, 'Invalid date-time.'))`;
       // JSON Schema counts characters (code points), `v.minLength` UTF-16 code units: a string is
       // only counted when its code units could exceed the bound.
       const actions: string[] = [];

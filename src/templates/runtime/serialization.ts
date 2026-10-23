@@ -345,8 +345,12 @@ export function serializeBody(
   if (body === undefined) return { body: undefined, contentType: undefined };
   const type = (mediaType?.split(';')[0] ?? '').trim().toLowerCase();
   if (type === 'multipart/form-data') {
-    const isForm = typeof FormData !== 'undefined' && body instanceof FormData;
-    return { body: isForm ? body : toFormData(body, encoding), contentType: undefined };
+    if (typeof FormData !== 'undefined' && body instanceof FormData)
+      return { body, contentType: undefined };
+    // `FormData` can only label a part with a Content-Type by sending it as a file (a `Blob`, with
+    // a filename), which servers then treat as an upload: such bodies are encoded here instead.
+    if (needsPartHeaders(body, encoding)) return toMultipartBody(body, encoding);
+    return { body: toFormData(body, encoding), contentType: undefined };
   }
   if (type === 'application/x-www-form-urlencoded') {
     const isParams = typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams;
@@ -398,6 +402,96 @@ function bytesToBlob(value: ArrayBuffer | ArrayBufferView, contentType: string |
   const copy = new Uint8Array(source.byteLength);
   copy.set(source);
   return new Blob([copy], contentType === undefined ? {} : { type: contentType });
+}
+
+/** A part's declared Content-Type, when it names one type (not a list or a range like `image/*`). */
+function concreteType(contentType: string | undefined): string | undefined {
+  if (contentType === undefined || contentType.includes(',') || contentType.includes('*'))
+    return undefined;
+  return contentType.trim();
+}
+
+/** The parts of a form body: each array item is a part unless `explode: false` joins them. */
+function formParts(
+  body: unknown,
+  encoding: Readonly<Record<string, PropertyEncoding>> | undefined,
+): [name: string, value: unknown, contentType: string | undefined][] {
+  const parts: [string, unknown, string | undefined][] = [];
+  if (!isObject(body)) return parts;
+  for (const [name, value] of entriesOf(body)) {
+    const propertyEncoding = encoding?.[name];
+    if (Array.isArray(value) && propertyEncoding?.explode !== false) {
+      for (const item of value) parts.push([name, item, propertyEncoding?.contentType]);
+    } else if (Array.isArray(value)) {
+      const joined = value
+        .map(primitiveToString)
+        .join(DELIMITERS[propertyEncoding?.style ?? 'form'] ?? ',');
+      parts.push([name, joined, undefined]);
+    } else {
+      parts.push([name, value, propertyEncoding?.contentType]);
+    }
+  }
+  return parts;
+}
+
+const isBlob = (value: unknown): value is Blob =>
+  typeof Blob !== 'undefined' && value instanceof Blob;
+
+/**
+ * Whether a part that is not a file needs a Content-Type: objects (JSON, OpenAPI's default for
+ * them) and values whose encoding declares one.
+ */
+function needsPartHeaders(
+  body: unknown,
+  encoding: Readonly<Record<string, PropertyEncoding>> | undefined,
+): boolean {
+  return formParts(body, encoding).some(([, value, contentType]) => {
+    if (value === undefined || value === null || isBlob(value)) return false;
+    if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return false;
+    return isObject(value) || Array.isArray(value) || concreteType(contentType) !== undefined;
+  });
+}
+
+/** Escapes a part name or filename as browsers do in `FormData` bodies (line breaks, quotes). */
+function dispositionValue(value: string): string {
+  return value.replace(/\r\n|\r|\n/g, '%0D%0A').replace(/"/g, '%22');
+}
+
+/**
+ * Encodes a `multipart/form-data` body by hand, so parts that are not files carry their
+ * Content-Type without a filename. Files keep theirs (a `File`'s name, otherwise `blob`).
+ */
+export function toMultipartBody(
+  body: unknown,
+  encoding?: Readonly<Record<string, PropertyEncoding>>,
+): { body: Blob; contentType: string } {
+  const random = (): string => Math.random().toString(16).slice(2, 14).padEnd(12, '0');
+  const boundary = `----swaggerz${random()}${random()}`;
+  const chunks: (string | Blob)[] = [];
+  for (const [name, value, declared] of formParts(body, encoding)) {
+    if (value === undefined || value === null) continue;
+    const contentType = concreteType(declared);
+    let headers = `Content-Disposition: form-data; name="${dispositionValue(name)}"`;
+    let content: string | Blob;
+    if (isBlob(value) || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+      const blob = isBlob(value) ? value : bytesToBlob(value, undefined);
+      const filename = typeof File !== 'undefined' && value instanceof File ? value.name : 'blob';
+      const type = blob.type === '' ? (contentType ?? 'application/octet-stream') : blob.type;
+      headers += `; filename="${dispositionValue(filename)}"\r\nContent-Type: ${type}`;
+      content = blob;
+    } else if (isObject(value) || Array.isArray(value)) {
+      headers += `\r\nContent-Type: ${contentType ?? 'application/json'}`;
+      content = JSON.stringify(value);
+    } else {
+      if (contentType !== undefined) headers += `\r\nContent-Type: ${contentType}`;
+      content = primitiveToString(value);
+    }
+    chunks.push(`--${boundary}\r\n${headers}\r\n\r\n`, content, '\r\n');
+  }
+  chunks.push(`--${boundary}--\r\n`);
+  const contentType = `multipart/form-data; boundary=${boundary}`;
+  // The Blob carries the type too: axios (Node.js) sends a Blob's own type as Content-Type.
+  return { body: new Blob(chunks, { type: contentType }), contentType };
 }
 
 /** Converts an object into `FormData`. Arrays are sent as repeated fields unless `explode: false`. */

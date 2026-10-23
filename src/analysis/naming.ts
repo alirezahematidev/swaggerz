@@ -185,13 +185,23 @@ export function toPropertyName(input: string, style: NamingStyle): string {
   return /^\d/.test(name) ? `_${name}` : name;
 }
 
-/** File name (without extension) for an identifier. */
+/**
+ * Device names Windows reserves in every directory, whatever the extension: `con.ts` or a
+ * directory `aux` cannot be created there.
+ */
+const WINDOWS_DEVICE_NAMES = /^(?:con|prn|aux|nul|com\d|lpt\d)$/i;
+
+/**
+ * File or directory name (without extension) for an identifier. Names Windows reserves get a `_`
+ * on every platform (`con_`), so the output is the same everywhere.
+ */
 export function toFileName(
   input: string,
   style: 'kebab-case' | 'camelCase' | 'PascalCase' | 'snake_case',
 ): string {
   const name = applyCase(input, style).replace(/[^A-Za-z\d_-]/g, '');
-  return name === '' ? 'unnamed' : name;
+  if (name === '') return 'unnamed';
+  return WINDOWS_DEVICE_NAMES.test(name) ? `${name}_` : name;
 }
 
 export function isIdentifier(name: string): boolean {

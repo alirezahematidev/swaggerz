@@ -59,6 +59,23 @@ paths:
               metadata: { style: deepObject, explode: true }
       responses:
         '200': { description: ok, content: { application/json: { schema: { type: object } } } }
+  /documents:
+    post:
+      operationId: uploadDocument
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                meta: { type: object, properties: { title: { type: string } } }
+                rows: { type: string }
+                file: { type: string, format: binary }
+            encoding:
+              rows: { contentType: text/csv }
+      responses:
+        '204': { description: ok }
   /anything:
     post:
       operationId: postAnything
@@ -145,6 +162,32 @@ describe.each(['fetch', 'axios'] as const)('%s adapter', (adapter) => {
       name: 'RequestError',
       kind: 'parse',
     });
+  });
+
+  it('sends multipart JSON and typed parts with their Content-Type, not as files', async () => {
+    server.respond(() => ({ status: 204 }));
+    await api.uploadDocument!({
+      body: {
+        meta: { title: 'Q3' },
+        rows: 'a,b',
+        file: new File(['%PDF'], 'q3.pdf', { type: 'application/pdf' }),
+      },
+    });
+    const request = server.requests.at(-1)!;
+    expect(request.headers['content-type']).toMatch(/^multipart\/form-data; boundary=/);
+    const text = request.text();
+    expect(text).toContain(
+      'Content-Disposition: form-data; name="meta"\r\nContent-Type: application/json\r\n\r\n{"title":"Q3"}',
+    );
+    expect(text).toContain(
+      'Content-Disposition: form-data; name="rows"\r\nContent-Type: text/csv\r\n\r\na,b',
+    );
+    expect(text).toContain(
+      'Content-Disposition: form-data; name="file"; filename="q3.pdf"\r\nContent-Type: application/pdf',
+    );
+    const form = await request.formData();
+    expect(form.get('meta')).toBe('{"title":"Q3"}');
+    expect((form.get('file') as File).name).toBe('q3.pdf');
   });
 
   it('serializes deepObject properties of urlencoded bodies', async () => {
