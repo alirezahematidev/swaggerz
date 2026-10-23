@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/logo-dark.svg">
-    <img src="brand/logo.svg" alt="swaggerz" width="300">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/alirezahematidev/swaggerz/main/brand/logotype-lockup-dark.png">
+    <img src="https://raw.githubusercontent.com/alirezahematidev/swaggerz/main/brand/logotype-lockup.png" alt="swaggerz" width="360">
   </picture>
 </h1>
 
