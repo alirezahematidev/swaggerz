@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -198,6 +199,20 @@ describe('file system conflicts', () => {
         'models/pet.ts cannot be written because models is a file, not a directory; nothing was changed.',
       ]);
     }));
+
+  // Reading a FIFO would wait for a writer forever.
+  it.skipIf(process.platform === 'win32')('reports a FIFO without reading it', () =>
+    withTempDir(async (dir) => {
+      execFileSync('mkfifo', [path.join(dir, 'client.ts')]);
+      const planned = await planWrite(files({ 'client.ts': 'client' }), dir, {
+        clean: true,
+        force: true,
+      });
+      expect(planned.conflicts.map((c) => c.message)).toEqual([
+        'client.ts cannot be written because client.ts is not a regular file; nothing was changed.',
+      ]);
+    }),
+  );
 
   it('creates no directories outside the output directory', () =>
     withTempDir(async (dir) => {

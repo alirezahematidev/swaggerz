@@ -1,7 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto';
 import {
+  constants,
+  type FileHandle,
   lstat,
   mkdir,
+  open,
   readdir,
   readFile,
   realpath,
@@ -161,21 +164,40 @@ async function inspect(
   kinds: DirectoryKinds = new Map(),
 ): Promise<Existing> {
   const target = path.join(directory, file);
+  let handle: FileHandle;
   try {
-    const info = await stat(target);
-    if (info.isDirectory()) return { state: 'blocked', reason: `${file} is a directory` };
-    // Never read FIFOs or devices, which could block.
-    if (!info.isFile()) return { state: 'blocked', reason: `${file} is not a regular file` };
-    return { state: 'file', content: await readFile(target, 'utf8') };
+    // The type check and the read use one handle, so the file cannot be swapped in between.
+    // O_NONBLOCK keeps a FIFO from waiting for a writer. Windows defines neither flag, and
+    // `| undefined` adds nothing.
+    handle = await open(target, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY);
   } catch (error) {
     const code = errorCode(error);
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') return { state: 'unreadable', error };
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      // Some platforms refuse to open directories at all.
+      const isDirectory = await stat(target).then(
+        (info) => info.isDirectory(),
+        () => false,
+      );
+      if (isDirectory) return { state: 'blocked', reason: `${file} is a directory` };
+      return { state: 'unreadable', error };
+    }
     const blocker = await blockingAncestor(directory, file, kinds);
     if (blocker === undefined && code === 'ENOENT') return { state: 'missing' };
     return {
       state: 'blocked',
       reason: `${blocker ?? path.posix.dirname(file)} is a file, not a directory`,
     };
+  }
+  try {
+    const info = await handle.stat();
+    if (info.isDirectory()) return { state: 'blocked', reason: `${file} is a directory` };
+    // Never read FIFOs or devices, which could block.
+    if (!info.isFile()) return { state: 'blocked', reason: `${file} is not a regular file` };
+    return { state: 'file', content: await handle.readFile('utf8') };
+  } catch (error) {
+    return { state: 'unreadable', error };
+  } finally {
+    await handle.close();
   }
 }
 

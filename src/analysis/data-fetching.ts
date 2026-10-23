@@ -1,6 +1,7 @@
 import type { ResolvedDataFetching } from '../config/resolved.ts';
 import type { DiagnosticBag } from '../diagnostics/bag.ts';
 import { wireMethod } from '../ir/types.ts';
+import { getOwn } from '../utils/object.ts';
 import { compareStrings, suggest } from '../utils/strings.ts';
 import type { OperationSymbol, QueryGroup } from './types.ts';
 
@@ -213,8 +214,10 @@ export function linkDataFetching(input: DataFetchingInput): void {
     const query = symbol.query;
     if (query === undefined || isQuery(symbol)) return;
     const key =
-      options.invalidates[symbol.name] === undefined ? symbol.operation.operationId : symbol.name;
-    const targets = key === undefined ? undefined : options.invalidates[key];
+      getOwn(options.invalidates, symbol.name) === undefined
+        ? symbol.operation.operationId
+        : symbol.name;
+    const targets = key === undefined ? undefined : getOwn(options.invalidates, key);
     if (key === undefined || targets === undefined) return;
     const source = `${option}.invalidates.${key}`;
     const keys = minimal(targets.flatMap((target) => resolve(target, source)));

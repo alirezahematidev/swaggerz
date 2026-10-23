@@ -2,6 +2,8 @@
   "$schema": "./node_modules/knip/schema-jsonc.json",
   // Report exports nothing imports, not exports that are also used in their own file.
   "ignoreExportsUsedInFile": true,
+  // A POSIX tool, not a package: the writer tests create a FIFO with it.
+  "ignoreBinaries": ["mkfifo"],
   "ignoreIssues": {
     // The shadcn-style primitives keep their full API, used or not.
     "src/dashboard/client/components/ui/**": ["exports", "types"],

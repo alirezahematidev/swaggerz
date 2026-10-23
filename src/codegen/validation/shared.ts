@@ -108,23 +108,36 @@ export function objectView(schema: SchemaIR, ctx: EmitContext): ObjectSchema | u
  * (`relaxed`); when every member is closed, properties none of them declares are still rejected
  * (`closedKeys`). A closed member without properties keeps rejecting every property, as its type
  * (`Record<string, never>`) does. Zod intersections behave like this on their own.
+ *
+ * `inlined` holds the models already copied on the way to this `allOf`; the members must be
+ * printed with the returned `inlined`. A model whose copy contains this `allOf` again (a closed
+ * model that refers to itself through `allOf`) is copied once and referenced, closed, below that.
  */
 export function intersectionMembers(
   members: readonly SchemaIR[],
   ctx: EmitContext,
-): { readonly relaxed: readonly SchemaIR[]; readonly closedKeys?: readonly string[] } {
-  const views = members.map((member) => objectView(member, ctx));
+  inlined: ReadonlySet<string> = new Set(),
+): {
+  readonly relaxed: readonly SchemaIR[];
+  readonly closedKeys?: readonly string[];
+  readonly inlined: ReadonlySet<string>;
+} {
+  const views = members.map((member) =>
+    member.kind === 'ref' && inlined.has(member.target) ? undefined : objectView(member, ctx),
+  );
   const relaxable = (view: ObjectSchema | undefined): view is ObjectSchema =>
     view?.additionalProperties === false && view.properties.length > 0;
-  if (members.length < 2 || !views.some(relaxable)) return { relaxed: members };
+  if (members.length < 2 || !views.some(relaxable)) return { relaxed: members, inlined };
+  const copied = new Set(inlined);
   const relaxed = members.map((member, index) => {
     const view = views[index];
     if (!relaxable(view)) return member;
     // A reference to a closed model is replaced by an open copy of the model's object.
+    if (member.kind === 'ref') copied.add(member.target);
     const { additionalProperties: _closed, ...open } = view;
     return open satisfies ObjectSchema;
   });
-  if (!views.every(relaxable)) return { relaxed };
+  if (!views.every(relaxable)) return { relaxed, inlined: copied };
   const keys = [...new Set(views.flatMap((view) => view.properties.map((p) => p.name)))];
-  return { relaxed, closedKeys: keys };
+  return { relaxed, closedKeys: keys, inlined: copied };
 }

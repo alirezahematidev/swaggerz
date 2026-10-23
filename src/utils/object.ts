@@ -20,6 +20,14 @@ export function setOwn(target: Record<string, unknown>, key: string, value: unkn
   }
 }
 
+/**
+ * Reads an own property. Unlike `record[key]`, keys such as `constructor` or `toString` do not
+ * reach `Object.prototype`: use it to look up keys that come from a specification.
+ */
+export function getOwn<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 /** True for `{}` literals and `Object.create(null)` objects (not class instances). */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (!isRecord(value)) return false;

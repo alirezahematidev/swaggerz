@@ -34,6 +34,8 @@ interface ArkContext {
   readonly ctx: EmitContext;
   /** References need no `lazy()`: the expression is evaluated when data is validated. */
   readonly deferred: boolean;
+  /** Models copied into `allOf` on the way here (see `intersectionMembers`). */
+  readonly inlined?: ReadonlySet<string>;
 }
 
 const type = (imports: ImportManager): string =>
@@ -214,8 +216,12 @@ function arkBase(schema: Exclude<SchemaIR, { kind: 'ref' }>, ac: ArkContext): st
       return union(t, variants);
     }
     case 'intersection': {
-      const { relaxed, closedKeys } = intersectionMembers(schema.members, ac.ctx);
-      const members = relaxed.map((member) => arkExpression(member, ac));
+      const { relaxed, closedKeys, inlined } = intersectionMembers(
+        schema.members,
+        ac.ctx,
+        ac.inlined,
+      );
+      const members = relaxed.map((member) => arkExpression(member, { ...ac, inlined }));
       if (closedKeys !== undefined)
         members.push(
           `${t()}.unknown.narrow((value, ctx) => Object.keys(Object(value)).every((key) => [${closedKeys.map(quote).join(', ')}].includes(key)) || ctx.mustBe('an object without properties that no member of allOf declares'))`,

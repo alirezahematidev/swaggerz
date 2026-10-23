@@ -9,6 +9,7 @@ import {
   type SchemaIR,
   type WebhookIR,
 } from '../ir/types.ts';
+import { getOwn } from '../utils/object.ts';
 import { compareStrings } from '../utils/strings.ts';
 import { groupKey, linkDataFetching, type MemberKey } from './data-fetching.ts';
 import { definitionsWithDates } from './dates.ts';
@@ -203,10 +204,10 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
       const settings = fetching.options;
       const isQuery = (settings.queryMethods as readonly string[]).includes(operation.method);
       const infiniteConfig =
-        settings.infinite[name] ??
+        getOwn(settings.infinite, name) ??
         (operation.operationId === undefined
           ? undefined
-          : settings.infinite[operation.operationId]);
+          : getOwn(settings.infinite, operation.operationId));
       const pageParam = isQuery
         ? resolvePageParam(operation, infiniteConfig?.pageParam, diagnostics)
         : undefined;

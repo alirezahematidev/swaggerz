@@ -6,7 +6,7 @@ Until 1.0, only the latest `0.x` release receives security fixes.
 
 ## Reporting a vulnerability
 
-Please report vulnerabilities privately through GitHub's private vulnerability reporting ("Report a vulnerability" on the repository's **Security** tab). Do not open a public issue. Include the version, a minimal specification or config that reproduces the problem and the impact you observed. You should receive an acknowledgement within a few days. Once a fix is released, the advisory is published with credit unless you prefer otherwise.
+Please report vulnerabilities privately through GitHub's private vulnerability reporting: [open a draft advisory](https://github.com/alirezahematidev/swaggerz/security/advisories/new) ("Report a vulnerability" on the repository's **Security** tab). Do not open a public issue. Include the version, a minimal specification or config that reproduces the problem and the impact you observed. You should receive an acknowledgement within a few days. Once a fix is released, the advisory is published with credit unless you prefer otherwise.
 
 ## Threat model
 

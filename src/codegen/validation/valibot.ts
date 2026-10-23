@@ -33,6 +33,8 @@ interface ValibotContext {
   readonly ctx: EmitContext;
   /** References need no `v.lazy`: the expression is evaluated when data is validated. */
   readonly deferred: boolean;
+  /** Models copied into `allOf` on the way here (see `intersectionMembers`). */
+  readonly inlined?: ReadonlySet<string>;
 }
 
 const v = (imports: ImportManager): string =>
@@ -223,8 +225,12 @@ function valibotBase(
       return union(n, variants);
     }
     case 'intersection': {
-      const { relaxed, closedKeys } = intersectionMembers(schema.members, vc.ctx);
-      const members = relaxed.map((member) => valibotExpression(member, vc));
+      const { relaxed, closedKeys, inlined } = intersectionMembers(
+        schema.members,
+        vc.ctx,
+        vc.inlined,
+      );
+      const members = relaxed.map((member) => valibotExpression(member, { ...vc, inlined }));
       if (members.length === 1) return members[0] ?? `${n}.unknown()`;
       const intersection = `${n}.intersect([${members.join(', ')}])`;
       if (closedKeys === undefined) return intersection;

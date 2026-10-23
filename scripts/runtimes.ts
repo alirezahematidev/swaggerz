@@ -89,8 +89,12 @@ function onPath(command: string): string | undefined {
 async function tools(packages: readonly string[]): Promise<NodeJS.Require> {
   await mkdir(TOOLS, { recursive: true });
   const manifest = path.join(TOOLS, 'package.json');
-  if (!existsSync(manifest))
-    await writeFile(manifest, JSON.stringify({ name: 'runtimes', private: true }));
+  // `wx` creates the manifest only if it is missing, without a separate existence check.
+  await writeFile(manifest, JSON.stringify({ name: 'runtimes', private: true }), {
+    flag: 'wx',
+  }).catch((error: unknown) => {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+  });
   const missing = packages.filter((spec) => {
     const name = spec.slice(0, spec.lastIndexOf('@'));
     return !existsSync(path.join(TOOLS, 'node_modules', name, 'package.json'));

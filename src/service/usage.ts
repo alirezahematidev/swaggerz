@@ -447,7 +447,7 @@ function componentParts(text: string): ComponentParts {
 
 /** How often `name` occurs as an identifier in component markup (`{{ name(x) }}`, `<Name />`). */
 function templateUses(template: string, name: string): number {
-  const escaped = name.replace(/[$]/g, '\\$');
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return [...template.matchAll(new RegExp(`(?<![\\w$.-])${escaped}(?![\\w$-])`, 'g'))].length;
 }
 

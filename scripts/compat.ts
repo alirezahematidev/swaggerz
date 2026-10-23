@@ -103,10 +103,7 @@ const CASES: readonly Case[] = [
       spec: { version: '3.1', input: fixture('features-3.1.yaml') },
       features: REACT_QUERY_CONFIG,
     },
-    consumer: REACT_QUERY_CONSUMER.replaceAll(
-      '__API__/react-query/index.js',
-      '__API__/react-query/index.js',
-    ),
+    consumer: REACT_QUERY_CONSUMER,
   },
   {
     name: 'zod',
@@ -185,7 +182,7 @@ async function install(): Promise<void> {
     2,
   );
   const file = path.join(WORK, 'package.json');
-  const current = existsSync(file) ? await readFile(file, 'utf8') : '';
+  const current = await readFile(file, 'utf8').catch(() => '');
   if (current === manifest && existsSync(path.join(WORK, 'node_modules'))) return;
   await rm(WORK, { recursive: true, force: true });
   await mkdir(WORK, { recursive: true });
@@ -209,9 +206,7 @@ async function prepare(testCase: Case): Promise<string> {
     },
   });
   if (!result.ok) throw new Error(`Generation failed for ${testCase.name}`);
-  const consumer = testCase.consumer
-    .replaceAll('__API__', './api')
-    .replace("'./api/index.js'", "'./api/index.js'");
+  const consumer = testCase.consumer.replaceAll('__API__', './api');
   await writeFile(
     path.join(directory, 'consumer.ts'),
     consumer.replace(/from '\.\/api'/g, "from './api/index.js'"),

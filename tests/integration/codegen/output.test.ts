@@ -247,8 +247,9 @@ describe('plugins', () => {
         target.kind === 'operation'
           ? { ...block, tags: [...block.tags, { tag: 'since', text: '1.0' }] }
           : block,
+      // An equivalent path, so the rewritten imports still resolve.
       resolveImport: ({ specifier }) =>
-        specifier.startsWith('../client') ? specifier.replace('../client', '../client') : undefined,
+        specifier.startsWith('../client') ? `./${specifier}` : undefined,
       generate: (ctx) => [
         {
           path: 'meta/operations.json',
@@ -290,6 +291,7 @@ describe('plugins', () => {
     expect(await read(directory, 'store/fetch-stock.ts')).toContain('export function fetchStock(');
     expect(await read(directory, 'models/label.ts')).toContain('export type Label = {');
     expect(await read(directory, 'pet/get-pet-by-id.ts')).toContain('@since 1.0');
+    expect(await read(directory, 'pet/get-pet-by-id.ts')).toContain("from './../client.js';");
     expect(await read(directory, 'pet/get-pet-by-id.ts')).toMatch(/\/\/ transformed\n$/);
     expect(JSON.parse(await read(directory, 'meta/operations.json'))).toContain('fetchStock');
     expect(result.files.find((f) => f.path === 'meta/operations.json')?.origin).toBe(

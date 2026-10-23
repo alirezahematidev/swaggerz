@@ -54,12 +54,24 @@ const update = args.includes('--update');
 const check = !args.includes('--no-typecheck');
 const only = args.filter((arg) => !arg.startsWith('--'));
 
+/** A file's content, or `undefined` when it does not exist (read without a separate check). */
+async function readIfExists(file: string): Promise<Buffer | undefined> {
+  try {
+    return await readFile(file);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 const list = JSON.parse(await readFile(LIST, 'utf8')) as { documents: Entry[] };
 const selected = list.documents.filter((entry) => only.length === 0 || only.includes(entry.name));
 if (selected.length === 0) throw new Error(`No corpus documents match ${only.join(', ')}.`);
-const baseline: Record<string, Result> = existsSync(BASELINE)
-  ? (JSON.parse(await readFile(BASELINE, 'utf8')) as Record<string, Result>)
-  : {};
+const baselineText = await readIfExists(BASELINE);
+const baseline: Record<string, Result> =
+  baselineText === undefined
+    ? {}
+    : (JSON.parse(baselineText.toString('utf8')) as Record<string, Result>);
 
 /** Checks out `sparse` of a repository at a commit (shallow), once. */
 function checkout(directory: string, git: NonNullable<Entry['git']>): void {
@@ -74,33 +86,47 @@ function checkout(directory: string, git: NonNullable<Entry['git']>): void {
   run('checkout', '--quiet', 'FETCH_HEAD');
 }
 
-/** Downloads a document once and verifies (or, with --update, records) its checksum. */
-async function download(entry: Entry): Promise<string> {
-  let file: string;
-  if (entry.git !== undefined && entry.path !== undefined) {
-    const directory = path.join(CACHE, entry.name);
-    await mkdir(directory, { recursive: true });
-    checkout(directory, entry.git);
-    file = path.join(directory, entry.path);
-  } else if (entry.url !== undefined) {
-    file = path.join(CACHE, entry.name, path.basename(new URL(entry.url).pathname));
-    if (!existsSync(file)) {
-      const response = await fetch(entry.url);
-      if (!response.ok) throw new Error(`${entry.url}: HTTP ${response.status}`);
-      await mkdir(path.dirname(file), { recursive: true });
-      await writeFile(file, Buffer.from(await response.arrayBuffer()));
-    }
-  } else {
-    throw new Error(`${entry.name}: needs a url, or git and path.`);
-  }
-  const sha256 = createHash('sha256')
-    .update(await readFile(file))
-    .digest('hex');
+/** Verifies (or, with --update, records) the checksum of a document's content. */
+function verify(entry: Entry, content: Buffer): void {
+  const sha256 = createHash('sha256').update(content).digest('hex');
   if (entry.sha256 === undefined && update) entry.sha256 = sha256;
   else if (entry.sha256 !== sha256)
     throw new Error(
       `${entry.name}: checksum ${sha256} does not match ${entry.sha256 ?? '(none recorded; run with --update)'}.`,
     );
+}
+
+/**
+ * Downloads a document once and verifies its checksum. A download is verified before it is
+ * cached, so a changed or tampered document never reaches `.corpus/`.
+ */
+async function download(entry: Entry): Promise<string> {
+  // Names become directories under `.corpus/`.
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(entry.name))
+    throw new Error(`Invalid corpus name ${entry.name}.`);
+  if (entry.git !== undefined && entry.path !== undefined) {
+    const directory = path.join(CACHE, entry.name);
+    await mkdir(directory, { recursive: true });
+    checkout(directory, entry.git);
+    const file = path.join(directory, entry.path);
+    verify(entry, await readFile(file));
+    return file;
+  }
+  if (entry.url === undefined) throw new Error(`${entry.name}: needs a url, or git and path.`);
+  const url = new URL(entry.url);
+  if (url.protocol !== 'https:') throw new Error(`${entry.name}: only https URLs are downloaded.`);
+  const file = path.join(CACHE, entry.name, path.basename(url.pathname));
+  const cached = await readIfExists(file);
+  if (cached !== undefined) {
+    verify(entry, cached);
+    return file;
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`${entry.url}: HTTP ${response.status}`);
+  const content = Buffer.from(await response.arrayBuffer());
+  verify(entry, content);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, content);
   return file;
 }
 

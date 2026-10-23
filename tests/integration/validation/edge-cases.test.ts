@@ -74,6 +74,17 @@ components:
         - type: object
           properties:
             c: { type: string }
+    Node:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        child:
+          allOf:
+            - $ref: '#/components/schemas/Node'
+            - type: object
+              properties:
+                label: { type: string }
 `;
 
 type Accepts = (schema: unknown, value: unknown) => boolean;
@@ -150,6 +161,11 @@ describe.each(LIBRARIES)('$library schemas', ({ library, accepts, emptyMemberAcc
     // its type (Record<string, never>) does, and the schema matches that type.
     expect(check('WithEmptySchema', {})).toBe(true);
     expect(check('WithEmptySchema', { c: 'x' })).toBe(emptyMemberAcceptsOthers);
+
+    // A closed model that refers to itself through allOf (generating it once never finished).
+    expect(check('NodeSchema', { id: 'a', child: { id: 'b', label: 'x' } })).toBe(true);
+    expect(check('NodeSchema', { id: 'a', child: { id: 1 } })).toBe(false);
+    expect(check('NodeSchema', { id: 'a', other: 1 })).toBe(false);
 
     // An open object with patternProperties keeps other keys.
     expect(check('TagsSchema', { 'x-a': 's', other: 1 })).toBe(true);

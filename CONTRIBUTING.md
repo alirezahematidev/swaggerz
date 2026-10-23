@@ -41,6 +41,7 @@ The sources are run directly by Node.js (type stripping): `node src/cli/bin.ts g
 ## Tests
 
 - **Unit tests** (`tests/unit`) cover the parser, naming, the dependency graph, printers, the diff algorithm, serialization and config validation.
+- **Fuzz tests** (`tests/unit/fuzz`) feed random specification text and random documents (well-formed and hostile, in all four versions, with every validation library) to the compiler with [fast-check](https://fast-check.dev): it must report diagnostics, never crash. They run 100 documents per mode with the unit tests; `FUZZ_RUNS=10000 pnpm vitest run tests/unit/fuzz` runs a longer campaign, and a failure prints the seed and the smallest document that reproduces it.
 - **Integration tests** (`tests/integration`) generate clients from the fixtures and then type-check them with the TypeScript compiler API under the strictest settings, run them against a local HTTP server, render React Query and SWR hooks with Testing Library, run Vue Query composables, drive the MCP server with the official SDK clients, bundle them with esbuild, Rollup and Vite to verify tree-shaking, drive the CLI as a subprocess and exercise the dashboard server and UI.
 
 Guidelines:
