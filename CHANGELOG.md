@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1](https://github.com/alirezahematidev/swaggerz/compare/v0.1.0...v0.1.1) (2026-10-23)
+
+### Features
+
+* **core:** configured husky and knip ([3e858f9](https://github.com/alirezahematidev/swaggerz/commit/3e858f931d49a72286c2f4b4dd22573ec5c60072))
+
 ## 0.1.0
 
 Initial release.
