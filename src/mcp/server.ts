@@ -45,7 +45,6 @@ const CACHE = { ttlMs: 0, cacheScope: 'private' } as const;
 /** How long a legacy confirmation waits for the user before it is withdrawn (declined). */
 const ELICITATION_TIMEOUT_MS = 10 * 60_000;
 
-export type JsonValue = unknown;
 type RequestId = string | number;
 
 /** Map key of a request id: `1` and `"1"` are different requests. */

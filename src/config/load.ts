@@ -170,11 +170,6 @@ async function readConfigSource(file: string): Promise<ConfigSource> {
     : readDataConfig(file, format);
 }
 
-/** Loads a config file of any supported format and returns its exported value. */
-export async function readConfigFile(file: string): Promise<unknown> {
-  return (await readConfigSource(file)).value;
-}
-
 function configLoadDiagnostic(file: string, error: unknown): Diagnostic {
   const code = isRecord(error) && typeof error.code === 'string' ? error.code : undefined;
   const message = error instanceof Error ? error.message : String(error);

@@ -7,7 +7,8 @@ A compiler from Swagger 2.0 / OpenAPI 3.0 / 3.1 / 3.2 documents (optionally patc
 Use pnpm; the exact version is pinned in `packageManager` and any recent pnpm switches to it. Dependencies may run install scripts only when listed under `allowBuilds` in `pnpm-workspace.yaml`. Node 22.18+; scripts and tests run `.ts` files directly through Node's type stripping, with no build step.
 
 ```sh
-pnpm check            # typecheck (4 projects) + oxlint + oxfmt --check + all tests; must pass before you finish
+pnpm check            # typecheck (4 projects) + oxlint + oxfmt --check + knip + all tests; must pass before you finish
+pnpm knip             # unused files, exports and dependencies (knip.jsonc)
 pnpm test:unit        # fast; tests/unit
 pnpm test:integration # compiles generated clients with tsc, runs them against mock servers
 pnpm vitest run tests/unit/config/formats.test.ts   # one file
@@ -26,6 +27,8 @@ node src/cli/bin.ts mcp --config <file>               # the MCP server on stdio 
 ```
 
 The vitest global setup builds the runtime templates and the dashboard bundle once per run, so the first test run is slower.
+
+`pnpm install` installs the husky git hooks (`.husky/`): pre-commit runs `format:check`, `lint` and `knip`, pre-push `typecheck` and `test:unit`, commit-msg checks the Conventional Commits format.
 
 ## Layout
 

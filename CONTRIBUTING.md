@@ -9,8 +9,10 @@ Requirements: Node.js 22.18 or later (24 recommended) and pnpm (`npm install --g
 ```sh
 pnpm install
 pnpm build        # dist/, runtime templates (assets/runtime) and the dashboard bundle (assets/dashboard)
-pnpm check        # typecheck, lint, format check, tests
+pnpm check        # typecheck, lint, format check, unused code (knip), tests
 ```
+
+`pnpm install` also installs the git hooks ([husky](https://typicode.github.io/husky/), in `.husky/`): `pre-commit` runs `pnpm format:check`, `pnpm lint` and `pnpm knip`, `pre-push` runs `pnpm typecheck` and `pnpm test:unit`, and `commit-msg` rejects messages that are not [Conventional Commits](https://www.conventionalcommits.org/). Run `pnpm format` when the format check fails. `git commit --no-verify` (or `HUSKY=0`) skips them; CI runs the same checks.
 
 Dependencies may only run install scripts when they are listed under `allowBuilds` in `pnpm-workspace.yaml` (today only esbuild). pnpm stops the install when a new dependency wants to run one; review what the script does before approving it with `pnpm approve-builds <package>`.
 
@@ -22,6 +24,7 @@ The sources are run directly by Node.js (type stripping): `node src/cli/bin.ts g
 | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `pnpm typecheck`                                      | Type-checks the sources, the runtime templates (browser-only lib), the dashboard client and its tests                             |
 | `pnpm lint` / `pnpm format`                           | oxlint (type-aware rules via oxlint-tsgolint) / oxfmt                                                                             |
+| `pnpm knip`                                           | Unused files, exports and dependencies in the package and the examples (configured in `knip.jsonc`)                               |
 | `pnpm test`, `test:unit`, `test:integration`          | Vitest; the global setup builds the runtime templates and the dashboard bundle                                                    |
 | `pnpm test:smoke`                                     | Generates a JavaScript client and runs it on the current Node.js (CI runs it on Node.js 18–24)                                    |
 | `pnpm test:runtimes [runtime…]`                       | Runs generated clients in Node.js, Deno, Bun, Chromium, Firefox, WebKit and workerd (installed on demand)                         |

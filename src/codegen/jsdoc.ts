@@ -48,9 +48,3 @@ export function schemaDoc(schema: SchemaIR, fallback?: string): JsDocBlock {
   const text = schema.description ?? schema.title ?? fallback;
   return { ...splitSummary(text), tags: schemaTags(schema) };
 }
-
-export function isEmptyDoc(block: JsDocBlock): boolean {
-  return (
-    (block.summary ?? '') === '' && (block.description ?? '') === '' && block.tags.length === 0
-  );
-}

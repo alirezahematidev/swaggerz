@@ -10,7 +10,7 @@ import { VALIBOT } from './valibot.ts';
 import type { Validator } from './shared.ts';
 import { ZOD } from './zod.ts';
 
-export { wireType, type Validator } from './shared.ts';
+export type { Validator } from './shared.ts';
 
 const VALIDATORS: Readonly<Record<ValidationLibrary, Validator>> = {
   zod: ZOD,

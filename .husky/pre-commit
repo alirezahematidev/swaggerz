@@ -1,0 +1,4 @@
+# Fast checks on the working tree; typecheck and unit tests run before a push.
+pnpm format:check
+pnpm lint
+pnpm knip

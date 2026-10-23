@@ -1,0 +1,15 @@
+# Conventional Commits drive the changelog (see CONTRIBUTING.md).
+subject=$(grep -v '^#' "$1" | grep -v '^[[:space:]]*$' | head -n 1)
+
+case "$subject" in
+  # Empty messages are rejected by git itself; leave merges, reverts and fixups alone.
+  '' | 'Merge '* | 'Revert '* | 'fixup! '* | 'squash! '* | 'amend! '*) exit 0 ;;
+esac
+
+if ! printf '%s\n' "$subject" |
+  grep -Eq '^(feat|fix|perf|docs|refactor|test|build|ci|chore|style|revert)(\([^()]+\))?!?: [^ ]'; then
+  echo "commit-msg: \"$subject\" is not a Conventional Commit." >&2
+  echo "Use <type>[(scope)][!]: <description>, e.g. \"fix(cli): report missing configs\"." >&2
+  echo "Types: feat, fix, perf, docs, refactor, test, build, ci, chore, style, revert." >&2
+  exit 1
+fi

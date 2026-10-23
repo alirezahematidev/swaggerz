@@ -44,6 +44,8 @@ jobs:
         run: pnpm lint
       - if: matrix.lint
         run: pnpm format:check
+      - if: matrix.lint
+        run: pnpm knip
       - run: pnpm build
       - run: pnpm test
 

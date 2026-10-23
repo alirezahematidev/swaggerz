@@ -15,7 +15,7 @@ import { generateReactMutation, generateReactQuery } from './react.ts';
 import { generateSwrMutation, generateSwrQuery } from './swr.ts';
 import { generateVueMutation, generateVueQuery } from './vue.ts';
 
-export { QUERY_LABELS, QUERY_PACKAGES, resolveInvalidations } from './common.ts';
+export { QUERY_LABELS, QUERY_PACKAGES } from './common.ts';
 
 /** The hooks module of one operation (`react-query/pets/get-pet`, `swr/pets/get-pet`, …). */
 export function generateQueryModule(

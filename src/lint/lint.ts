@@ -16,7 +16,7 @@ import type { DocumentStore } from '../loader/store.ts';
 import { compareStrings, pluralize } from '../utils/strings.ts';
 import { LINT_RULES, type LintRuleInfo } from './rules.ts';
 
-export { LINT_RULES, type LintRuleInfo } from './rules.ts';
+export { LINT_RULES } from './rules.ts';
 
 interface Finding {
   readonly message: string;

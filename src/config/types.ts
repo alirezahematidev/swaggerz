@@ -1,6 +1,5 @@
 import type { SwaggerzPlugin } from '../plugins/types.ts';
 import type { StandardHttpMethod } from '../ir/types.ts';
-import type { ResolvedConfig } from './resolved.ts';
 
 export type SpecVersionOption = '2.0' | '3.0' | '3.1' | '3.2' | 'auto';
 export type CaseStyle = 'camelCase' | 'PascalCase' | 'snake_case' | 'kebab-case' | 'preserve';
@@ -292,5 +291,3 @@ export interface ConfigEnv {
 
 /** A config module may export an object or a (possibly async) function returning one. */
 export type ConfigExport = UserConfig | ((env: ConfigEnv) => UserConfig | Promise<UserConfig>);
-
-export type { ResolvedConfig };

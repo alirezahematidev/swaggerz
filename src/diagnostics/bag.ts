@@ -1,4 +1,4 @@
-import type { Diagnostic, Severity, SourceLocation } from './types.ts';
+import type { Diagnostic, Severity } from './types.ts';
 
 type DiagnosticInput = Omit<Diagnostic, 'severity'>;
 
@@ -53,11 +53,6 @@ export class SwaggerzError extends Error {
     this.name = 'SwaggerzError';
     this.diagnostics = diagnostics;
   }
-}
-
-/** Helper to build a location object without `undefined` members. */
-export function location(file: string, pointer?: string): SourceLocation {
-  return pointer === undefined ? { file } : { file, pointer };
 }
 
 export function hasErrors(diagnostics: readonly Diagnostic[]): boolean {

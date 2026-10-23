@@ -112,11 +112,3 @@ export function renderJsDoc(block: JsDocBlock | undefined, indent = ''): string 
   if (compact.length === 1) return `${indent}/** ${compact[0] ?? ''} */\n`;
   return `${indent}/**\n${compact.map((line) => `${indent} *${line === '' ? '' : ` ${line}`}`).join('\n')}\n${indent} */\n`;
 }
-
-/** Indents every non-empty line. */
-export function indentLines(text: string, indent: string): string {
-  return text
-    .split('\n')
-    .map((line) => (line === '' ? line : indent + line))
-    .join('\n');
-}

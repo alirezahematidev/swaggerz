@@ -643,7 +643,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `pnpm install`, `pnpm check` (types, oxlint, oxfmt, tests), and [Conventional Commits](https://www.conventionalcommits.org/) messages; releases are cut with release-it and published from CI.
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `pnpm install`, `pnpm check` (types, oxlint, oxfmt, knip, tests), and [Conventional Commits](https://www.conventionalcommits.org/) messages; releases are cut with release-it and published from CI.
 
 ## License
 

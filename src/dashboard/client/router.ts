@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { href, parseRoute, type Route } from './routes.ts';
 
-export { href, parseRoute, type Route } from './routes.ts';
+export { href, type Route } from './routes.ts';
 
 /** The current route. Each section scrolls in its own area, which starts at the top. */
 export function useRoute(): Route {

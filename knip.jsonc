@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/knip/schema-jsonc.json",
+  // Report exports nothing imports, not exports that are also used in their own file.
+  "ignoreExportsUsedInFile": true,
+  "ignoreIssues": {
+    // The shadcn-style primitives keep their full API, used or not.
+    "src/dashboard/client/components/ui/**": ["exports", "types"],
+  },
+  "workspaces": {
+    ".": {
+      "entry": [
+        // package.json points `exports` and `bin` at dist/, which knip cannot map back to src/.
+        "src/index.ts",
+        "src/cli/bin.ts",
+        // Copied into every generated client rather than imported.
+        "src/templates/runtime/*.ts",
+        // Bundled by scripts/build-assets.ts through Vite's API (there is no vite.config).
+        "src/dashboard/client/main.tsx",
+        // Passed as file paths: to the bundler by scripts/runtimes.ts, to the CLI by `test:smoke`.
+        "tests/runtimes/entry.js",
+        "tests/smoke/swaggerz.config.mjs",
+        // Run by hand to regenerate the logos (see the header of each script).
+        "brand/*.mjs",
+      ],
+      "ignoreDependencies": [
+        // Imported only by generated clients in tests/.output, which the integration tests compile.
+        "@tanstack/solid-query",
+        "@tanstack/svelte-query",
+        "solid-js",
+        // Installed on demand into .runtimes/ by scripts/runtimes.ts.
+        "playwright",
+        "miniflare",
+        "workerd",
+        // Installed into a temporary directory by brand/build-logo.mjs.
+        "opentype.js",
+      ],
+    },
+    // The examples import their client from src/generated, which is gitignored, so knip neither
+    // follows those imports nor sees the validation library the generated client imports.
+    "examples/*": {
+      "entry": ["swaggerz.config.{ts,mjs}"],
+    },
+    "examples/custom-plugin": {
+      "entry": ["swaggerz.config.ts", "src/index.ts"],
+    },
+    "examples/react-query": {
+      "entry": ["swaggerz.config.ts"],
+      "ignoreDependencies": ["zod"],
+    },
+    "examples/swr": {
+      "entry": ["swaggerz.config.ts"],
+      "ignoreDependencies": ["arktype"],
+    },
+    "examples/vue-query": {
+      "entry": ["swaggerz.config.ts"],
+      "ignoreDependencies": ["valibot"],
+    },
+  },
+}
