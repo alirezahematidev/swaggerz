@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.2](https://github.com/alirezahematidev/swaggerz/compare/v0.1.1...v0.1.2) (2026-10-24)
+
+### Features
+
+* website ([c573de0](https://github.com/alirezahematidev/swaggerz/commit/c573de01d77a49cb25c23b3e0e721d74c75537df))
+
+### Bug fixes
+
+* plan.txt ignored ([6345f47](https://github.com/alirezahematidev/swaggerz/commit/6345f47dc07078a7853975835704b55f94901ef2))
+* resolve code scanning alerts and two crashes found by fuzzing ([661309b](https://github.com/alirezahematidev/swaggerz/commit/661309bbb537d6b29d650a908faa093d9e66f901))
+* security issues ([b380811](https://github.com/alirezahematidev/swaggerz/commit/b3808114b506e45be09776f022b0c1313c9d368e))
+
 ## [0.1.1](https://github.com/alirezahematidev/swaggerz/compare/v0.1.0...v0.1.1) (2026-10-23)
 
 ### Features
