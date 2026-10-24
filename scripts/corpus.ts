@@ -7,12 +7,13 @@
  *   --update        record checksums of new documents and rewrite the baseline
  *   --no-typecheck  skip type-checking the generated clients (faster)
  *
- * Documents are downloaded once into `.corpus/` (network) and verified against their checksums.
+ * Documents are checked out once into `.corpus/` with git (network) and verified against their
+ * checksums.
  */
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveConfig } from '../src/config/resolve.ts';
@@ -27,13 +28,18 @@ const CACHE = path.join(ROOT, '.corpus');
 /** Inside the repository, so generated clients resolve zod and React Query from node_modules. */
 const OUTPUT = path.join(ROOT, 'tests', '.output', 'corpus');
 
+interface Git {
+  readonly repo: string;
+  readonly commit: string;
+  /** The directory to check out when the description spreads over many files. */
+  readonly sparse?: string;
+}
+
 interface Entry {
   readonly name: string;
-  /** A single-file document. */
-  readonly url?: string;
-  /** A description spread over many files: checked out at a commit, compiled from `path`. */
-  readonly git?: { readonly repo: string; readonly commit: string; readonly sparse: string };
-  readonly path?: string;
+  readonly git: Git;
+  /** The root document, relative to the repository. */
+  readonly path: string;
   sha256?: string;
 }
 
@@ -73,17 +79,23 @@ const baseline: Record<string, Result> =
     ? {}
     : (JSON.parse(baselineText.toString('utf8')) as Record<string, Result>);
 
-/** Checks out `sparse` of a repository at a commit (shallow), once. */
-function checkout(directory: string, git: NonNullable<Entry['git']>): void {
-  if (existsSync(path.join(directory, '.git'))) return;
+/** Checks out `file` (or the `sparse` directory) of a repository at a commit, shallow. */
+function checkout(directory: string, git: Git, file: string): void {
   const run = (...gitArgs: string[]): void => {
     execFileSync('git', gitArgs, { cwd: directory, stdio: 'ignore' });
   };
   run('init', '--quiet');
   run('remote', 'add', 'origin', git.repo);
-  run('sparse-checkout', 'set', git.sparse);
   run('fetch', '--quiet', '--depth', '1', '--filter=blob:none', 'origin', git.commit);
-  run('checkout', '--quiet', 'FETCH_HEAD');
+  if (git.sparse === undefined) {
+    // Fetches the one blob.
+    run('checkout', '--quiet', 'FETCH_HEAD', '--', file);
+  } else {
+    // A sparse checkout fetches the directory's blobs in one batch; a path checkout would fetch
+    // them one by one.
+    run('sparse-checkout', 'set', git.sparse);
+    run('checkout', '--quiet', 'FETCH_HEAD');
+  }
 }
 
 /** Verifies (or, with --update, records) the checksum of a document's content. */
@@ -97,52 +109,40 @@ function verify(entry: Entry, content: Buffer): void {
 }
 
 /**
- * Where corpus documents may come from. `corpus.json` is data, so its URLs are checked against
- * these before anything is fetched; every download is also pinned by its checksum.
+ * `corpus.json` is data, so its repositories must be on GitHub over https and its commits full
+ * hashes (which also keeps them from being read as git options).
  */
-const DOWNLOAD_HOSTS: ReadonlySet<string> = new Set(['raw.githubusercontent.com']);
-const GIT_HOSTS: ReadonlySet<string> = new Set(['github.com']);
-
-function allowed(address: string, hosts: ReadonlySet<string>, name: string): URL {
-  const url = new URL(address);
-  if (url.protocol !== 'https:' || !hosts.has(url.host))
-    throw new Error(
-      `${name}: ${url.origin} is not an allowed source (https, ${[...hosts].join(', ')}).`,
-    );
-  return url;
+function checkSource(entry: Entry): void {
+  const url = new URL(entry.git.repo);
+  if (url.protocol !== 'https:' || url.host !== 'github.com')
+    throw new Error(`${entry.name}: ${url.origin} is not an allowed source (https://github.com).`);
+  if (!/^[0-9a-f]{40}$/.test(entry.git.commit))
+    throw new Error(`${entry.name}: ${entry.git.commit} is not a full commit hash.`);
 }
 
 /**
- * Downloads a document once and verifies its checksum. A download is verified before it is
- * cached, so a changed or tampered document never reaches `.corpus/`.
+ * Checks a document out once and verifies its checksum. A checkout is verified before it is moved
+ * into `.corpus/`, so a failed, changed or tampered one never gets there.
  */
 async function download(entry: Entry): Promise<string> {
   // Names become directories under `.corpus/`.
   if (!/^[a-z0-9][a-z0-9-]*$/.test(entry.name))
     throw new Error(`Invalid corpus name ${entry.name}.`);
-  if (entry.git !== undefined && entry.path !== undefined) {
-    allowed(entry.git.repo, GIT_HOSTS, entry.name);
-    const directory = path.join(CACHE, entry.name);
-    await mkdir(directory, { recursive: true });
-    checkout(directory, entry.git);
-    const file = path.join(directory, entry.path);
-    verify(entry, await readFile(file));
-    return file;
-  }
-  if (entry.url === undefined) throw new Error(`${entry.name}: needs a url, or git and path.`);
-  const url = allowed(entry.url, DOWNLOAD_HOSTS, entry.name);
-  const file = path.join(CACHE, entry.name, path.basename(url.pathname));
+  checkSource(entry);
+  const directory = path.join(CACHE, entry.name);
+  const file = path.join(directory, entry.path);
   const cached = await readIfExists(file);
   if (cached !== undefined) {
     verify(entry, cached);
     return file;
   }
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`${entry.url}: HTTP ${response.status}`);
-  const content = Buffer.from(await response.arrayBuffer());
-  verify(entry, content);
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, content);
+  const partial = `${directory}.partial`;
+  await rm(partial, { recursive: true, force: true });
+  await mkdir(partial, { recursive: true });
+  checkout(partial, entry.git, entry.path);
+  verify(entry, await readFile(path.join(partial, entry.path)));
+  await rm(directory, { recursive: true, force: true });
+  await rename(partial, directory);
   return file;
 }
 
