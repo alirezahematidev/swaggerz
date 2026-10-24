@@ -20,3 +20,6 @@ examples/*/dist/
 
 # Marketing assets and their Remotion project (kept out of the repository)
 marketing/
+
+# Private planning notes
+plan.txt
