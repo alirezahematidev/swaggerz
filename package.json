@@ -150,7 +150,7 @@
     "provenance": true
   },
   "optionalDependencies": {
-    "oxc-parser": "^0.154.0",
+    "oxc-parser": "^0.155.0",
     "oxc-resolver": "^11.24.0"
   }
 }
