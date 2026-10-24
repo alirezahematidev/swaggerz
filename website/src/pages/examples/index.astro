@@ -1,0 +1,78 @@
+---
+/** The examples gallery: every project in examples/, with what it shows. */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { getCollection } from 'astro:content';
+
+const examples = (await getCollection('examples')).sort((a, b) => a.id.localeCompare(b.id));
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Examples',
+    description: 'Runnable projects from the repository, each generated and type-checked in CI.',
+    tableOfContents: false,
+  }}
+>
+  <p>
+    Each example is a project in the repository's <code>examples/</code> directory. CI generates
+    its client, type-checks it with its framework's compiler and builds it; the numbers below come
+    from generating it for this build of the site.
+  </p>
+  <ul class="example-grid not-content">
+    {
+      examples.map((example) => (
+        <li>
+          <a href={`${example.id}/`} class="example-card">
+            <span class="example-name">{example.data.title}</span>
+            <span class="example-description">{example.data.description}</span>
+            <span class="example-meta">
+              {example.data.operations} operations · {example.data.models} models ·{' '}
+              {example.data.generated.length} files
+              {example.data.dependencies.length > 0 && <> · {example.data.dependencies.join(', ')}</>}
+            </span>
+          </a>
+        </li>
+      ))
+    }
+  </ul>
+  <p>
+    Run any of them from the repository root with <code>pnpm example:&lt;name&gt;</code>, for example
+    <code>pnpm example:react-query</code>.
+  </p>
+</StarlightPage>
+
+<style>
+  .example-grid {
+    list-style: none;
+    padding: 0;
+    margin-top: 1.5rem;
+    display: grid;
+    gap: 0;
+    border-top: 1px solid var(--border-strong);
+  }
+  .example-card {
+    display: grid;
+    gap: 0.25rem;
+    padding: 1.1rem 0;
+    border-bottom: 1px solid var(--rule);
+    text-decoration: none;
+    color: var(--text);
+  }
+  .example-name {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--text-strong);
+  }
+  .example-card:hover .example-name {
+    color: var(--link);
+  }
+  .example-description {
+    max-width: 68ch;
+  }
+  .example-meta {
+    font-size: 0.82rem;
+    color: var(--muted-foreground);
+  }
+</style>

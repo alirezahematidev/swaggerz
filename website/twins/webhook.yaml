@@ -1,0 +1,39 @@
+openapi: 3.1.0
+info:
+  title: Accounts
+  version: '1.0'
+paths: {}
+webhooks:
+  accountClosed:
+    post:
+      summary: Sent when an account is closed.
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Account'
+      responses:
+        '200':
+          description: Received.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+components:
+  schemas:
+    Account:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string

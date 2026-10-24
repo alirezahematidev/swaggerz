@@ -1,0 +1,20 @@
+---
+/** The changelog, rendered from CHANGELOG.md (written by release-it from commits). */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { getEntry, render } from 'astro:content';
+
+const entry = await getEntry('changelog', 'changelog');
+if (entry === undefined) throw new Error('CHANGELOG.md was not loaded.');
+const { Content, headings } = await render(entry);
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Changelog',
+    description: 'Every release, generated from the commit history.',
+    editUrl: false,
+  }}
+  headings={headings}
+>
+  <Content />
+</StarlightPage>

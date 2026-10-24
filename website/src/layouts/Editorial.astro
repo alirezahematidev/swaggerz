@@ -1,0 +1,138 @@
+---
+/**
+ * The layout of pages outside the docs (the landing page and the playground): the same tokens,
+ * fonts and theme handling as the docs, with a header and a footer of its own.
+ */
+import '../styles/theme.css';
+import '../styles/editorial.css';
+import { Image } from 'astro:assets';
+import lockup from '../../../brand/logotype-lockup.png';
+import lockupDark from '../../../brand/logotype-lockup-dark.png';
+import sans from '../../../src/dashboard/client/fonts/figtree-latin-wght-normal.woff2?url';
+import serif from '../../../src/dashboard/client/fonts/fraunces-latin-full-normal.woff2?url';
+import mono from '../../../src/dashboard/client/fonts/spline-sans-mono-latin-wght-normal.woff2?url';
+import Disclosure from '../components/Disclosure.astro';
+import Search from '../components/Search.astro';
+import SocialMeta from '../components/SocialMeta.astro';
+import build from '../generated/build.json';
+import ThemeSelect from '../overrides/ThemeSelect.astro';
+import { REPOSITORY } from '../site.ts';
+
+interface Props {
+  title: string;
+  description: string;
+  /** Wide pages (the playground) use the whole viewport width. */
+  wide?: boolean;
+  current?: 'home' | 'playground';
+}
+
+const { title, description, wide = false, current } = Astro.props;
+const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+const nav = [
+  { label: 'Docs', href: `${base}docs/introduction/` },
+  { label: 'Guides', href: `${base}docs/guides/fetch-and-axios/` },
+  { label: 'Reference', href: `${base}docs/reference/config/` },
+  { label: 'Examples', href: `${base}examples/` },
+  { label: 'Playground', href: `${base}playground/`, current: current === 'playground' },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+    <link rel="preload" href={sans} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={serif} as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href={mono} as="font" type="font/woff2" crossorigin />
+    <SocialMeta title={title} description={description} image={`og/${current === 'playground' ? 'playground' : 'index'}.png`} />
+    {/* Same bootstrapping as the docs (Starlight's storage key), before the first paint. */}
+    <script is:inline>
+      (() => {
+        let stored = '';
+        try {
+          stored = localStorage.getItem('starlight-theme') || '';
+        } catch {}
+        const theme =
+          stored || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+      })();
+    </script>
+  </head>
+  <body class:list={['editorial', { 'editorial-wide': wide }]}>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <a class="site-brand" href={base} aria-label="swaggerz home" aria-current={current === 'home' ? 'page' : undefined}>
+        <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
+        <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
+      </a>
+      <nav class="site-nav" aria-label="Main">
+        {
+          nav.map((item) => (
+            <a href={item.href} aria-current={item.current === true ? 'page' : undefined}>
+              {item.label}
+            </a>
+          ))
+        }
+      </nav>
+      <div class="site-tools">
+        <Search />
+        <a class="site-github" href={REPOSITORY.url} aria-label="swaggerz on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"
+            ><path
+              d="M8 .2a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.08-2.7-1.08-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.66 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 .2Z"
+            ></path></svg
+          >
+        </a>
+        <div class="site-theme"><ThemeSelect /></div>
+        <Disclosure id="site-menu-panel" class="site-menu" popover caret={false}>
+          <Fragment slot="summary">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"></path></svg>
+            <span class="sr-only">Menu</span>
+          </Fragment>
+          <nav aria-label="Main menu">
+            {
+              nav.map((item) => (
+                <a href={item.href} aria-current={item.current === true ? 'page' : undefined}>
+                  {item.label}
+                </a>
+              ))
+            }
+            <a href={REPOSITORY.url}>GitHub</a>
+          </nav>
+          <div class="site-menu-theme">
+            <span>Theme</span>
+            <ThemeSelect />
+          </div>
+        </Disclosure>
+      </div>
+    </header>
+    <main id="main">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="site-footer-inner">
+        <div class="site-footer-brand">
+          <a class="site-brand" href={base} aria-label="swaggerz home">
+            <Image src={lockup} alt="" class="lockup light-only" height={22} densities={[1, 2]} />
+            <Image src={lockupDark} alt="" class="lockup dark-only" height={22} densities={[1, 2]} />
+          </a>
+          <p>Typed API clients, compiled from your OpenAPI spec.</p>
+        </div>
+        <nav aria-label="Footer">
+          <a href={`${base}docs/introduction/`}>Introduction</a>
+          <a href={`${base}docs/quick-start/`}>Quick start</a>
+          <a href={`${base}docs/reference/config/`}>Config options</a>
+          <a href={`${base}playground/`}>Playground</a>
+          <a href={`${base}changelog/`}>Changelog</a>
+          <a href={`${base}brand/`}>Brand</a>
+          <a href={REPOSITORY.url}>GitHub</a>
+        </nav>
+        <p class="site-license">MIT licensed · swaggerz {build.version}</p>
+      </div>
+    </footer>
+  </body>
+</html>

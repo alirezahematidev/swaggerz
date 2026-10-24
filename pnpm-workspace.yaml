@@ -2,6 +2,8 @@
 # (`pnpm example:<name>` builds it first).
 packages:
   - examples/*
+  # The docs website (website.md); it builds this checkout and documents it.
+  - website
 
 allowBuilds:
   esbuild: true

@@ -1,0 +1,87 @@
+---
+/**
+ * Every config option, from the JSON Schema that `src/config/validate.ts` produces; the same
+ * definitions validate configs at runtime.
+ */
+import config from '../../generated/config.json';
+import { configGroups } from '../../reference/headings.ts';
+
+const groups = configGroups();
+const slug = (text: string): string =>
+  text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const depth = (path: string): number => path.split('.').length - 1;
+---
+
+<p>
+  Config files are named <code>{config.basename}.&lt;ext&gt;</code>, with the extensions {
+    config.extensions.map((extension, index) => (
+      <>
+        {index > 0 && (index === config.extensions.length - 1 ? ' and ' : ', ')}
+        <code>{extension}</code>
+      </>
+    ))
+  }. JSON and YAML configs are validated against the same schema in editors
+  (<code>swaggerz/config.schema.json</code>). Options marked <span class="ref-badge">code only</span>
+  take functions and exist only in TypeScript and JavaScript configs.
+</p>
+
+{
+  groups.map((group) => (
+    <section class="ref-group">
+      <div class="sl-heading-wrapper level-h2">
+        <h2 id={`group-${slug(group)}`}>
+          <code>{group}</code>
+        </h2>
+      </div>
+      <dl class="ref-config">
+        {config.options
+          .filter((option) => option.path === group || option.path.startsWith(`${group}.`))
+          .map((option) => (
+            <div class="ref-config-entry" id={option.path} data-depth={depth(option.path)}>
+              <dt>
+                <a class="ref-anchor" href={`#${option.path}`}>
+                  <code>{option.path}</code>
+                </a>
+                {option.required && <span class="ref-badge ref-badge-strong">required</span>}
+                {option.codeOnly && <span class="ref-badge">code only</span>}
+              </dt>
+              <dd>
+                <p class="ref-type">
+                  <code>{option.type}</code>
+                  {option.default !== undefined && option.default !== null && (
+                    <span>
+                      {' '}
+                      · default <code>{option.default}</code>
+                    </span>
+                  )}
+                  {option.constraints.length > 0 && <span> · {option.constraints.join(', ')}</span>}
+                </p>
+                <p set:html={option.descriptionHtml} />
+              </dd>
+            </div>
+          ))}
+      </dl>
+    </section>
+  ))
+}
+
+<div class="sl-heading-wrapper level-h2"><h2 id="environment-variables">Environment variables</h2></div>
+<p>
+  Environment variables override the config file, and command-line flags override both. The prefix
+  is <code>{config.envPrefix}</code>.
+</p>
+<table class="ref-table">
+  <thead><tr><th>Variable</th><th>Overrides</th></tr></thead>
+  <tbody>
+    {
+      config.env.map((variable) => (
+        <tr>
+          <td><code>{variable.name}</code></td>
+          <td>
+            <a href={`#${variable.path.join('.')}`}><code>{variable.path.join('.')}</code></a>
+          </td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>

@@ -1,0 +1,346 @@
+/* Pages outside the docs: the landing page and the playground. */
+
+.editorial {
+  /* One content width and gutter for the header, the page and the footer, so their edges line up. */
+  --page-max: 78rem;
+  --gutter: clamp(1rem, 4vw, 2.5rem);
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-body);
+  font-size: 1.03125rem;
+  line-height: 1.7;
+  background: var(--background);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Zero-specificity resets, so every component's own rules win. */
+:where(.editorial) *,
+:where(.editorial) *::before,
+:where(.editorial) *::after {
+  box-sizing: border-box;
+}
+
+:where(.editorial) :where(h1, h2, h3, p, ul, ol, dl, dd, figure, pre, blockquote) {
+  margin: 0;
+}
+
+:where(.editorial) a {
+  color: inherit;
+}
+
+:where(.editorial) img {
+  max-width: 100%;
+  height: auto;
+}
+
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 50;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  background: var(--text-strong);
+  color: var(--background) !important;
+  text-decoration: none;
+}
+
+.skip-link:focus {
+  top: 0.75rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Header */
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  height: 4rem;
+  padding: 0 max(var(--gutter), calc((100% - var(--page-max)) / 2));
+  background: color-mix(in srgb, var(--background) 88%, transparent);
+  backdrop-filter: saturate(1.2) blur(8px);
+  border-bottom: 1px solid var(--rule);
+}
+
+.editorial-wide .site-header {
+  padding-inline: 1.25rem;
+}
+
+.site-brand {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  border-radius: 6px;
+}
+
+.site-brand .lockup {
+  height: 26px;
+  width: auto;
+}
+
+:root[data-theme='dark'] .light-only,
+:root[data-theme='light'] .dark-only {
+  display: none;
+}
+
+.site-nav {
+  display: flex;
+  gap: 1.4rem;
+  font-size: 0.92rem;
+}
+
+.site-nav a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color var(--fast) var(--ease);
+}
+
+.site-nav a:hover,
+.site-nav a[aria-current='page'] {
+  color: var(--text-strong);
+}
+
+.site-nav a[aria-current='page'] {
+  box-shadow: inset 0 -2px 0 var(--marigold);
+}
+
+.site-tools {
+  margin-inline-start: auto;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.site-theme {
+  display: flex;
+}
+
+.site-github {
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  border-radius: 6px;
+}
+
+.site-github:hover {
+  color: var(--text-strong);
+}
+
+.site-github svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  fill: currentColor;
+}
+
+main#main {
+  flex: 1;
+}
+
+/* Footer: the brand and a line, the links, the license. On paper, under a hairline. */
+.site-footer {
+  border-top: 1px solid var(--rule);
+}
+
+.site-footer-inner {
+  max-width: calc(var(--page-max) + var(--gutter) * 2);
+  margin: 0 auto;
+  padding: 2.75rem var(--gutter) 2.5rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 1.75rem 3rem;
+}
+
+.site-footer-brand {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+.site-footer-brand .lockup {
+  height: 22px;
+  width: auto;
+}
+
+.site-footer-brand p {
+  font-size: 0.9rem;
+  color: var(--muted-foreground);
+}
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem 1.5rem;
+  font-size: 0.9rem;
+}
+
+.site-footer nav a {
+  color: var(--muted-foreground);
+  text-decoration: none;
+  transition: color var(--fast) var(--ease);
+}
+
+.site-footer nav a:hover {
+  color: var(--text-strong);
+}
+
+.site-license {
+  grid-column: 1 / -1;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.8rem;
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 40rem) {
+  .site-footer-inner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .site-footer nav {
+    justify-content: flex-start;
+  }
+}
+
+.site-tools .search-trigger {
+  width: 12.5rem;
+}
+
+.site-menu {
+  display: none;
+  position: relative;
+}
+
+.site-menu > .disclosure-button {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid;
+  border-radius: 999px;
+  color: var(--text-strong);
+}
+
+.site-menu > .disclosure-button svg {
+  width: 1.15rem;
+  height: 1.15rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.site-menu > .disclosure-button {
+  border-color: var(--border);
+}
+
+.site-menu[data-open] > .disclosure-button {
+  border-color: var(--border-strong);
+}
+
+.site-menu-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.4rem;
+  padding: 0.5rem 0.25rem 0.1rem 0.75rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.site-menu .disclosure-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  min-width: 13rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+  box-shadow: var(--sl-shadow-lg);
+}
+
+.site-menu nav {
+  display: grid;
+}
+
+.site-menu nav a {
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text-strong);
+}
+
+.site-menu nav a:hover {
+  background: color-mix(in srgb, var(--marigold) 12%, transparent);
+}
+
+.site-menu nav a {
+  position: relative;
+}
+
+.site-menu nav a[aria-current='page']::before {
+  content: '';
+  position: absolute;
+  left: 0.25rem;
+  top: 0.6rem;
+  bottom: 0.6rem;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--marigold);
+}
+
+/* Between phone and desktop widths the header has room for the trigger's icon only. */
+@media (max-width: 64rem) {
+  .site-tools .search-trigger {
+    width: 2.4rem;
+    padding: 0;
+    justify-content: center;
+  }
+  .site-tools .search-trigger .search-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .site-tools .search-trigger::after {
+    display: none;
+  }
+}
+
+@media (max-width: 52rem) {
+  .site-header {
+    gap: 1rem;
+  }
+  .site-tools {
+    gap: 0.6rem;
+  }
+  .site-nav,
+  .site-github,
+  .site-theme {
+    display: none;
+  }
+  .site-menu {
+    display: block;
+  }
+}

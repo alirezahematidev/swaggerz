@@ -1,0 +1,30 @@
+---
+/** The brand lockup (mark and logotype), in ink on paper or paper on night. */
+import { Image } from 'astro:assets';
+import lockup from '../../../brand/logotype-lockup.png';
+import lockupDark from '../../../brand/logotype-lockup-dark.png';
+
+const { siteTitleHref } = Astro.locals.starlightRoute;
+---
+
+<a href={siteTitleHref} class="site-title">
+  <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
+  <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
+  <span class="sr-only">swaggerz</span>
+</a>
+
+<style>
+  .site-title {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 6px;
+  }
+  .lockup {
+    height: 26px;
+    width: auto;
+  }
+  :global([data-theme='dark']) .light-only,
+  :global([data-theme='light']) .dark-only {
+    display: none;
+  }
+</style>

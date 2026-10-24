@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: Accounts
+  version: '1.0'
+paths:
+  /accounts:
+    post:
+      tags: [accounts]
+      operationId: createAccount
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewAccount'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/NewAccount'
+          application/xml:
+            schema:
+              $ref: '#/components/schemas/NewAccount'
+      responses:
+        '204':
+          description: Created.
+  /accounts/{accountId}/avatar:
+    put:
+      tags: [accounts]
+      operationId: uploadAvatar
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  format: binary
+                caption:
+                  type: string
+      responses:
+        '204':
+          description: Uploaded.
+components:
+  schemas:
+    NewAccount:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string

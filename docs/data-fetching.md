@@ -91,7 +91,7 @@ pages.data?.pages.flatMap((page) => page.items);
 
 ## Bundling
 
-Hooks are separate modules under their library's directory (`react-query/`, `vue-query/`, …) with their own barrel. Importing one hook bundles only that operation, its key and the shared runtime (measured: ~12 KB beyond TanStack Query itself for a 1,000-operation client). Operation modules and the main barrel never import a UI framework, TanStack Query or SWR.
+Hooks are separate modules under their library's directory (`react-query/`, `vue-query/`, …) with their own barrel. Importing one hook bundles only that operation, its key and the shared runtime (measured: ~17 KB beyond TanStack Query itself for a 1,000-operation client, most of it the shared runtime). Operation modules and the main barrel never import a UI framework, TanStack Query or SWR.
 
 ## Vue, Svelte and Solid
 

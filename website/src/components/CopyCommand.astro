@@ -1,0 +1,107 @@
+---
+/** A shell command with a copy button. Without JavaScript it is plain, selectable text. */
+interface Props {
+  command: string;
+}
+
+const { command } = Astro.props;
+---
+
+<sz-copy class="copy-command" data-command={command}>
+  <code><span class="prompt" aria-hidden="true">$</span> {command}</code>
+  <button type="button" hidden aria-label={`Copy “${command}”`}>
+    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1.5"></rect><path d="M10.5 3V2.5A1.5 1.5 0 0 0 9 1H3.5A1.5 1.5 0 0 0 2 2.5V8a1.5 1.5 0 0 0 1.5 1.5H4"></path></svg>
+    <span class="copy-done" aria-hidden="true">Copied</span>
+  </button>
+  <span class="sr-only" role="status" aria-live="polite"></span>
+</sz-copy>
+
+<script>
+  class CopyCommand extends HTMLElement {
+    connectedCallback(): void {
+      const button = this.querySelector('button');
+      const status = this.querySelector('[role="status"]');
+      const command = this.dataset.command ?? '';
+      if (button === null || navigator.clipboard === undefined) return;
+      button.hidden = false;
+      button.addEventListener('click', () => {
+        navigator.clipboard.writeText(command).then(
+          () => {
+            this.setAttribute('data-copied', '');
+            if (status !== null) status.textContent = 'Copied to the clipboard';
+            setTimeout(() => {
+              this.removeAttribute('data-copied');
+              if (status !== null) status.textContent = '';
+            }, 1600);
+          },
+          () => undefined,
+        );
+      });
+    }
+  }
+  customElements.define('sz-copy', CopyCommand);
+</script>
+
+<style>
+  .copy-command {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 100%;
+    height: 2.75rem;
+    padding: 0 0.4rem 0 1rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    font-size: 0.9rem;
+  }
+  code {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-strong);
+    white-space: nowrap;
+  }
+  .prompt {
+    color: var(--muted-foreground);
+    user-select: none;
+  }
+  button {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    height: 2rem;
+    min-width: 2rem;
+    justify-content: center;
+    padding: 0 0.5rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+  }
+  button:hover {
+    color: var(--text-strong);
+  }
+  button[hidden] {
+    display: none;
+  }
+  svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.3;
+  }
+  .copy-done {
+    display: none;
+    font-size: 0.8rem;
+  }
+  :global(sz-copy[data-copied]) .copy-done {
+    display: inline;
+  }
+  :global(sz-copy[data-copied]) svg {
+    display: none;
+  }
+</style>

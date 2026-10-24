@@ -1,0 +1,29 @@
+---
+/**
+ * A code sample from `website/samples/`, which the build type-checks against clients generated
+ * by this checkout (scripts/samples.ts). The `// #region show` and `// #endregion` markers, when
+ * present, select the part that is shown.
+ */
+import { Code } from '@astrojs/starlight/components';
+
+// The samples next to their generated clients (`samples/<variant>/*.ts`), read at build time.
+const SAMPLES = import.meta.glob<string>('../../samples/*/*.{ts,tsx}', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+});
+
+interface Props {
+  file: string;
+  title?: string;
+}
+
+const { file, title } = Astro.props;
+const text = SAMPLES[`../../samples/${file}`];
+if (text === undefined) throw new Error(`No sample samples/${file}.`);
+const region = /\/\/ #region show\n([\s\S]*?)\/\/ #endregion/.exec(text);
+const code = (region?.[1] ?? text).replace(/\nexport \{\};\n?$/, '\n').trimEnd();
+const lang = file.endsWith('.tsx') ? 'tsx' : file.endsWith('.js') ? 'js' : 'ts';
+---
+
+<Code code={code} lang={lang} {...title === undefined ? {} : { title }} />

@@ -1,0 +1,120 @@
+---
+/**
+ * Chapter navigation: the sidebar's top-level groups are numbered chapters set in the serif, and
+ * the current page is marked with a short marigold bar.
+ */
+import MobileMenuFooter from '@astrojs/starlight/components/MobileMenuFooter.astro';
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+
+const { sidebar } = Astro.locals.starlightRoute;
+type Entry = (typeof sidebar)[number];
+
+const isCurrent = (entry: Entry): boolean =>
+  entry.type === 'link' ? entry.isCurrent : entry.entries.some(isCurrent);
+---
+
+<SidebarPersister>
+  <ol class="chapters">
+    {
+      sidebar.map((chapter, index) =>
+        chapter.type === 'group' ? (
+          <li class="chapter" data-current={isCurrent(chapter) ? '' : undefined}>
+            <p class="chapter-title" id={`chapter-${index + 1}`}>
+              <span class="chapter-number">{String(index + 1).padStart(2, '0')}</span>
+              <span class="chapter-label">{chapter.label}</span>
+            </p>
+            <ul aria-labelledby={`chapter-${index + 1}`}>
+              {chapter.entries.map((entry) =>
+                entry.type === 'link' ? (
+                  <li>
+                    <a href={entry.href} aria-current={entry.isCurrent ? 'page' : undefined}>
+                      {entry.label}
+                    </a>
+                  </li>
+                ) : null,
+              )}
+            </ul>
+          </li>
+        ) : null,
+      )
+    }
+  </ol>
+</SidebarPersister>
+
+
+<div class="md:sl-hidden">
+  <MobileMenuFooter />
+</div>
+
+<style>
+  .chapters {
+    list-style: none;
+    padding: 0.25rem 0 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.6rem;
+  }
+  .chapter-title {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin: 0 0 0.35rem;
+    padding-inline: 0.75rem;
+  }
+  .chapter-number {
+    font-family: var(--font-code);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+  .chapter[data-current] .chapter-number {
+    color: var(--marigold-ink);
+  }
+  .chapter-label {
+    font-family: var(--font-display);
+    font-size: 1.06rem;
+    font-weight: 520;
+    line-height: 1.2;
+    color: var(--text-strong);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  a {
+    position: relative;
+    display: block;
+    padding: 0.28rem 0.75rem 0.28rem 2.05rem;
+    font-size: 0.9rem;
+    line-height: 1.35;
+    color: var(--muted-foreground);
+    text-decoration: none;
+    border-radius: 6px;
+    transition: color var(--fast) var(--ease);
+  }
+  a:hover {
+    color: var(--text-strong);
+  }
+  a[aria-current='page'] {
+    color: var(--text-strong);
+    font-weight: 560;
+  }
+  a[aria-current='page']::before {
+    content: '';
+    position: absolute;
+    left: 0.95rem;
+    top: 50%;
+    width: 0.65rem;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--marigold);
+    transform: translateY(-50%);
+  }
+  a:focus-visible {
+    outline-offset: -2px;
+  }
+
+</style>

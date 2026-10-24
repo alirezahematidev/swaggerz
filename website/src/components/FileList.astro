@@ -1,0 +1,81 @@
+---
+/** The files `swaggerz generate` writes for the petstore fixture (src/generated/quick-start.json). */
+import quickStart from '../generated/quick-start.json';
+
+const DESCRIPTIONS: Record<string, string> = {
+  '': 'the client instance and the barrel',
+  models: 'one module per model',
+  runtime: 'transport, serialization, errors: emitted, no dependency',
+};
+---
+
+<figure class="file-list not-content">
+  <figcaption>
+    <code>src/generated/api/</code> for the petstore fixture: {quickStart.total} files, {quickStart.operations} operations, {quickStart.models} models
+  </figcaption>
+  <ul>
+    {
+      quickStart.tree.map((entry) => (
+        <li>
+          <span class="file-list-name">{entry.directory === '' ? entry.files.join(', ') : `${entry.directory}/`}</span>
+          <span class="file-list-note">
+            {entry.directory === ''
+              ? DESCRIPTIONS['']
+              : DESCRIPTIONS[entry.directory] ?? `${entry.files.length} operations tagged “${entry.directory}”`}
+          </span>
+        </li>
+      ))
+    }
+    <li>
+      <span class="file-list-name">.swaggerz-manifest.json</span>
+      <span class="file-list-note">the files the generator owns, with their hashes</span>
+    </li>
+  </ul>
+</figure>
+
+<style>
+  .file-list {
+    margin-top: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  figcaption {
+    padding: 0.7rem 1rem 0.6rem;
+    font-size: 0.82rem;
+    color: var(--muted-foreground);
+    border-bottom: 1px solid var(--rule);
+  }
+  figcaption code {
+    color: var(--text-strong);
+  }
+  ul {
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem 0;
+  }
+  li {
+    display: grid;
+    grid-template-columns: minmax(9rem, 14rem) 1fr;
+    gap: 1rem;
+    padding: 0.25rem 1rem;
+    font-size: 0.88rem;
+  }
+  .file-list-name {
+    font-family: var(--font-code);
+    font-size: 0.82rem;
+    color: var(--text-strong);
+    overflow-wrap: anywhere;
+  }
+  .file-list-note {
+    color: var(--muted-foreground);
+  }
+  @media (max-width: 40rem) {
+    li {
+      grid-template-columns: 1fr;
+      gap: 0;
+      padding-block: 0.35rem;
+    }
+  }
+</style>

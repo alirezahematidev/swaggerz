@@ -1,0 +1,43 @@
+/*
+ * Tokens the website adds to the shared palette (src/dashboard/client/tokens.css): text tones
+ * between ink and muted, and the margin-note and stamp colors. Same structure as the shared file:
+ * light under `:root`, dark under the media query and `[data-theme='dark']`.
+ */
+:root {
+  --text: #2b2822;
+  --text-strong: #1b1915;
+  --link: #8a5a00;
+  --link-hover: #1b1915;
+  --rule: #e0d8c8;
+  --note-rule: #f2b33d;
+  --paper-edge: #e9e2d4;
+  --stamp-ink: #fdfbf7;
+  /* Focus outlines: the brand's deep gold, which keeps 3:1 against every light paper. */
+  --focus: #b07a12;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --text: #d9d2c5;
+    --text-strong: #ede7dc;
+    --link: #f2b33d;
+    --link-hover: #ede7dc;
+    --rule: #2c2924;
+    --note-rule: #f2b33d;
+    --paper-edge: #1f1d1a;
+    --stamp-ink: #141311;
+    --focus: #f2b33d;
+  }
+}
+
+:root[data-theme='dark'] {
+  --text: #d9d2c5;
+  --text-strong: #ede7dc;
+  --link: #f2b33d;
+  --link-hover: #ede7dc;
+  --rule: #2c2924;
+  --note-rule: #f2b33d;
+  --paper-edge: #1f1d1a;
+  --stamp-ink: #141311;
+  --focus: #f2b33d;
+}

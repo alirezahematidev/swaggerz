@@ -21,6 +21,18 @@
     ".corpus",
     "marketing",
     "config.schema.json",
-    "pnpm-lock.yaml"
+    "pnpm-lock.yaml",
+    "website/dist",
+    "website/.astro",
+    "website/.cache",
+    "website/.measurements",
+    "website/src/generated",
+    "website/samples/*/generated",
+    "website/samples/.extracted",
+    "website/public/brand",
+    "website/public/og",
+    "website/test-results",
+    "website/playwright-report",
+    "website/tests/__screenshots__"
   ]
 }

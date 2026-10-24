@@ -1,0 +1,166 @@
+---
+/**
+ * Measured numbers: bundle sizes from the tree-shaking test and compiler timings from
+ * scripts/bench.ts, with the date, commit and machine of the run (src/generated/measurements.json).
+ */
+import measurements from '../generated/measurements.json';
+import { REPOSITORY } from '../site.ts';
+
+interface Props {
+  table: 'bundles' | 'compiler';
+}
+
+const { table } = Astro.props;
+const { treeshake, bench } = measurements;
+const kb = (bytes: number): string => `${(bytes / 1000).toFixed(1)} kB`;
+const ms = (value: number): string => `${Math.round(value).toLocaleString('en-US')} ms`;
+const mb = (bytes: number): string => `${(bytes / 1_000_000).toFixed(bytes < 1_000_000 ? 2 : 1)} MB`;
+const date = new Date(measurements.measuredAt).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+const rows = [
+  { label: '1 operation, direct module import (esbuild)', bytes: treeshake.oneOperation },
+  { label: '3 operations through the barrel (esbuild)', bytes: treeshake.threeOperationsEsbuild },
+  { label: '3 operations through the barrel (Vite production build)', bytes: treeshake.threeOperationsVite },
+  { label: '3 operations through the barrel (webpack production build)', bytes: treeshake.threeOperationsWebpack },
+  { label: '3 operations through the barrel (Rollup, not minified)', bytes: treeshake.threeOperationsRollupUnminified },
+  { label: '1 React Query hook, without TanStack Query itself (esbuild)', bytes: treeshake.reactQueryHook },
+  { label: 'The whole client (esbuild)', bytes: treeshake.entireClient },
+];
+---
+
+<figure class="measured not-content">
+  {
+    table === 'bundles' ? (
+      <table>
+        <caption>
+          A client of {treeshake.operations.toLocaleString('en-US')} operations and {treeshake.models} models; minified, not gzipped.
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Bundle</th>
+            <th scope="col" class="num">Size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr>
+              <td>{row.label}</td>
+              <td class="num">{kb(row.bytes)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    ) : (
+      <table>
+        <caption>Median of {bench.runs} runs after a warm-up, compiled in memory (writing excluded).</caption>
+        <thead>
+          <tr>
+            <th scope="col" class="num">Operations</th>
+            <th scope="col" class="num">Models</th>
+            <th scope="col" class="num">Spec</th>
+            <th scope="col" class="num">Parse</th>
+            <th scope="col" class="num">Analyze</th>
+            <th scope="col" class="num">Generate</th>
+            <th scope="col" class="num">Total</th>
+            <th scope="col" class="num">Files</th>
+            <th scope="col" class="num">Heap</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bench.rows.map((row) => (
+            <tr>
+              <td class="num">{row.operations.toLocaleString('en-US')}</td>
+              <td class="num">{row.models.toLocaleString('en-US')}</td>
+              <td class="num">{mb(row.specBytes)}</td>
+              <td class="num">{ms(row.parseMs)}</td>
+              <td class="num">{ms(row.analyzeMs)}</td>
+              <td class="num">{ms(row.generateMs)}</td>
+              <td class="num strong">{ms(row.totalMs)}</td>
+              <td class="num">{row.files.toLocaleString('en-US')}</td>
+              <td class="num">{mb(row.heapBytes)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  <p class="measured-stamp">
+    Measured on {date}, {measurements.environment}
+    {
+      measurements.commit !== undefined && (
+        <>
+          , at{' '}
+          <a href={`${REPOSITORY.url}/commit/${measurements.commit}`}>
+            <code>{measurements.commit.slice(0, 7)}</code>
+          </a>
+        </>
+      )
+    }.
+  </p>
+</figure>
+
+<style>
+  .measured {
+    margin-top: 1.5rem;
+    overflow-x: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+    border-top: 1px solid var(--border-strong);
+  }
+  caption {
+    caption-side: bottom;
+    text-align: start;
+    padding-top: 0.6rem;
+    font-size: 0.82rem;
+    color: var(--muted-foreground);
+  }
+  th {
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--muted-foreground);
+    text-align: start;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid var(--border-strong);
+    white-space: nowrap;
+  }
+  td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  th:first-child,
+  td:first-child {
+    padding-inline-start: 0;
+  }
+  .num {
+    text-align: end;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-code);
+    font-size: 0.85rem;
+    white-space: nowrap;
+  }
+  th.num {
+    font-family: var(--font-body);
+    font-size: 0.75rem;
+  }
+  .strong {
+    color: var(--text-strong);
+    font-weight: 600;
+  }
+  .measured-stamp {
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+    color: var(--muted-foreground);
+  }
+  .measured-stamp a {
+    color: inherit;
+  }
+</style>

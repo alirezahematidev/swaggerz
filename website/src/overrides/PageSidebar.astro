@@ -1,0 +1,62 @@
+---
+/**
+ * "On this page": one menu that is a bar under the header on narrow screens and sits at the foot
+ * of the margin column on wide screens, opening upwards. Starlight's table of contents inside it
+ * marks the section being read.
+ */
+import TableOfContents from '@astrojs/starlight/components/TableOfContents.astro';
+import Disclosure from '../components/Disclosure.astro';
+---
+
+{
+  Astro.locals.starlightRoute.toc && (
+    <Disclosure id="page-toc-panel" class="toc" popover>
+      <Fragment slot="summary">
+        <span class="toc-label">On this page</span>
+        <span class="toc-current" data-toc-current />
+      </Fragment>
+      <TableOfContents />
+    </Disclosure>
+  )
+}
+
+<script>
+  const menu = document.querySelector<HTMLElement>('.toc');
+  if (menu !== null) {
+    // The section being read, next to the label of the narrow bar.
+    const current = menu.querySelector<HTMLElement>('[data-toc-current]');
+    const update = (): void => {
+      const link = menu.querySelector<HTMLAnchorElement>('a[aria-current="true"]');
+      if (current !== null) current.textContent = link?.textContent?.trim() ?? '';
+    };
+    new MutationObserver(update).observe(menu, { attributes: true, subtree: true, attributeFilter: ['aria-current'] });
+    update();
+
+    // On wide screens the menu sits over the margin column; wide material (twin panels, wide
+    // tables) uses that column too, so the menu steps aside while it would cover them.
+    const wide = [...document.querySelectorAll<HTMLElement>('.sl-markdown-content > :is(.twin, table, .wide)')];
+    const desktop = matchMedia('(min-width: 80rem)');
+    let frame = 0;
+    const place = (): void => {
+      frame = 0;
+      if (!desktop.matches) {
+        menu.removeAttribute('data-covered');
+        return;
+      }
+      const box = menu.getBoundingClientRect();
+      const covered = wide.some((element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.top < box.bottom && rect.bottom > box.top && rect.right > box.left;
+      });
+      menu.toggleAttribute('data-covered', covered && !menu.hasAttribute('data-open'));
+    };
+    const schedule = (): void => {
+      if (frame === 0) frame = requestAnimationFrame(place);
+    };
+    addEventListener('scroll', schedule, { passive: true });
+    addEventListener('resize', schedule);
+    menu.addEventListener('sz-toggle', schedule);
+    place();
+    requestAnimationFrame(() => menu.setAttribute('data-settled', ''));
+  }
+</script>

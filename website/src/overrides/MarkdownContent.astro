@@ -1,0 +1,24 @@
+---
+/**
+ * Page content, followed for pages that name a twin by "What's generated": the specification
+ * fragment beside the code swaggerz generates for it.
+ */
+import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+import SpecToCode from '../components/SpecToCode.astro';
+
+const { twin } = Astro.locals.starlightRoute.entry.data;
+---
+
+<Default>
+  <slot />
+  {
+    twin !== undefined && (
+      <>
+        <div class="sl-heading-wrapper level-h2">
+          <h2 id="whats-generated">What's generated</h2>
+        </div>
+        <SpecToCode id={twin} />
+      </>
+    )
+  }
+</Default>

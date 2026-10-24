@@ -1,0 +1,38 @@
+---
+title: Tree-shaking
+description: One module per operation, and what that costs in bytes, measured on every build.
+---
+
+import Measured from '../../../../components/Measured.astro';
+import measurements from '../../../../generated/measurements.json';
+
+export const perOperation = Math.round(
+  (measurements.treeshake.threeOperationsEsbuild - measurements.treeshake.oneOperation) / 2,
+);
+
+A client generated from a large API should cost an application only the operations it calls. swaggerz gets there by construction rather than by configuration:
+
+- **One module per operation and per model.** Each has only static imports and no top-level side effects. The one exception, the default client instance, is marked `/* @__PURE__ */`.
+- **No registry.** There is no class per tag and no table of all endpoints that would keep every operation alive.
+- **Optional parts are separate modules.** Hooks, schemas and the `retry()` and `refreshAuth()` middleware are only bundled when imported; with validation off, nothing imports the validation library.
+
+## Measured
+
+The [tree-shaking test](https://github.com/alirezahematidev/swaggerz/blob/main/tests/integration/treeshake/bundle.test.ts) generates a client from a synthetic specification and bundles small applications with esbuild, Rollup, Vite and webpack. It asserts which operations each bundle contains (only the imported ones); the sizes below are what it measured for this build of the site.
+
+<Measured table="bundles" />
+
+The base is the shared runtime: serialization, errors, the client and the transport. Each further operation adds about {perOperation} bytes (the difference between the first two rows, per operation). Model types cost nothing at runtime.
+
+## Barrels and bundlers
+
+Importing from the barrel (`./generated/api`) is as tree-shakeable as importing the modules directly: the test bundles through the barrel with esbuild, Rollup, Vite and webpack. webpack removes the unused exports of these side-effect-free modules in production mode, with its `usedExports` analysis and its minifier.
+
+:::note
+The whole-client figure includes every operation's error guard (`isGetPetByIdApiError`); an application only bundles the guards it imports.
+:::
+
+## Limitations
+
+- The sizes are minified, not compressed; transfer sizes over the network are smaller.
+- Every client carries its own runtime, so an application that imports two generated clients bundles it twice.

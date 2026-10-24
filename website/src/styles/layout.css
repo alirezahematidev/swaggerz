@@ -1,0 +1,487 @@
+/*
+ * Page layout: header, chapter sidebar, page title, the text column with its margin
+ * column, margin notes, "On this page" and the page footer. Below 80rem the margin column folds
+ * into the text and "On this page" becomes a bar under the header.
+ */
+
+/* ----- Header ----- */
+
+/* Starlight's header places the search box at the text column's edge assuming a right sidebar;
+   this layout has none (the margin column is inside the content width). */
+:root {
+  --__toc-width: 0rem;
+}
+
+.header {
+  backdrop-filter: saturate(1.2) blur(8px);
+  background-color: color-mix(in srgb, var(--background) 90%, transparent) !important;
+  border-bottom-color: var(--rule) !important;
+}
+
+/* The phone menu button: an outlined circle like the search button, not a filled one. */
+:root {
+  --sl-menu-button-size: 2.4rem;
+}
+
+.sl-menu-button {
+  border: 1px solid var(--border) !important;
+  background: var(--background) !important;
+  color: var(--text-strong) !important;
+  box-shadow: none !important;
+}
+
+.sl-menu-button:has(~ :popover-open) {
+  border-color: var(--border-strong) !important;
+}
+
+/* Heading anchors: a quiet mark, shown on hover (and always on touch screens). */
+.sl-markdown-content .sl-anchor-link {
+  color: var(--faint-foreground);
+}
+
+.sl-markdown-content .sl-anchor-link:hover {
+  color: var(--marigold-ink);
+}
+
+/* ----- Sidebar ----- */
+
+.sidebar-pane {
+  background-color: var(--surface-sunken) !important;
+  border-inline-end-color: var(--rule) !important;
+}
+
+.sidebar-content {
+  padding-top: 1.75rem !important;
+  min-height: 100%;
+}
+
+/* ----- Page title ----- */
+
+.kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin: 0.75rem 0 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.kicker-number {
+  font-family: var(--font-code);
+  color: var(--marigold-ink);
+  letter-spacing: 0.02em;
+}
+
+.page-title {
+  margin-top: 0.4rem !important;
+  font-family: var(--font-display);
+  font-size: var(--sl-text-h1);
+  font-weight: 460;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+  text-wrap: balance;
+}
+
+.lede {
+  max-width: 38rem;
+  margin-top: 0.85rem !important;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1.25rem;
+  font-weight: 380;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  text-wrap: pretty;
+}
+
+/* The two content panels (title, body) read as one page: no rule between them. */
+.content-panel + .content-panel {
+  border-top: 0 !important;
+}
+
+.content-panel:first-child {
+  padding-bottom: 0.5rem;
+}
+
+/* ----- Margin notes (Starlight asides) ----- */
+
+.sl-markdown-content .starlight-aside {
+  max-width: var(--measure);
+  padding: 0.1rem 0 0.1rem 1rem;
+  border-inline-start: 2px solid var(--note-rule);
+  background: none;
+  color: var(--muted-foreground);
+  font-size: 0.92rem;
+  line-height: 1.6;
+}
+
+.sl-markdown-content .starlight-aside__title {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-strong);
+}
+
+.sl-markdown-content .starlight-aside__icon {
+  display: none;
+}
+
+.sl-markdown-content .starlight-aside__title + .starlight-aside__content {
+  margin-top: 0.15rem;
+}
+
+.sl-markdown-content .starlight-aside--danger {
+  --note-rule: var(--danger);
+}
+
+.sl-markdown-content .starlight-aside--caution {
+  --note-rule: var(--warning);
+}
+
+.sl-markdown-content .starlight-aside a {
+  color: var(--link);
+}
+
+/* ----- "On this page" ----- */
+
+.toc .disclosure-button {
+  width: 100%;
+  min-height: 2.25rem;
+  font-size: 0.85rem;
+  color: var(--text-strong);
+}
+
+.toc-label {
+  flex: none;
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 0.98rem;
+  font-weight: 480;
+}
+
+.toc-current {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+
+.toc-current:not(:empty)::before {
+  content: '— ';
+}
+
+.toc .disclosure-caret {
+  margin-inline-start: auto;
+}
+
+.toc .disclosure-panel {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.toc .disclosure-panel h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.toc .disclosure-panel ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.toc .disclosure-panel a {
+  position: relative;
+  display: block;
+  padding: 0.3rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.toc .disclosure-panel ul ul a {
+  padding-inline-start: 1.5rem;
+}
+
+.toc .disclosure-panel a:hover {
+  color: var(--text-strong);
+  background: color-mix(in srgb, var(--marigold) 10%, transparent);
+}
+
+.toc .disclosure-panel a[aria-current='true'] {
+  color: var(--text-strong);
+}
+
+.toc .disclosure-panel a[aria-current='true']::before {
+  content: '';
+  position: absolute;
+  left: 0.2rem;
+  top: 0.45rem;
+  bottom: 0.45rem;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--marigold);
+}
+
+/* Narrow screens: a bar under the header, the list drops down. */
+@media (max-width: 79.99rem) {
+  :root[data-has-toc] {
+    --sl-mobile-toc-height: 2.75rem;
+  }
+
+  .toc {
+    position: fixed;
+    z-index: var(--sl-z-index-toc);
+    top: var(--sl-nav-height);
+    inset-inline: var(--sl-content-inline-start, 0) 0;
+    display: flex;
+    align-items: center;
+    height: var(--sl-mobile-toc-height);
+    padding: 0 1rem;
+    background: color-mix(in srgb, var(--background) 94%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .toc .disclosure-panel {
+    position: absolute;
+    top: 100%;
+    inset-inline: 0.75rem;
+    max-height: min(65vh, 28rem);
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--background);
+    box-shadow: var(--sl-shadow-lg);
+  }
+}
+
+/* ----- Footer ----- */
+
+.page-footer {
+  margin-top: 4.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 1.25rem;
+}
+
+.pager-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  text-decoration: none;
+  color: var(--text-strong);
+  border-radius: 6px;
+}
+
+.pager-link.next {
+  text-align: end;
+  grid-column: 2;
+}
+
+.pager-direction {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.pager-title {
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+  font-weight: 500;
+  line-height: 1.2;
+  transition: color var(--fast) var(--ease);
+}
+
+.pager-link:hover .pager-title {
+  color: var(--link);
+}
+
+.page-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 2rem;
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.page-meta a {
+  color: var(--muted-foreground);
+}
+
+.page-meta a:hover {
+  color: var(--text-strong);
+}
+
+.page-source code {
+  font-size: 0.95em;
+}
+
+/* Without the sidebar (phones and small tablets) the content uses the whole width; prose keeps
+   its measure, code blocks, tables and twins fill the line. */
+@media (max-width: 49.99rem) {
+  :root {
+    --sl-content-width: 100%;
+  }
+}
+
+/* From tablet widths up the text column is centered in the space beside the sidebar (Starlight
+   only centers it from 72rem), which is also where the header puts the search box. */
+@media (min-width: 50rem) {
+  .sl-container {
+    margin-inline: auto;
+  }
+}
+
+/* Pages without a sidebar (the 404 page) are one centered text column too, not Starlight's wide
+   splash column. */
+:root:not([data-has-sidebar]) {
+  --sl-content-width: 44rem;
+}
+
+:root:not([data-has-sidebar]) .sl-container {
+  margin-inline: auto;
+}
+
+/* ----- Wide screens: text column and margin column ----- */
+
+@media (min-width: 80rem) {
+  :root {
+    --sl-content-width: calc(44rem + var(--margin-gap) + var(--margin-width));
+    --sl-mobile-toc-height: 0rem;
+  }
+
+  .sl-markdown-content {
+    display: grid;
+    grid-template-columns:
+      [main-start] minmax(0, 1fr) [main-end] var(--margin-gap)
+      [margin-start] var(--margin-width) [margin-end];
+    align-items: start;
+  }
+
+  .sl-markdown-content > * {
+    grid-column: main;
+  }
+
+  /* Wide material may use the margin too. */
+  .sl-markdown-content > :is(.wide, .twin, table, .expressive-code.wide) {
+    grid-column: main-start / margin-end;
+  }
+
+  /* A note sits in the margin, level with the block before it. */
+  .sl-markdown-content > .starlight-aside {
+    grid-column: margin;
+    grid-row-end: span 3;
+    margin-top: var(--sl-content-gap-y);
+    padding-top: 0;
+    padding-bottom: 0;
+    font-size: 0.85rem;
+    line-height: 1.55;
+  }
+
+  /* The kicker, title and lede align with the text column. */
+  .content-panel:first-child .sl-container > * {
+    max-width: 44rem;
+  }
+
+  .page-footer {
+    max-width: 44rem;
+  }
+
+  .content-frame {
+    position: relative;
+  }
+
+  .margin-column {
+    position: absolute;
+    inset-block: 0;
+    right: max(var(--sl-content-pad-x), calc((100% - var(--sl-content-width)) / 2));
+    width: var(--margin-width);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding-bottom: 1.5rem;
+    pointer-events: none;
+  }
+
+  .toc {
+    position: sticky;
+    bottom: 1.25rem;
+    pointer-events: auto;
+    padding-top: 0.35rem;
+    background: var(--background);
+    border-top: 1px solid var(--rule);
+  }
+
+  .toc .disclosure-panel {
+    position: absolute;
+    bottom: 100%;
+    inset-inline: -0.75rem 0;
+    max-height: min(60vh, 30rem);
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--background);
+    box-shadow: var(--sl-shadow-lg);
+  }
+
+  /* Fades only after the first placement, so a page never loads with the menu fading out. */
+  .toc[data-settled] {
+    transition:
+      opacity var(--fast) var(--ease),
+      transform var(--fast) var(--ease);
+  }
+
+  .toc[data-covered] {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(0.5rem);
+    pointer-events: none;
+  }
+
+  .toc[data-settled][data-covered] {
+    transition:
+      opacity var(--fast) var(--ease),
+      transform var(--fast) var(--ease),
+      visibility 0s linear var(--fast);
+  }
+
+  .toc-current {
+    display: none;
+  }
+}
+
+/* ----- Narrow screens ----- */
+
+@media (max-width: 49.99rem) {
+  .page-title {
+    font-size: 2.2rem;
+  }
+  .lede {
+    font-size: 1.12rem;
+  }
+}

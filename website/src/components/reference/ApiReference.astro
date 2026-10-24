@@ -1,0 +1,81 @@
+---
+/** The programmatic API, from the declarations the package publishes (`dist/index.d.ts`). */
+import { Code } from '@astrojs/starlight/components';
+import Disclosure from '../Disclosure.astro';
+import api from '../../generated/api.json';
+import { API_SECTIONS, apiSection } from '../../reference/headings.ts';
+
+const sections = API_SECTIONS.map((section) => ({
+  ...section,
+  items: api.exports.filter((item) => apiSection(item) === section.kind),
+})).filter((section) => section.items.length > 0);
+
+const example = (text: string): { code: string; lang: string } | undefined => {
+  const match = /```(\w+)?\n([\s\S]*?)```/.exec(text);
+  return match === null ? undefined : { lang: match[1] ?? 'ts', code: (match[2] ?? '').trimEnd() };
+};
+---
+
+<p>
+  Everything below is exported from <code>swaggerz</code> and follows semantic versioning, except
+  the types of the intermediate representation and the project model, which are
+  <strong>experimental</strong> until 1.0 and may change in minor releases.
+</p>
+
+{
+  sections.map((section) => (
+    <section class="ref-group">
+      <div class="sl-heading-wrapper level-h2">
+        <h2 id={section.kind}>{section.title}</h2>
+      </div>
+      {section.experimental ? (
+        <>
+          <p>
+            Plugins receive these in their hook contexts. They are listed here so plugin authors can
+            find them; their shapes are in <code>dist/ir/types.d.ts</code> and
+            <code>dist/analysis/types.d.ts</code> of the package.
+          </p>
+          <ul class="ref-names">
+            {section.items.map((item) => (
+              <li id={item.name}>
+                <code>{item.name}</code>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        section.items.map((item) =>
+          item.kind === 'interface' || item.kind === 'type' ? (
+            <Disclosure id={`${item.name}-declaration`} anchor={item.name} class="ref-api">
+              <span slot="summary" class="ref-api-head">
+                <code>{item.name}</code>
+                {item.summaryHtml[0] !== undefined && (
+                  <span class="ref-api-summary" set:html={item.summaryHtml[0]} />
+                )}
+              </span>
+              <Code code={item.declaration} lang="ts" />
+            </Disclosure>
+          ) : (
+            <article class="ref-api-function" id={item.name}>
+              <div class="sl-heading-wrapper level-h3">
+                <h3>
+                  <code>{item.name}</code>
+                </h3>
+              </div>
+              {item.summaryHtml.map((paragraph) => (
+                <p set:html={paragraph} />
+              ))}
+              <Code code={item.declaration} lang="ts" />
+              {item.tags
+                .filter((tag) => tag.name === 'example')
+                .map((tag) => {
+                  const code = example(tag.text);
+                  return code === undefined ? null : <Code code={code.code} lang={code.lang} title="Example" />;
+                })}
+            </article>
+          ),
+        )
+      )}
+    </section>
+  ))
+}

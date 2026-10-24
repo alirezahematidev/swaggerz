@@ -1,0 +1,45 @@
+---
+title: Introduction
+description: What swaggerz is, what it generates, and when another tool is the better fit.
+---
+
+import SpecToCode from '../../../components/SpecToCode.astro';
+
+swaggerz is a compiler. Its input is an API description: Swagger 2.0, or OpenAPI 3.0, 3.1 or 3.2, optionally patched by OpenAPI Overlays. Its output is the TypeScript or JavaScript client you would have written by hand: one function per operation, one type per model, typed errors, and nothing you do not import.
+
+The generated code lives in your repository and has no dependency on swaggerz. You can read it, debug it and step through it; swaggerz is only a development dependency.
+
+## What you get
+
+- **A function per operation**, taking one `params` object, resolving with typed data and rejecting with errors typed per HTTP status.
+- **A type per model**, with documentation from the specification, separate request and response types where `readOnly` and `writeOnly` differ, and `Date` values if you want them.
+- **A small runtime** in the client itself: URL building, parameter and body serialization (every style OpenAPI defines), authentication, middleware, retries and token refresh, over `fetch` or `axios`.
+- **Optionally**, TanStack Query hooks for React, Vue, Svelte and Solid, or SWR hooks, and Zod, Valibot or ArkType schemas that validate responses at runtime.
+- **Tools around the client**: a [linter](../guides/lint/) for what makes the client worse, a local [dashboard](../guides/dashboard/), and an [MCP server](../guides/mcp/) that gives coding agents the exact generated functions.
+
+## How it is different
+
+**It is a compiler, not a template.** Every specification version has its own adapter into one intermediate representation, so a Swagger 2.0 document and an OpenAPI 3.2 one produce the same kind of code, and features the client cannot represent are reported as [diagnostics](../reference/diagnostics/) with a location instead of being silently dropped. The [pipeline](../concepts/pipeline/) page shows the stages.
+
+**Every operation is its own module.** There is no class per tag and no registry of endpoints, so bundlers keep only the operations an application imports, measured with esbuild, Rollup, Vite and webpack on [tree-shaking](../concepts/tree-shaking/).
+
+**Regeneration is safe.** The same input gives byte-identical output, unchanged files are not rewritten, and files the generator does not own are never overwritten or deleted. See [determinism and safety](../concepts/determinism-and-safety/).
+
+## When to use something else
+
+- **You want types only**, and call the API by path with a thin fetch wrapper: [openapi-typescript](https://openapi-ts.dev) generates one declaration file and stays out of your runtime.
+- **You need server code**: swaggerz generates clients. For webhooks and callbacks it generates handler types, but no routing or server stubs.
+- **You need a language other than TypeScript or JavaScript**: [openapi-generator](https://openapi-generator.tech) covers dozens.
+- **Your API is not described by Swagger or OpenAPI**: GraphQL, gRPC and AsyncAPI have their own generators.
+
+:::note[Before 1.0]
+swaggerz follows semantic versioning for the config, the CLI and the generated code. The intermediate representation that plugins see is experimental until 1.0.
+:::
+
+## What it looks like
+
+A specification on the left, the code swaggerz generates for it on the right. Hover a line on either side to see its counterpart.
+
+<SpecToCode id="operation" />
+
+Next: generate a client for your API in the [quick start](../quick-start/).

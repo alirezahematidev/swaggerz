@@ -1,0 +1,51 @@
+/*
+ * The playground uses the dashboard's components, so it uses the dashboard's Tailwind theme.
+ * Only this page loads Tailwind; the docs do not.
+ */
+@import 'tailwindcss' source(none);
+@import '../../../src/dashboard/client/tailwind-theme.css';
+
+@source '../../../src/dashboard/client/components';
+@source '../../../src/dashboard/client/lib';
+@source './';
+
+.sz-playground {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.sz-playground ::selection {
+  background: var(--highlight);
+}
+
+/* Line numbers of the dashboard's code view: readable, although they are decorative. */
+.sz-playground pre [aria-hidden='true'] {
+  color: var(--muted-foreground);
+}
+
+/* The editor: the textarea and its highlighted copy must lay text out identically. */
+.sz-editor-text {
+  font-family: var(--font-code);
+  font-size: 12px;
+  line-height: 1.7;
+  letter-spacing: 0;
+  font-variant-ligatures: none;
+  font-feature-settings: normal;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.sz-editor-input {
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--foreground);
+}
+
+.sz-editor-input::selection {
+  background: color-mix(in srgb, var(--marigold) 32%, transparent);
+}
+
+/* The code view's line numbers sit on the panel's paper, not on a gray band. */
+.sz-playground pre [aria-hidden='true'] {
+  background: var(--surface);
+}

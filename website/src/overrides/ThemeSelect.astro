@@ -1,0 +1,120 @@
+---
+/**
+ * A three-way theme switch (system, light, dark) in place of Starlight's select. It keeps
+ * Starlight's storage key and `data-theme` contract, so its inline theme bootstrapping still
+ * applies the stored choice before the first paint.
+ */
+---
+
+<sz-theme-select>
+  <div class="switch" role="radiogroup" aria-label="Color theme">
+    <button type="button" role="radio" aria-checked="true" data-value="auto" data-tip="System theme">
+      <svg viewBox="0 0 16 16" aria-hidden="true"
+        ><rect x="2" y="3" width="12" height="8.5" rx="1.5"></rect><path d="M5.5 14h5"></path></svg
+      >
+      <span class="sr-only">System</span>
+    </button>
+    <button type="button" role="radio" aria-checked="false" data-value="light" data-tip="Light theme">
+      <svg viewBox="0 0 16 16" aria-hidden="true"
+        ><circle cx="8" cy="8" r="3"></circle><path
+          d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"
+        ></path></svg
+      >
+      <span class="sr-only">Light</span>
+    </button>
+    <button type="button" role="radio" aria-checked="false" data-value="dark" data-tip="Dark theme" data-tip-align="end">
+      <svg viewBox="0 0 16 16" aria-hidden="true"
+        ><path d="M13 9.6A5.5 5.5 0 0 1 6.4 3a5.5 5.5 0 1 0 6.6 6.6Z"></path></svg
+      >
+      <span class="sr-only">Dark</span>
+    </button>
+  </div>
+</sz-theme-select>
+
+<script>
+  import { applyTheme, storedTheme, type Theme } from '../scripts/theme.ts';
+
+  class ThemeSelect extends HTMLElement {
+    connectedCallback(): void {
+      const buttons = [...this.querySelectorAll<HTMLButtonElement>('button[data-value]')];
+      const show = (theme: Theme): void => {
+        for (const button of buttons) {
+          const selected = button.dataset.value === theme;
+          button.setAttribute('aria-checked', String(selected));
+          button.tabIndex = selected ? 0 : -1;
+        }
+      };
+      show(storedTheme());
+      for (const button of buttons) {
+        button.addEventListener('click', () => {
+          const theme = (button.dataset.value ?? 'auto') as Theme;
+          applyTheme(theme);
+          document.querySelectorAll('sz-theme-select').forEach((picker) => {
+            picker.dispatchEvent(new CustomEvent('sz-theme', { detail: theme }));
+          });
+        });
+        // Arrow keys move between the options, as in any radio group.
+        button.addEventListener('keydown', (event) => {
+          if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+          event.preventDefault();
+          const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1;
+          const next = buttons[(buttons.indexOf(button) + step + buttons.length) % buttons.length];
+          next?.focus();
+          next?.click();
+        });
+      }
+      this.addEventListener('sz-theme', (event) => show((event as CustomEvent<Theme>).detail));
+      matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+        if (storedTheme() === 'auto') applyTheme('auto');
+      });
+    }
+  }
+  customElements.define('sz-theme-select', ThemeSelect);
+</script>
+
+<style>
+  .switch {
+    display: inline-flex;
+    gap: 0.1rem;
+  }
+  button {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition: color var(--fast) var(--ease);
+  }
+  button:hover {
+    color: var(--text-strong);
+  }
+  button[aria-checked='true'] {
+    color: var(--text-strong);
+  }
+  /* The selected option is marked with a marigold dot under its icon. */
+  button[aria-checked='true']::before {
+    content: '';
+    position: absolute;
+    bottom: 0.05rem;
+    left: 50%;
+    width: 0.25rem;
+    height: 0.25rem;
+    margin-left: -0.125rem;
+    border-radius: 50%;
+    background: var(--marigold);
+  }
+  svg {
+    width: 1rem;
+    height: 1rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+</style>

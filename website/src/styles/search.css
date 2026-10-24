@@ -1,0 +1,269 @@
+/*
+ * The search trigger and dialog (components/Search.astro), on the docs and on the landing page and
+ * playground alike.
+ */
+
+sz-search {
+  display: contents;
+}
+
+.search-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  max-width: 22rem;
+  height: 2.4rem;
+  padding: 0 0.5rem 0 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font: 0.88rem/1 var(--font-body);
+  cursor: pointer;
+  transition:
+    border-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.search-trigger:hover {
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.search-trigger svg,
+.search-field svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+/* The shortcut hint is set by search.ts for the reader's platform (⌘K or Ctrl K) and shown as
+   generated content; aria-keyshortcuts announces the shortcut itself. */
+.search-trigger[data-shortcut]::after {
+  content: attr(data-shortcut);
+  margin-inline-start: auto;
+  padding: 0.15rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: 0.72rem/1.2 var(--font-code);
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 49.99rem) {
+  .search-trigger {
+    width: 2.4rem;
+    padding: 0;
+    justify-content: center;
+  }
+  /* Still the button's name, only not shown. */
+  .search-trigger .search-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .search-trigger::after {
+    display: none;
+  }
+}
+
+:root.search-open {
+  overflow: hidden;
+}
+
+.search-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: min(12vh, 7rem) 1rem 1rem;
+}
+
+.search-layer[hidden] {
+  display: none;
+}
+
+.search-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--foreground) 32%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.search-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(40rem, 100%);
+  max-height: min(36rem, 100% - 2rem);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--background);
+  box-shadow: var(--sl-shadow-lg);
+  overflow: hidden;
+  animation: search-in 160ms var(--ease);
+}
+
+@keyframes search-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0 0.75rem 0 1.1rem;
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted-foreground);
+}
+
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  height: 3.4rem;
+  border: 0;
+  background: none;
+  color: var(--text-strong);
+  font: 1.05rem/1 var(--font-body);
+  outline: none;
+}
+
+.search-field input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.search-escape {
+  flex: none;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted-foreground);
+  font: 0.72rem/1.2 var(--font-code);
+  cursor: pointer;
+}
+
+.search-escape:hover {
+  color: var(--text-strong);
+  border-color: var(--border-strong);
+}
+
+.search-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.4rem;
+}
+
+.search-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.search-results > li {
+  border-radius: 10px;
+}
+
+.search-results > li[aria-selected='true'] {
+  background: color-mix(in srgb, var(--marigold) 14%, transparent);
+}
+
+.search-results a {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.search-result-title {
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.search-result-excerpt {
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+:root .search-panel .search-result-excerpt mark {
+  background: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text-strong);
+  box-shadow: inset 0 -0.35em 0 color-mix(in srgb, var(--marigold) 45%, transparent);
+}
+
+.search-result-sections {
+  list-style: none;
+  margin: -0.35rem 0 0.25rem;
+  padding: 0 0.75rem 0.35rem 1.6rem;
+}
+
+.search-result-sections a {
+  display: block;
+  padding: 0.15rem 0;
+  font-size: 0.82rem;
+  color: var(--muted-foreground);
+}
+
+.search-result-sections a::before {
+  content: '§ ';
+  color: var(--marigold-ink);
+}
+
+.search-status {
+  margin: 0;
+  padding: 0.75rem 0.85rem;
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.search-results:not(:empty) + .search-status {
+  padding-top: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.search-footer {
+  display: flex;
+  gap: 1.25rem;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.search-footer kbd {
+  margin-inline-end: 0.2rem;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: 0.7rem/1.4 var(--font-code);
+}
+
+@media (max-width: 49.99rem) {
+  .search-layer {
+    padding: 0.75rem;
+  }
+  .search-footer {
+    display: none;
+  }
+}

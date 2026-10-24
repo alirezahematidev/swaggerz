@@ -12,7 +12,7 @@ Each entry records the context, the decision and its consequences. New decisions
 
 **Context.** Generated code could import a runtime from this package, or carry its own.
 **Decision.** Emit the runtime (`runtime/*`) into every client. The generator is a development dependency only.
-**Consequences.** No runtime coupling between the application and the generator version; the runtime is readable and patchable by the user; the runtime is duplicated if a project generates several clients (~13 KB minified each).
+**Consequences.** No runtime coupling between the application and the generator version; the runtime is readable and patchable by the user; the runtime is duplicated if a project generates several clients (~16 KB minified each).
 
 ## 3. Configuration files are loaded with Node.js's own module loader
 

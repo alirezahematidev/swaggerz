@@ -1,0 +1,39 @@
+---
+/**
+ * A disclosure: a button that shows or hides the content below it (or, as a popover, over the
+ * page). Used in place of <details>, so every part is styled and behaves the same everywhere.
+ */
+import '../styles/disclosure.css';
+
+interface Props {
+  /** The panel's id. */
+  id: string;
+  /** An id for the whole disclosure, to link to it; following the link opens it. */
+  anchor?: string;
+  class?: string;
+  popover?: boolean;
+  open?: boolean;
+  /** Show the chevron after the summary (off for icon buttons). */
+  caret?: boolean;
+}
+
+const { id, anchor, class: className, popover = false, open = false, caret = true } = Astro.props;
+// Closed inline panels stay searchable with the browser's find-in-page, which opens them.
+const hidden = open ? undefined : popover ? true : 'until-found';
+---
+
+<div id={anchor} class:list={['disclosure', className]} data-disclosure={popover ? 'popover' : 'inline'} data-open={open ? '' : undefined}>
+  <button type="button" class="disclosure-button" data-disclosure-button aria-expanded={open ? 'true' : 'false'} aria-controls={id}>
+    <slot name="summary" />
+    {caret && <svg class="disclosure-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 6.5 8 9.5l3-3"></path></svg>}
+  </button>
+  <div class="disclosure-panel" id={id} hidden={hidden}>
+    <slot />
+  </div>
+</div>
+
+<script>
+  import { setUpDisclosures } from '../scripts/disclosure.ts';
+
+  setUpDisclosures();
+</script>

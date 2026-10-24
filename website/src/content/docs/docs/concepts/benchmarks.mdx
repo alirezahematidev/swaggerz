@@ -1,0 +1,30 @@
+---
+title: Benchmarks
+description: Compiler timings and memory by specification size, and bundle sizes, measured on every build.
+---
+
+import Measured from '../../../../components/Measured.astro';
+
+## Compiler
+
+[`scripts/bench.ts`](https://github.com/alirezahematidev/swaggerz/blob/main/scripts/bench.ts) generates synthetic OpenAPI 3.0 specifications of increasing size and compiles each in memory. Each resource group adds five CRUD operations and three models, and every model references the previous group's model, so the reference graph is unusually deep: a deliberately pessimistic case for dependency analysis.
+
+"Total" covers loading, parsing, reference resolution, normalization, analysis and generating every file; writing to disk is excluded. "Heap" is the largest heap observed across the runs.
+
+<Measured table="compiler" />
+
+Time and memory grow linearly with the size of the specification. Regeneration only writes files whose content changed, so an incremental run touches a handful of files whatever the size.
+
+## Bundle size
+
+The [tree-shaking test](https://github.com/alirezahematidev/swaggerz/blob/main/tests/integration/treeshake/bundle.test.ts) bundles small applications against a generated client and records their sizes. [Tree-shaking](../tree-shaking/) explains how the client is built for it.
+
+<Measured table="bundles" />
+
+## Reproducing
+
+```sh
+pnpm bench                                   # the compiler benchmark
+pnpm vitest run tests/integration/treeshake  # writes tests/.output/treeshake/sizes.json
+pnpm --filter swaggerz-website run data --measure  # both, for the site
+```

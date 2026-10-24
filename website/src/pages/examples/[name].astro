@@ -1,0 +1,92 @@
+---
+/** One example: its README, its config, its sources and the files swaggerz generates for it. */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { Code } from '@astrojs/starlight/components';
+import { getCollection, render, type CollectionEntry } from 'astro:content';
+import { REPOSITORY } from '../../site.ts';
+
+export async function getStaticPaths() {
+  const examples = await getCollection('examples');
+  return examples.map((example) => ({ params: { name: example.id }, props: { example } }));
+}
+
+interface Props {
+  example: CollectionEntry<'examples'>;
+}
+
+const { example } = Astro.props;
+const { Content, headings } = await render(example);
+const { data } = example;
+const directories = [...new Set(data.generated.map((file) => (file.includes('/') ? file.split('/')[0] : '')))];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: data.title,
+    description: data.description,
+    editUrl: `${REPOSITORY.url}/edit/${REPOSITORY.branch}/examples/${example.id}/README.md`,
+  }}
+  headings={[
+    ...headings,
+    { depth: 2, slug: 'config', text: 'Config' },
+    { depth: 2, slug: 'sources', text: 'Sources' },
+    { depth: 2, slug: 'generated-files', text: 'Generated files' },
+  ]}
+>
+  <Content />
+
+  <div class="sl-heading-wrapper level-h2"><h2 id="config">Config</h2></div>
+  <Code code={data.config.content} lang={data.config.language} title={data.config.path} />
+
+  <div class="sl-heading-wrapper level-h2"><h2 id="sources">Sources</h2></div>
+  {data.sources.map((file) => <Code code={file.content} lang={file.language} title={file.path} />)}
+
+  <div class="sl-heading-wrapper level-h2"><h2 id="generated-files">Generated files</h2></div>
+  <p>
+    {data.generated.length} files for {data.operations} operations and {data.models} models, generated
+    with this config when the site was built:
+  </p>
+  <ul class="generated-tree not-content">
+    {
+      directories.map((directory) => {
+        const files = data.generated.filter((file) =>
+          directory === '' ? !file.includes('/') : file.startsWith(`${directory}/`),
+        );
+        return (
+          <li>
+            <code>{directory === '' ? files.join(', ') : `${directory}/`}</code>
+            {directory !== '' && <span>{files.length} files</span>}
+          </li>
+        );
+      })
+    }
+  </ul>
+  <p>
+    <a href={`${REPOSITORY.url}/tree/${REPOSITORY.branch}/examples/${example.id}`}>The project on GitHub</a>
+  </p>
+</StarlightPage>
+
+<style>
+  .generated-tree {
+    list-style: none;
+    padding: 0;
+    margin-top: 1rem;
+    border-top: 1px solid var(--border-strong);
+  }
+  .generated-tree li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 0.9rem;
+  }
+  .generated-tree code {
+    font-size: 0.85rem;
+    overflow-wrap: anywhere;
+  }
+  .generated-tree span {
+    color: var(--muted-foreground);
+    white-space: nowrap;
+  }
+</style>

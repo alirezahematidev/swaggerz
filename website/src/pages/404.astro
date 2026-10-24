@@ -1,0 +1,34 @@
+---
+/**
+ * The 404 page, a page of its own instead of a docs entry, so Starlight's catch-all route does
+ * not render it a second time (its own 404 route is disabled in astro.config.ts). GitHub Pages
+ * and most static hosts serve dist/404.html for missing paths.
+ */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+
+const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Not found',
+    description: 'This page does not exist, or not any more.',
+    template: 'splash',
+    editUrl: false,
+    tableOfContents: false,
+    pagefind: false,
+  }}
+>
+  <p>The page you asked for is not here. It may have moved when the documentation was reorganized.</p>
+  <ul>
+    <li>
+      Start at the <a href={`${base}docs/introduction/`}>introduction</a> or the
+      <a href={`${base}docs/quick-start/`}>quick start</a>.
+    </li>
+    <li>
+      Look up an option in the <a href={`${base}docs/reference/config/`}>config reference</a> or a
+      code in the <a href={`${base}docs/reference/diagnostics/`}>diagnostics</a>.
+    </li>
+    <li>Or search with <kbd>⌘K</kbd> / <kbd>Ctrl+K</kbd>.</li>
+  </ul>
+</StarlightPage>

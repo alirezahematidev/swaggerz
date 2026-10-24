@@ -1,0 +1,13 @@
+# Built site, and everything the data scripts generate from the repository.
+dist/
+.astro/
+.cache/
+.measurements/
+src/generated/
+public/brand/
+public/favicon.svg
+samples/*/generated/
+samples/.extracted/
+public/og/
+test-results/
+playwright-report/

@@ -1,0 +1,54 @@
+---
+/**
+ * Site search: a trigger in the header and a dialog of our own over Pagefind's index (the native
+ * <dialog> and Pagefind's default interface are not used). ⌘K / Ctrl+K and "/" open it.
+ */
+import '../styles/search.css';
+
+const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+---
+
+<sz-search data-base={base}>
+  <button type="button" class="search-trigger" data-search-open aria-haspopup="dialog" aria-keyshortcuts="Control+K">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>
+    <span class="search-label">Search</span>
+  </button>
+  <div class="search-layer" data-search-layer hidden>
+    <div class="search-backdrop" data-search-close></div>
+    <div class="search-panel" role="dialog" aria-modal="true" aria-labelledby="search-title">
+      <p id="search-title" class="sr-only">Search the documentation</p>
+      <div class="search-field">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"></circle><path d="m10.5 10.5 3 3"></path></svg>
+        <input
+          type="text"
+          inputmode="search"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="Search guides, options, diagnostics…"
+          aria-label="Search"
+          aria-controls="search-results"
+          aria-autocomplete="list"
+          role="combobox"
+          aria-expanded="false"
+          data-search-input
+        />
+        <button type="button" class="search-escape" data-search-close aria-label="Close search">Esc</button>
+      </div>
+      <div class="search-body">
+        <ul id="search-results" class="search-results" role="listbox" aria-label="Results" data-search-results></ul>
+        <p class="search-status" role="status" aria-live="polite" data-search-status></p>
+      </div>
+      <div class="search-footer" aria-hidden="true">
+        <span><kbd>↑</kbd><kbd>↓</kbd> to move</span>
+        <span><kbd>↵</kbd> to open</span>
+        <span><kbd>Esc</kbd> to close</span>
+      </div>
+    </div>
+  </div>
+</sz-search>
+
+<script>
+  import { setUpSearch } from '../scripts/search.ts';
+
+  setUpSearch();
+</script>

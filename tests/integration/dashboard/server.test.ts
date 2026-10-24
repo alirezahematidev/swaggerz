@@ -146,7 +146,7 @@ describe('dashboard security', () => {
 
     const favicon = await raw('GET', '/assets/favicon.svg');
     expect([favicon.status, favicon.headers['content-type']]).toEqual([200, 'image/svg+xml']);
-    const font = await raw('GET', '/assets/fonts/geist-latin-wght-normal.woff2');
+    const font = await raw('GET', '/assets/fonts/figtree-latin-wght-normal.woff2');
     expect([font.status, font.headers['content-type']]).toEqual([200, 'font/woff2']);
     for (const probe of [
       '/assets/../package.json',

@@ -1,0 +1,18 @@
+---
+/** The chapter as a kicker above the title, and the page description as a lede below it. */
+import { chapterOf } from '../navigation.ts';
+
+const { entry } = Astro.locals.starlightRoute;
+const chapter = chapterOf(entry.id);
+---
+
+{
+  chapter && (
+    <p class="kicker">
+      <span class="kicker-number">{chapter.number}</span>
+      <span>{chapter.label}</span>
+    </p>
+  )
+}
+<h1 id="_top" class="page-title">{entry.data.title}</h1>
+{entry.data.description && <p class="lede">{entry.data.description}</p>}

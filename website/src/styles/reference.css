@@ -1,0 +1,348 @@
+/* Generated reference pages: options, commands, API entries and the diagnostics dictionary. */
+
+.ref-muted {
+  color: var(--muted-foreground);
+}
+
+.sl-markdown-content .ref-table {
+  width: 100%;
+}
+
+.sl-markdown-content .ref-table td:first-child {
+  white-space: nowrap;
+}
+
+.ref-badge {
+  margin-inline-start: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 560;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+.ref-badge-strong {
+  color: var(--marigold-ink);
+}
+
+.sl-markdown-content .ref-anchor {
+  text-decoration: none;
+  color: var(--text-strong);
+}
+
+.sl-markdown-content .ref-anchor:hover code {
+  box-shadow: inset 0 -2px 0 var(--marigold);
+}
+
+/* Option lists (CLI flags) */
+.sl-markdown-content dl.ref-options {
+  display: grid;
+  grid-template-columns: minmax(10rem, max-content) 1fr;
+  gap: 0.4rem 1.5rem;
+  max-width: none;
+  margin-top: 1rem;
+}
+
+.sl-markdown-content dl.ref-options > dt {
+  margin: 0;
+  font-weight: 400;
+}
+
+.sl-markdown-content dl.ref-options > dt code {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  white-space: nowrap;
+}
+
+.sl-markdown-content dl.ref-options > dd {
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+}
+
+/* Phones: each flag above its description. */
+@media (max-width: 40rem) {
+  .sl-markdown-content dl.ref-options {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .sl-markdown-content dl.ref-options > dd {
+    margin-bottom: 0.8rem;
+  }
+}
+
+.ref-entry + .ref-entry {
+  margin-top: 2.25rem;
+}
+
+.sl-markdown-content .ref-entry h3 code {
+  font-size: 0.92em;
+}
+
+.ref-help {
+  margin-top: 1rem !important;
+}
+
+.ref-help > .disclosure-button {
+  font-size: 0.88rem;
+  color: var(--muted-foreground);
+}
+
+.ref-help > .disclosure-button:hover,
+.ref-help[data-open] > .disclosure-button {
+  color: var(--text-strong);
+}
+
+.ref-help .expressive-code {
+  margin-top: 0.6rem;
+}
+
+/* Config options */
+.sl-markdown-content dl.ref-config {
+  max-width: none;
+  margin-top: 0.5rem;
+}
+
+.sl-markdown-content .ref-config-entry {
+  margin-top: 0;
+}
+
+.ref-config-entry {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--rule);
+  scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem);
+}
+
+.ref-config-entry[data-depth='2'],
+.ref-config-entry[data-depth='3'] {
+  padding-inline-start: 1.25rem;
+  border-inline-start: 1px solid var(--rule);
+  margin-inline-start: 0.4rem;
+}
+
+.ref-config-entry:target {
+  background: linear-gradient(to right, var(--highlight), transparent 70%);
+}
+
+.sl-markdown-content .ref-config dt {
+  font-weight: 400;
+}
+
+.sl-markdown-content .ref-config dt code {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  font-weight: 560;
+  font-size: 0.95rem;
+}
+
+.sl-markdown-content .ref-config dd {
+  margin: 0.3rem 0 0;
+  padding: 0;
+}
+
+.sl-markdown-content .ref-config dd p {
+  margin-top: 0.25rem;
+}
+
+.ref-type {
+  font-size: 0.85rem;
+  color: var(--muted-foreground);
+}
+
+.sl-markdown-content .ref-type code {
+  font-size: 0.95em;
+  color: var(--code-type);
+  box-shadow: none;
+}
+
+/* API */
+.ref-api {
+  border-bottom: 1px solid var(--rule);
+  margin-top: 0 !important;
+  scroll-margin-top: calc(var(--sl-nav-height) + var(--sl-mobile-toc-height, 0rem) + 1.5rem);
+}
+
+.sl-markdown-content .ref-api + .ref-api {
+  margin-top: 0;
+}
+
+.ref-api > .disclosure-button {
+  display: flex;
+  width: 100%;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  font-size: 0.95rem;
+}
+
+.ref-api > .disclosure-button .disclosure-caret {
+  margin-inline-start: auto;
+  align-self: center;
+  color: var(--muted-foreground);
+}
+
+.ref-api-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.15rem 0.75rem;
+  min-width: 0;
+}
+
+.sl-markdown-content .ref-api-head code {
+  font-weight: 560;
+  box-shadow: none;
+}
+
+.ref-api > .disclosure-button:hover code {
+  box-shadow: inset 0 -2px 0 var(--marigold);
+}
+
+.ref-api-summary {
+  color: var(--muted-foreground);
+  font-size: 0.88rem;
+}
+
+.ref-api .disclosure-panel {
+  padding-bottom: 0.9rem;
+}
+
+.ref-api .expressive-code {
+  margin-top: 0.1rem;
+}
+
+.ref-api-function + .ref-api-function {
+  margin-top: 2.5rem;
+}
+
+.sl-markdown-content ul.ref-names {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.5rem;
+  max-width: none;
+}
+
+.sl-markdown-content ul.ref-names li {
+  margin: 0;
+}
+
+/* Diagnostics dictionary */
+/* The areas as a line of words with their counts, like a book's index. */
+.ref-index {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.4rem;
+  margin-top: 1.75rem !important;
+  padding-block: 0.75rem;
+  border-block: 1px solid var(--rule);
+}
+
+.sl-markdown-content .ref-index a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--text-strong);
+  text-decoration: none;
+}
+
+.sl-markdown-content .ref-index a:hover {
+  color: var(--link);
+  text-decoration: underline;
+  text-decoration-color: var(--marigold);
+}
+
+.ref-index a span {
+  font-family: var(--font-code);
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+}
+
+.sl-markdown-content dl.dictionary {
+  max-width: none;
+  margin-top: 0.75rem;
+}
+
+.sl-markdown-content .headword {
+  margin-top: 0;
+}
+
+.headword {
+  padding: 1.1rem 0 1.2rem;
+  border-bottom: 1px solid var(--rule);
+  scroll-margin-top: calc(var(--sl-nav-height) + 1.5rem);
+}
+
+.headword:target {
+  background: linear-gradient(to right, var(--highlight), transparent 70%);
+}
+
+.sl-markdown-content .headword dt {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-weight: 400;
+}
+
+.sl-markdown-content .headword dt code {
+  background: none;
+  box-shadow: none;
+  padding: 0;
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+.sl-markdown-content .headword dd {
+  margin: 0.35rem 0 0;
+  padding: 0;
+}
+
+/* Severity in colored small capitals, no chip. */
+.severity {
+  font-weight: 620;
+  letter-spacing: 0.06em;
+  font-variant-caps: all-small-caps;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.severity-error {
+  color: var(--danger);
+}
+
+.severity-warning {
+  color: var(--warning);
+}
+
+.severity-info {
+  color: var(--info);
+}
+
+.headword-example {
+  margin-top: 0.9rem;
+  padding-inline-start: 1rem;
+  border-inline-start: 2px solid var(--note-rule);
+}
+
+.headword-example .expressive-code {
+  margin-top: 0.6rem;
+}
+
+.headword-label {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 1em;
+  color: var(--text-strong);
+}
+
+.headword-fix {
+  margin-top: 0.6rem !important;
+}
+
+.ref-severities {
+  margin-top: 0.75rem !important;
+}

@@ -85,16 +85,19 @@ Pushing the `v<version>` tag starts the release workflow, which:
 3. publishes to npm with provenance, using the `next` dist-tag for pre-releases. npm authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) when it is configured for the workflow, and otherwise with the `NPM_TOKEN` repository secret;
 4. creates the GitHub release with that version's section of `CHANGELOG.md`.
 
+The same tag starts the website workflow (`website.yml`), which builds and tests the docs site from the tagged commit and deploys it to GitHub Pages, so the site documents the released version.
+
 `publishConfig.provenance` is set, so `npm publish` fails outside a supported CI environment — an additional guard against accidental local publishing.
 
 The first version, `0.1.0`, already has its changelog entry, so it is tagged by hand once `main` is green: `git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0`. The workflow publishes it with `NPM_TOKEN` (an npm granular access token with read and write access to the package). Afterwards, configure the package's trusted publisher on npmjs.com (this repository, workflow `release.yml`, environment `npm`) and delete the token, so no long-lived credential is left. Later releases use `pnpm release`.
 
 ## Repository settings
 
-The workflows in `.github/workflows` check every change: `ci.yml` (tests on Linux, macOS and Windows, generated clients in every runtime, the corpus, oldest and newest dependencies, the packed package, the examples; the `CI passed` job sums them up), `codeql.yml` (code scanning), `dependency-review.yml` (vulnerable or copyleft dependencies in pull requests), `scorecard.yml` (OpenSSF Scorecard) and `zizmor.yml` (audits the workflows). Actions are pinned to commit SHAs, checkouts do not keep credentials, and every job has least-privilege permissions; Dependabot updates actions and npm dependencies after a cooldown.
+The workflows in `.github/workflows` check every change: `ci.yml` (tests on Linux, macOS and Windows, generated clients in every runtime, the corpus, oldest and newest dependencies, the packed package, the examples; the `CI passed` job sums them up), `codeql.yml` (code scanning), `dependency-review.yml` (vulnerable or copyleft dependencies in pull requests), `scorecard.yml` (OpenSSF Scorecard), `zizmor.yml` (audits the workflows) and `website.yml` (builds and tests the docs site; deploys it on release tags). Actions are pinned to commit SHAs, checkouts do not keep credentials, and every job has least-privilege permissions; Dependabot updates actions and npm dependencies after a cooldown.
 
 Settings that live outside the repository, configured once by an admin:
 
 - **Rulesets** (Settings → Rules → Rulesets → New ruleset → Import a ruleset): [`.github/rulesets/main.json`](.github/rulesets/main.json) protects `main` — pull requests with one approval from a code owner, resolved conversations, squash merges, linear and signed history, no force pushes or deletion, and the required checks `CI passed`, CodeQL and dependency review; [`.github/rulesets/release-tags.json`](.github/rulesets/release-tags.json) lets only admins create, move or delete `v*` tags, which trigger publishing. Repository admins can bypass both, so a maintainer can push release commits and tags.
 - **Advanced Security** (Settings → Advanced Security): dependency graph, Dependabot alerts and security updates, secret scanning with push protection, and private vulnerability reporting (see [SECURITY.md](SECURITY.md)). Code scanning uses `codeql.yml`, so leave CodeQL's default setup off.
 - **Environment** `npm` (Settings → Environments): optionally add required reviewers to approve each publish.
+- **GitHub Pages** (Settings → Pages): _Source_ set to _GitHub Actions_; in Settings → Environments → `github-pages` → _Deployment branches and tags_, add a tag rule `v*`, since the site deploys from release tags. A custom domain goes in Settings → Pages; the next deployment picks it up (see [website/README.md](website/README.md#deploying)).

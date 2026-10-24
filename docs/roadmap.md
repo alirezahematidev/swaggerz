@@ -39,6 +39,7 @@ Implemented after the first version, with tests and documentation:
 | OpenAPI Overlays                              | [overlays](overlays.md), [decision 19](decisions.md#19-overlays-patch-the-root-document-before-anything-reads-it-with-the-11-rules)                                                       |
 | Valibot and ArkType validation                | [generated code](generated-code.md#validation), [decision 17](decisions.md#17-each-validation-library-gets-its-own-printer-behind-one-interface)                                          |
 | `swaggerz lint`                               | [linting](lint.md), [decision 21](decisions.md#21-the-linter-reports-what-changes-the-generated-client-nothing-else)                                                                      |
+| Docs website                                  | [website/](../website) ([plan and notes](../website.md))                                                                                                                                  |
 | `sz` alias of the CLI                         | [README](../README.md#cli)                                                                                                                                                                |
 
 ## Candidates for later versions
@@ -49,7 +50,6 @@ Ordered roughly by expected value. None of them is committed.
 - Opt-in `int64` → `bigint` (needs a JSON parser that keeps large integers exact, since `JSON.parse` already loses precision before any conversion).
 - XML request and response serialization (today XML bodies are passed and returned as strings).
 - `$dynamicRef` / `$recursiveRef`.
-- The docs website ([website.md](../website.md)).
 - Incremental compilation in watch mode (today the whole specification is recompiled; only changed files are written).
 - A stable, documented IR (currently experimental, see [plugins](plugins.md#stability)).
 

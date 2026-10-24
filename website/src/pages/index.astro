@@ -1,0 +1,221 @@
+---
+/**
+ * The landing page: the claim and the two calls to action, a panel of generated output over an
+ * animated wave field, what the client gives you, three measured numbers and a closing call to
+ * action. Every number comes from src/generated (measurements, the corpus baseline, the files the
+ * quick start generates); the measurements are dated beside them.
+ */
+import CopyCommand from '../components/CopyCommand.astro';
+import build from '../generated/build.json';
+import corpus from '../generated/corpus.json';
+import measurements from '../generated/measurements.json';
+import quickStart from '../generated/quick-start.json';
+import Editorial from '../layouts/Editorial.astro';
+import '../styles/landing.css';
+import { PACKAGE } from '../site.ts';
+
+const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
+const docs = (path: string): string => `${base}docs/${path}/`;
+const { treeshake, bench } = measurements;
+const largest = bench.rows.at(-1);
+const date = new Date(measurements.measuredAt).toLocaleDateString('en-GB', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+
+const stats = [
+  {
+    value: (treeshake.oneOperation / 1000).toFixed(1),
+    decimals: 1,
+    unit: 'kB',
+    label: 'bundled by an app that calls one operation',
+    detail: `of a ${treeshake.operations.toLocaleString('en-US')}-operation client`,
+  },
+  ...(largest === undefined
+    ? []
+    : [
+        {
+          value: (largest.totalMs / 1000).toFixed(1),
+          decimals: 1,
+          unit: 's',
+          label: `to compile ${largest.operations.toLocaleString('en-US')} operations`,
+          detail: `into ${largest.files.toLocaleString('en-US')} files, in memory`,
+        },
+      ]),
+  {
+    value: String(corpus.compiled),
+    decimals: 0,
+    unit: `/ ${corpus.documents}`,
+    label: 'public API descriptions compile',
+    detail: `${corpus.operations.toLocaleString('en-US')} operations, ${corpus.typeErrors === 0 ? 'no' : corpus.typeErrors} type errors`,
+  },
+];
+
+const features = [
+  {
+    title: 'Tree-shakeable',
+    text: 'One module per operation and per model. An app bundles only what it imports.',
+    href: docs('concepts/tree-shaking'),
+    icon: 'M4 7h16M7 12h10M10 17h4',
+  },
+  {
+    title: 'Typed end to end',
+    text: 'Parameters, bodies and responses, and errors typed by HTTP status. No runtime dependency.',
+    href: docs('reference/generated-code'),
+    icon: 'M8 7 3.5 12 8 17M16 7l4.5 5-4.5 5M13.5 5l-3 14',
+  },
+  {
+    title: 'Hooks and schemas',
+    text: 'TanStack Query for React, Vue, Svelte and Solid, or SWR. Zod, Valibot or ArkType.',
+    href: docs('guides/data-fetching'),
+    icon: 'M12 3.5 20 8v8l-8 4.5L4 16V8l8-4.5ZM4 8l8 4.5L20 8M12 12.5v8',
+  },
+  {
+    title: 'Tools around it',
+    text: 'A linter for what makes the client worse, a local dashboard and an MCP server for agents.',
+    href: docs('guides/dashboard'),
+    icon: 'M4.5 5.5h15v10h-15zM9 19.5h6M12 15.5v4',
+  },
+];
+
+// The quick start's own output, for the terminal card.
+const terminal = [
+  { kind: 'command', text: 'npx swaggerz generate' },
+  { kind: 'done', text: `Read openapi.yaml: ${quickStart.operations} operations, ${quickStart.models} models` },
+  { kind: 'done', text: `Wrote ${quickStart.total} files to src/generated/api` },
+  { kind: 'done', text: 'Runtime emitted, no dependency added' },
+];
+---
+
+<Editorial title="swaggerz — typed API clients compiled from OpenAPI" description={PACKAGE.description} current="home">
+  <div class="landing">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="hero-glow" aria-hidden="true"></div>
+      <a class="announce rise" style="--d: 0ms" href={`${base}changelog/`}>
+        <span class="announce-dot" aria-hidden="true"></span>
+        <span>swaggerz {build.version}</span>
+        <span class="announce-sep" aria-hidden="true"></span>
+        <span class="announce-link">What's new</span>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>
+      </a>
+      <h1 id="hero-title" class="hero-title">
+        <span class="rise" style="--d: 80ms">Typed API clients,</span>
+        <span class="rise" style="--d: 180ms"><em class="shine">compiled</em> from your</span>
+        <span class="rise" style="--d: 280ms">OpenAPI spec.</span>
+      </h1>
+      <div class="hero-foot">
+        <div class="hero-actions rise" style="--d: 420ms">
+          <a class="cta cta-primary" href={docs('quick-start')}>
+            <span>Get started</span>
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9.5M8.5 4l4 4-4 4"></path></svg>
+          </a>
+          <a class="cta cta-secondary" href={`${base}playground/`}>Open the playground</a>
+        </div>
+        <p class="hero-lede rise" style="--d: 520ms">
+          Swagger 2.0 and OpenAPI 3.0 to 3.2 in, tree-shakeable TypeScript or JavaScript out. One
+          function per operation, and the code is yours to read.
+        </p>
+      </div>
+    </section>
+
+    <section class="showcase rise" style="--d: 620ms" aria-label="What generating a client looks like">
+      <div class="showcase-field" data-waves aria-hidden="true"></div>
+      <div class="showcase-grain" aria-hidden="true"></div>
+      <figure class="glass glass-code">
+        <figcaption class="glass-bar">src/main.ts</figcaption>
+        <pre tabindex="0"><code><span class="tk-k">import</span> {'{'} getPetById {'}'} <span class="tk-k">from</span> <span class="tk-s">'./generated/api'</span>;
+
+<span class="tk-k">const</span> pet = <span class="tk-k">await</span> <span class="tk-f">getPetById</span>({'{'} petId: <span class="tk-n">10</span> {'}'});
+<span class="tk-c">// pet: Pet, typed from the specification</span>
+console.<span class="tk-f">log</span>(pet.name);</code></pre>
+      </figure>
+      <figure class="glass glass-term">
+        <figcaption class="glass-bar">Terminal</figcaption>
+        <ol class="term">
+          {
+            terminal.map((line, index) => (
+              <li class:list={['term-line', `term-${line.kind}`]} style={`--i: ${index}`}>
+                <span class="term-mark" aria-hidden="true">{line.kind === 'command' ? '$' : '✓'}</span>
+                {line.text}
+              </li>
+            ))
+          }
+          <li class="term-line" style={`--i: ${terminal.length}`} aria-hidden="true">
+            <span class="term-mark">$</span>
+            <span class="term-caret"></span>
+          </li>
+        </ol>
+      </figure>
+    </section>
+
+    <section class="features reveal" aria-labelledby="features-title">
+      <h2 id="features-title" class="section-title">Everything the client needs. Nothing it doesn't.</h2>
+      <ul class="feature-grid">
+        {
+          features.map((feature) => (
+            <li>
+              <a class="feature" href={feature.href} data-spotlight>
+                <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d={feature.icon} />
+                </svg>
+                <span class="feature-title">{feature.title}</span>
+                <span class="feature-text">{feature.text}</span>
+                <span class="feature-more" aria-hidden="true">
+                  Read more
+                  <svg viewBox="0 0 16 16"><path d="M3 8h9.5M8.5 4l4 4-4 4" /></svg>
+                </span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section class="stats reveal" aria-labelledby="stats-title">
+      <h2 id="stats-title" class="sr-only">Measured</h2>
+      <dl class="stat-grid">
+        {
+          stats.map((stat) => (
+            <div class="stat">
+              <dt class="stat-label">{stat.label}</dt>
+              <dd class="stat-value">
+                <span class="stat-number" data-count={stat.value} data-decimals={stat.decimals}>
+                  {stat.value}
+                </span>
+                <span class="stat-unit">{stat.unit}</span>
+              </dd>
+              <dd class="stat-detail">{stat.detail}</dd>
+            </div>
+          ))
+        }
+      </dl>
+      <p class="stats-note">
+        Measured for this build on {date}, {measurements.environment}.
+        <a href={docs('concepts/benchmarks')}>How it is measured</a>
+      </p>
+    </section>
+
+    <section class="closing reveal" aria-labelledby="closing-title">
+      <div class="closing-field" aria-hidden="true"></div>
+      <div class="showcase-grain" aria-hidden="true"></div>
+      <h2 id="closing-title" class="closing-title">Generate your first client in a minute.</h2>
+      <p class="closing-lede">Point it at a specification, run one command, import what you need.</p>
+      <div class="closing-actions">
+        <a class="cta cta-primary" href={docs('quick-start')}>
+          <span>Read the quick start</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9.5M8.5 4l4 4-4 4"></path></svg>
+        </a>
+        <CopyCommand command="npx swaggerz init" />
+      </div>
+    </section>
+  </div>
+</Editorial>
+
+<script>
+  import { setUpLanding } from '../scripts/landing.ts';
+
+  setUpLanding();
+</script>

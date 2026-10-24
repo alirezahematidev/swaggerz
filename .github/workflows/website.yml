@@ -1,0 +1,112 @@
+name: Website
+
+# Pull requests build and test the site. A release tag (the same `v*` tags release.yml publishes)
+# also deploys it, so the site documents the released version. Run it by hand on a tag to deploy
+# again (for example after setting the custom domain).
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: website-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Actions are pinned to commit SHAs; Dependabot updates the SHA and the version comment together.
+jobs:
+  website:
+    name: Docs website
+    runs-on: ubuntu-latest
+    # Playwright's image has Chromium and its system libraries; its version matches
+    # @playwright/test in website/package.json. `--user 1001` runs as the runner's user.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:7852dc5a7d72f5fe458a597d690f6c42fbc8e9e26ddfa95f8e6ef552558d9bbf
+      options: --user 1001 --ipc=host
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # configure-pages reads the Pages address (github.io or the custom domain).
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      # No dependency cache: tag runs publish the site, and must not restore state written by
+      # other workflows (as in release.yml).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      # The site documents this checkout: build it, then measure and generate everything the
+      # pages show from it (references, twins, the playground's compiler, bundle sizes, timings).
+      - run: pnpm build
+      - run: pnpm --filter swaggerz-website run data --measure
+      - run: pnpm --filter swaggerz-website run samples
+      - run: pnpm --filter swaggerz-website run build:site
+      - run: pnpm --filter swaggerz-website run links
+      - run: pnpm --filter swaggerz-website run check
+      - run: pnpm --filter swaggerz-website run test:gates
+      # Baselines are per platform; Linux ones missing from the repository are written (and
+      # uploaded below) instead of failing, so the first run produces them for review.
+      - run: pnpm --filter swaggerz-website run test:visual --update-snapshots=missing
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website-tests
+          path: |
+            website/test-results
+            website/playwright-report
+            website/tests/__screenshots__
+          if-no-files-found: ignore
+          retention-days: 14
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website
+          path: website/dist
+          retention-days: 14
+
+      # GitHub Pages, from release tags only. The tested build above is served from `/`; the
+      # published one is built again for the Pages address: https://<owner>.github.io/<repo>/,
+      # or the custom domain once one is set in the repository's Pages settings (no change here).
+      - id: pages
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - if: steps.pages.outcome == 'success'
+        run: pnpm --filter swaggerz-website run build:site
+        env:
+          SITE_URL: ${{ steps.pages.outputs.origin }}
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}/
+      - if: steps.pages.outcome == 'success'
+        run: pnpm --filter swaggerz-website run links
+        env:
+          SITE_BASE: ${{ steps.pages.outputs.base_path }}/
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: website/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: website
+    # The github-pages environment must allow `v*` tags (Settings → Environments).
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    # One deployment at a time, and a running one is never cancelled halfway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -45,6 +45,22 @@
     "examples/custom-plugin": {
       "entry": ["swaggerz.config.ts", "src/index.ts"],
     },
+    "website": {
+      "entry": [
+        // Run directly with Node.js (`node scripts/<name>.ts`).
+        "scripts/*.ts",
+        // Bundled by scripts/playground.ts with esbuild, its Node.js modules replaced by the shims.
+        "playground/compiler.ts",
+        "playground/shims/*.ts",
+        // Referenced by path in astro.config.ts (Starlight's routeMiddleware).
+        "src/route-data.ts",
+        // Type-checked by scripts/samples.ts and included by MDX pages; nothing imports them.
+        "samples/*/*.{ts,tsx}",
+      ],
+      // Static font files that scripts/data/og.ts opens by path (fontkit cannot draw the variable
+      // fonts the site uses at other instances than their default).
+      "ignoreDependencies": ["@fontsource/figtree", "@fontsource/fraunces"],
+    },
     "examples/react-query": {
       "entry": ["swaggerz.config.ts"],
       "ignoreDependencies": ["zod"],

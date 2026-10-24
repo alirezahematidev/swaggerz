@@ -1,0 +1,383 @@
+/*
+ * "A technical manual, printed on good paper": the shared palette and fonts mapped onto
+ * Starlight's variables, then typography. Layout lives in layout.css, components in their own
+ * files. Unlayered, so it wins over Starlight's layered styles.
+ */
+@import '../../../src/dashboard/client/tokens.css';
+@import './tokens.css';
+@import '../generated/fonts.css';
+
+:root {
+  /* Fraunces for titles and the editorial voice, Figtree for reading, Spline Sans Mono for code. */
+  --font-body: 'Figtree Variable', 'Figtree Fallback', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Fraunces Variable', 'Fraunces Fallback', Georgia, serif;
+  --font-code:
+    'Spline Sans Mono Variable', 'Spline Sans Mono Fallback', ui-monospace, 'SF Mono', Menlo,
+    monospace;
+
+  --sl-font: var(--font-body);
+  --sl-font-mono: var(--font-code);
+
+  /* Paper, ink and marigold. Every Starlight color goes through a palette token, so both themes
+     follow the tokens and the contrast check covers what is shown. */
+  --sl-color-white: var(--text-strong);
+  --sl-color-gray-1: var(--text-strong);
+  --sl-color-gray-2: var(--text);
+  --sl-color-gray-3: var(--muted-foreground);
+  --sl-color-gray-4: var(--faint-foreground);
+  --sl-color-gray-5: var(--border-strong);
+  --sl-color-gray-6: var(--border);
+  --sl-color-gray-7: var(--surface-sunken);
+  --sl-color-black: var(--background);
+  --sl-color-accent-low: var(--highlight);
+  --sl-color-accent: var(--marigold);
+  --sl-color-accent-high: var(--marigold-ink);
+  --sl-color-text: var(--text);
+  --sl-color-text-accent: var(--link);
+  --sl-color-text-invert: var(--background);
+  --sl-color-bg: var(--background);
+  --sl-color-bg-nav: var(--background);
+  --sl-color-bg-sidebar: var(--surface-sunken);
+  --sl-color-bg-inline-code: var(--muted);
+  --sl-color-bg-accent: var(--marigold);
+  --sl-color-hairline-light: var(--border);
+  --sl-color-hairline: var(--border);
+  --sl-color-hairline-shade: var(--border);
+  --sl-color-backdrop-overlay: color-mix(in srgb, var(--foreground) 45%, transparent);
+  --sl-shadow-md:
+    0 1px 0 rgb(var(--shadow-color) / 0.04), 0 2px 8px rgb(var(--shadow-color) / 0.08);
+  --sl-shadow-lg:
+    0 12px 32px -8px rgb(var(--shadow-color) / 0.22), 0 2px 6px rgb(var(--shadow-color) / 0.08);
+
+  /* Asides keep the paper; the marigold rule is the only accent. */
+  --sl-color-orange-low: var(--highlight);
+  --sl-color-orange: var(--marigold);
+  --sl-color-orange-high: var(--marigold-ink);
+  --sl-color-red-low: color-mix(in srgb, var(--danger) 10%, var(--background));
+  --sl-color-red: var(--danger);
+  --sl-color-red-high: var(--danger);
+  --sl-color-blue-low: var(--surface);
+  --sl-color-blue: var(--marigold);
+  --sl-color-blue-high: var(--marigold-ink);
+  --sl-color-purple-low: var(--surface);
+  --sl-color-purple: var(--marigold);
+  --sl-color-purple-high: var(--marigold-ink);
+  --sl-color-green-low: color-mix(in srgb, var(--success) 10%, var(--background));
+  --sl-color-green: var(--success);
+  --sl-color-green-high: var(--success);
+
+  /* Type: 16.5 px body at 1.7, a display serif for titles and section headings. */
+  --sl-text-body: 1.03125rem;
+  --sl-text-body-sm: 0.875rem;
+  --sl-text-code: 0.875rem;
+  --sl-text-code-sm: 0.88em;
+  --sl-line-height: 1.7;
+  --sl-line-height-headings: 1.12;
+  --sl-text-h1: 2.3rem;
+  --sl-text-h2: 1.7rem;
+  --sl-text-h3: 1.2rem;
+  --sl-text-h4: 1.05rem;
+  --sl-text-h5: 1rem;
+
+  /* Layout: a narrower sidebar, a 68-character measure and a margin column. */
+  --sl-nav-height: 3.75rem;
+  --sl-sidebar-width: 16.5rem;
+  --sl-content-width: 44rem;
+  --measure: 68ch;
+  --margin-width: 15rem;
+  --margin-gap: 2.75rem;
+
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --fast: 140ms;
+}
+
+@media (min-width: 50em) {
+  :root {
+    --sl-nav-height: 4rem;
+    --sl-text-h1: 3rem;
+    --sl-text-h2: 1.95rem;
+    --sl-text-h3: 1.25rem;
+    --sl-text-h4: 1.05rem;
+  }
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--text);
+  font-kerning: normal;
+  /* Never fake a weight or a slant the fonts do not have. */
+  font-synthesis: none;
+  /* Fraunces' soft, not wonky, cut. Inherited, and ignored by fonts without these axes. */
+  font-variation-settings:
+    'SOFT' 50,
+    'WONK' 0;
+}
+
+::selection {
+  background: var(--highlight);
+  color: var(--text-strong);
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-code);
+  font-variant-ligatures: none;
+}
+
+/* Thin, warm scrollbars everywhere, including code blocks and panels. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--faint-foreground);
+}
+
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Tooltips of our own (no native title tooltips): generated only while the element is hovered or
+   focused, so a hidden tooltip never widens the page. */
+[data-tip] {
+  position: relative;
+}
+
+[data-tip]:is(:hover, :focus-visible)::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 0.4rem);
+  left: 50%;
+  translate: -50% 0;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  background: var(--text-strong);
+  color: var(--background);
+  font: 500 0.72rem/1.2 var(--font-body);
+  letter-spacing: 0;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: tip-in var(--fast) var(--ease);
+}
+
+[data-tip-align='end']:is(:hover, :focus-visible)::after {
+  left: auto;
+  right: 0;
+  translate: none;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.display,
+.sl-markdown-content :is(h1, h2) {
+  font-family: var(--font-display);
+  font-weight: 480;
+  letter-spacing: -0.012em;
+}
+
+/* ----- Prose ----- */
+
+.sl-markdown-content {
+  font-size: var(--sl-text-body);
+}
+
+.sl-markdown-content :is(p, ul, ol, dl, blockquote):not(:where(.not-content *)) {
+  max-width: var(--measure);
+}
+
+.sl-markdown-content h2:not(:where(.not-content *)) {
+  font-weight: 480;
+  line-height: 1.15;
+  margin-top: 2.4em;
+}
+
+.sl-markdown-content h3:not(:where(.not-content *)) {
+  font-family: var(--font-body);
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  line-height: 1.3;
+  margin-top: 2.1em;
+}
+
+.sl-markdown-content h4:not(:where(.not-content *)) {
+  font-family: var(--font-body);
+  font-weight: 650;
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4) code {
+  font-size: 0.84em;
+  font-weight: 500;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+
+.sl-markdown-content strong {
+  color: var(--text-strong);
+  font-weight: 650;
+}
+
+.sl-markdown-content a:not(:where(.not-content *)) {
+  color: var(--link);
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--link) 40%, transparent);
+  text-underline-offset: 0.2em;
+  transition:
+    text-decoration-color var(--fast) var(--ease),
+    color var(--fast) var(--ease);
+}
+
+.sl-markdown-content a:hover:not(:where(.not-content *)) {
+  color: var(--link-hover);
+  text-decoration-color: var(--marigold);
+}
+
+/* Inline code: the mono face in ink, no chip and no underline (that would read as a link). */
+.sl-markdown-content code:not(:where(.not-content *)) {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  color: var(--text-strong);
+  font-size: 0.87em;
+  overflow-wrap: anywhere;
+}
+
+.sl-markdown-content a code:not(:where(.not-content *)) {
+  color: inherit;
+}
+
+.sl-markdown-content kbd:not(:where(.not-content *)) {
+  font-size: 0.82em;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 0.05em 0.35em;
+  background: none;
+  color: var(--text-strong);
+}
+
+.sl-markdown-content ul:not(:where(.not-content *)) {
+  padding-inline-start: 1.15rem;
+}
+
+.sl-markdown-content ul > li::marker {
+  color: var(--faint-foreground);
+}
+
+.sl-markdown-content ol > li::marker {
+  color: var(--muted-foreground);
+  font-family: var(--font-code);
+  font-size: 0.86em;
+}
+
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+  border-inline-start: 2px solid var(--border-strong);
+  color: var(--muted-foreground);
+  font-family: var(--font-display);
+  font-size: 1.12em;
+  font-style: italic;
+}
+
+.sl-markdown-content hr:not(:where(.not-content *)) {
+  border-bottom-color: var(--rule);
+  margin-block: 2.5rem;
+}
+
+/* The highlighter: an irregular marigold stroke behind the text, not a flat box. */
+mark,
+.highlight {
+  color: inherit;
+  background: url('../assets/highlight.svg') no-repeat center / 100% 100%;
+  padding: 0.05em 0.18em;
+  margin: 0 -0.08em;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+:root[data-theme='dark'] :is(mark, .highlight) {
+  background-image: url('../assets/highlight-dark.svg');
+}
+
+/* ----- Tables: hairlines, no zebra ----- */
+
+.sl-markdown-content table:not(:where(.not-content *)) {
+  font-size: 0.92rem;
+  line-height: 1.55;
+  width: max-content;
+  max-width: 100%;
+  border-top: 1px solid var(--border-strong);
+}
+
+.sl-markdown-content :is(th, td):not(:where(.not-content *)) {
+  border-bottom: 1px solid var(--rule);
+  padding: 0.55rem 0.9rem;
+  min-width: 6rem;
+}
+
+.sl-markdown-content th:not(:where(.not-content *)) {
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  border-bottom-color: var(--border-strong);
+  white-space: nowrap;
+}
+
+.sl-markdown-content td code:not(:where(.not-content *)) {
+  white-space: nowrap;
+}
+
+.sl-markdown-content td:first-child code:not(:where(.not-content *)) {
+  white-space: normal;
+}
+
+/* ----- Expressive Code frames ----- */
+
+.expressive-code .frame {
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

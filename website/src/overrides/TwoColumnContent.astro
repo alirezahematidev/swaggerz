@@ -1,0 +1,18 @@
+---
+/**
+ * The content frame: on wide screens the text column and its margin column, which carries the
+ * margin notes and, at its foot, a compact "On this page" menu. Narrower screens get one column.
+ */
+const { toc } = Astro.locals.starlightRoute;
+---
+
+<div class="content-frame">
+  <div class="main-pane"><slot /></div>
+  {
+    toc && (
+      <div class="margin-column print:hidden">
+        <slot name="right-sidebar" />
+      </div>
+    )
+  }
+</div>

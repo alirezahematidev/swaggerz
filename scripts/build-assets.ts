@@ -94,7 +94,10 @@ export async function buildDashboard(): Promise<void> {
     logLevel: 'warn',
     publicDir: false,
     plugins: [tailwind()],
-    oxc: { jsx: { runtime: 'automatic' } },
+    // Always the production JSX transform: Vite derives it from NODE_ENV, which is `test` when the
+    // test suite's setup builds the bundle, and the development transform's jsxDEV does not exist
+    // in React's production build.
+    oxc: { jsx: { runtime: 'automatic', development: false } },
     define: { 'process.env.NODE_ENV': JSON.stringify('production') },
     build: {
       outDir: DASHBOARD_OUT,

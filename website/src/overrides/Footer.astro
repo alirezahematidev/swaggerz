@@ -1,0 +1,39 @@
+---
+/** Previous and next pages, and where to edit the page. */
+import EditLink from '@astrojs/starlight/components/EditLink.astro';
+
+const { pagination, entry } = Astro.locals.starlightRoute;
+const { prev, next } = pagination;
+const source = entry.data.source;
+---
+
+<footer class="page-footer print:hidden">
+  {
+    (prev || next) && (
+      <nav class="pager" aria-label="Pages">
+        {prev ? (
+          <a href={prev.href} rel="prev" class="pager-link prev">
+            <span class="pager-direction">← Previous</span>
+            <span class="pager-title">{prev.label}</span>
+          </a>
+        ) : (
+          <span />
+        )}
+        {next && (
+          <a href={next.href} rel="next" class="pager-link next">
+            <span class="pager-direction">Next →</span>
+            <span class="pager-title">{next.label}</span>
+          </a>
+        )}
+      </nav>
+    )
+  }
+  <div class="page-meta">
+    <EditLink />
+    {source !== undefined && (
+      <p class="page-source">
+        Rendered from <code>{source}</code>
+      </p>
+    )}
+  </div>
+</footer>

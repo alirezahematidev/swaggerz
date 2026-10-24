@@ -1,0 +1,36 @@
+openapi: 3.1.0
+info:
+  title: Accounts
+  version: '1.0'
+paths:
+  /accounts/{accountId}:
+    get:
+      tags: [accounts]
+      operationId: getAccount
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The account.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+components:
+  schemas:
+    Account:
+      type: object
+      required: [id, createdAt]
+      properties:
+        id:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        birthday:
+          type: string
+          format: date

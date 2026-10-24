@@ -1,0 +1,30 @@
+openapi: 3.1.0
+info:
+  title: Vendor API
+  version: '2024-06'
+paths:
+  /pets:
+    get:
+      tags: [pets]
+      responses:
+        '200':
+          description: The pets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+  /internal/metrics:
+    get:
+      tags: [internal]
+      responses:
+        '204':
+          description: Metrics were flushed.
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id:
+          type: string

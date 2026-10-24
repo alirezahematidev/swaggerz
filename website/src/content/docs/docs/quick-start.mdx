@@ -1,0 +1,58 @@
+---
+title: Quick start
+description: Install swaggerz, create a config, generate a client and call the API in five steps.
+---
+
+import { Steps } from '@astrojs/starlight/components';
+import FileList from '../../../components/FileList.astro';
+import Sample from '../../../components/Sample.astro';
+
+You need Node.js 22.18 or later (TypeScript config files are loaded with Node's built-in type stripping) and a Swagger 2.0 or OpenAPI 3.x document, as a file or a URL.
+
+<Steps>
+
+1. **Install** swaggerz as a development dependency. The generated client does not depend on it.
+
+   ```sh
+   npm install --save-dev swaggerz
+   ```
+
+   The CLI is installed as `swaggerz` and as the shorter `sz`.
+
+2. **Create a config.** `init` finds your specification, reads its version, and turns on hooks for the data-fetching library your `package.json` already depends on.
+
+   ```sh
+   npx swaggerz init
+   ```
+
+   <Sample file="default/swaggerz.config.ts" title="swaggerz.config.ts" />
+
+   Prefer JSON or YAML? `npx swaggerz init --format yaml`. Every option is in the [config reference](../reference/config/).
+
+3. **Generate** the client.
+
+   ```sh
+   npx swaggerz generate
+   ```
+
+   <FileList />
+
+4. **Configure the client and call the API.** Every operation is a function you import by name.
+
+   <Sample file="default/quick-start.ts" title="src/main.ts" />
+
+5. **Keep it in step.** Regenerate when the specification changes, or let it happen while you work, and check it in CI:
+
+   ```sh
+   npx swaggerz generate --watch   # regenerate on every change
+   npx swaggerz generate --check   # in CI: fail when the committed client is out of date
+   ```
+
+</Steps>
+
+## Where to go next
+
+- **Hooks**: `features: { query: true }` adds TanStack Query hooks; see [data fetching](../guides/data-fetching/).
+- **Validation**: `features: { validation: 'zod' }` checks responses at runtime; see [validation](../guides/validation/).
+- **A specification you do not own** needs fixes? Patch it with an [overlay](../guides/overlays/).
+- **Something does not work**: `npx swaggerz doctor`, then [troubleshooting](../troubleshooting/).

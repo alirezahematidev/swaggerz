@@ -1,0 +1,14 @@
+overlay: 1.1.0
+info:
+  title: Fixes for the vendor API
+  version: 1.0.0
+actions:
+  - target: $.paths['/pets'].get
+    update:
+      operationId: listPets
+      summary: List the pets.
+  - target: $.paths['/internal/metrics']
+    remove: true
+  - target: $.components.schemas.Pet.properties.id
+    update:
+      type: integer

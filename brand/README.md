@@ -29,12 +29,12 @@ The mark is two interlocking bolts that read as an S and a Z, in marigold on a t
 
 ## Type
 
-- **Source Serif 4** (Semibold for the wordmark and headings): editorial voice.
-- **Geist** for interface text, **Geist Mono** for code.
-
+- **Fraunces** for titles and headings, in its soft cut (`SOFT` 50, `WONK` 0): the editorial voice of the dashboard and the website.
+- **Figtree** for interface and body text, **Spline Sans Mono** for code.
+- **Source Serif 4** Semibold for the wordmark in `logo.svg`, which is drawn as outlines, so no font is loaded for it.
 - **Passero One** for the logotype (the `logotype*.png` files): the display voice for marketing and social media. Only the rendered images are kept; the font is downloaded to regenerate them (`build-logotype.mjs`).
 
-All four are licensed under the SIL Open Font License.
+All are licensed under the SIL Open Font License; the dashboard and the website self-host Fraunces, Figtree and Spline Sans Mono (`src/dashboard/client/fonts/`).
 
 ## Usage
 

@@ -1,0 +1,75 @@
+---
+/**
+ * Every diagnostic code as a dictionary headword: severity, meaning and, for many, an example
+ * that the compiler ran at build time with the message it printed.
+ */
+import { Code } from '@astrojs/starlight/components';
+import diagnostics from '../../generated/diagnostics.json';
+import { AREA_TITLES, areas, diagnosticAnchor } from '../../reference/headings.ts';
+
+const [lead, ...rest] = diagnostics.intro;
+const severities = rest.slice(0, 3);
+const after = rest.slice(3);
+---
+
+{lead !== undefined && <p set:html={lead} />}
+<ul class="ref-severities">
+  {severities.map((line) => <li set:html={line} />)}
+</ul>
+{after.map((line) => <p set:html={line} />)}
+
+<nav class="ref-index" aria-label="Areas">
+  {
+    areas().map((area) => (
+      <a href={`#area-${area}`}>
+        {AREA_TITLES[area] ?? area}
+        <span>{diagnostics.entries.filter((entry) => entry.area === area).length}</span>
+      </a>
+    ))
+  }
+</nav>
+
+{
+  areas().map((area) => (
+    <section class="ref-group">
+      {/* docs/diagnostics.md calls this section "Lint findings"; links to it keep working. */}
+      {area === 'lint' && <span id="lint-findings" />}
+      <div class="sl-heading-wrapper level-h2">
+        <h2 id={`area-${area}`}>{AREA_TITLES[area] ?? area}</h2>
+      </div>
+      <dl class="dictionary">
+        {diagnostics.entries
+          .filter((entry) => entry.area === area)
+          .map((entry) => (
+            <div class="headword" id={diagnosticAnchor(entry.code)}>
+              <dt>
+                <a class="ref-anchor" href={`#${diagnosticAnchor(entry.code)}`}>
+                  <code>{entry.code}</code>
+                </a>
+                {entry.severity.split('/').map((severity) => (
+                  <span class={`severity severity-${severity}`}>{severity}</span>
+                ))}
+              </dt>
+              <dd>
+                <p set:html={entry.meaning} />
+                {'example' in entry && entry.example !== undefined && (
+                  <div class="headword-example">
+                    <p class="headword-label">
+                      Example: <span set:html={entry.example.title} />
+                    </p>
+                    {entry.example.files.map((file) => (
+                      <Code code={file.content} lang={file.language} title={file.name} />
+                    ))}
+                    <Code code={entry.example.output} lang="txt" frame="terminal" title={entry.example.command} />
+                    <p class="headword-fix">
+                      <span class="headword-label">Fix.</span> <span set:html={entry.example.fix} />
+                    </p>
+                  </div>
+                )}
+              </dd>
+            </div>
+          ))}
+      </dl>
+    </section>
+  ))
+}

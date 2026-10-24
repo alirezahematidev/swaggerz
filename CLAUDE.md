@@ -24,6 +24,10 @@ pnpm examples:check                                   # build, then generate and
 node scripts/verify-examples.ts                       # packs, installs and checks examples/* like a user (network)
 node dist/cli/bin.js dashboard --config <file>        # run the dashboard against a config
 node src/cli/bin.ts mcp --config <file>               # the MCP server on stdio (logs on stderr)
+pnpm website:dev      # docs website on http://localhost:4321 (regenerates its data first; needs `pnpm build`)
+pnpm website:build    # build swaggerz, generate the site's data, type-check samples, build the site, check links
+pnpm website:check    # contrast check of the palette + astro check (after a website build)
+pnpm website:test     # Playwright on the built site: axe in both themes, CSP, budgets, screenshots
 ```
 
 The vitest global setup builds the runtime templates and the dashboard bundle once per run, so the first test run is slower.
@@ -42,6 +46,7 @@ The vitest global setup builds the runtime templates and the dashboard bundle on
 - `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed; the MCP tests drive `swaggerz mcp` with the official SDK clients), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions; `features-3.2.yaml` every OpenAPI 3.2 addition).
 - `examples/` — pnpm workspace packages (`swaggerz: workspace:*`), run from the root with `pnpm example:<name>`.
 - `brand/` — logo sources; `scripts/` — build, pack verification, compat, release notes.
+- `website/` — the docs website (Astro + Starlight; plan and notes in [website.md](website.md)). It renders `docs/*.md`, the examples' READMEs, `CHANGELOG.md` and `brand/README.md` in place; `website/scripts/data.ts` generates the references, twin panels, measurements and the playground's browser compiler from this checkout into `website/src/generated/`. The palette lives in `src/dashboard/client/tokens.css`, shared with the dashboard.
 
 ## Rules that are not negotiable
 
@@ -62,3 +67,4 @@ The vitest global setup builds the runtime templates and the dashboard bundle on
 - Dashboard UI: compose `components/ui` primitives (no native `select`, checkbox or dialog); use the palette tokens in `client/styles.css` rather than raw colors; check light and dark themes and a 390px-wide viewport.
 - Commit messages follow Conventional Commits (`feat:`, `fix:`, `perf:`, `docs:` reach the changelog).
 - Keep docs in `docs/` and `README.md` in step with behavior; `CHANGELOG.md` is written by release-it from commits.
+- A new `docs/*.md` file needs a page in `website/src/navigation.ts` (the website build fails otherwise). Mark complete TypeScript code blocks in docs as ` ```ts check ` so the website build type-checks them; GitHub alerts (`> [!NOTE]`) become margin notes on the site.

@@ -1,0 +1,268 @@
+/* Twin panels: specification and generated code side by side, on one sheet of paper. */
+
+.twin {
+  --twin-height: 24rem;
+  margin: 2rem 0 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.twin-panes {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+
+.twin-pane {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.twin-pane + .twin-pane {
+  border-inline-start: 1px solid var(--rule);
+}
+
+/* Tabs are words with a marigold underline when selected; no band behind them. */
+.twin-bar,
+.twin-switch {
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  height: 2.5rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.twin-tabs,
+.twin-switch {
+  display: flex;
+  gap: 1.1rem;
+  align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.twin-label {
+  align-self: center;
+  font: 0.76rem/1 var(--font-code);
+  color: var(--text-strong);
+}
+
+.twin-path {
+  display: none;
+  /* Physical, not logical: the path is set right-to-left so a long one loses its start. */
+  margin-left: auto;
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  font: 0.72rem/1.2 var(--font-code);
+  color: var(--muted-foreground);
+}
+
+/* With JavaScript the path sits in the tab row, so both sides' code starts on the same line. */
+.twin[data-ready] .twin-path {
+  display: block;
+}
+
+.twin[data-ready] .twin-file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.twin-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.twin-tabs button,
+.twin-switch button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: -1px;
+  padding: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font: 500 0.8rem/1 var(--font-body);
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--fast) var(--ease),
+    border-color var(--fast) var(--ease);
+}
+
+.twin-pane[data-pane='spec'] .twin-tabs button {
+  font-family: var(--font-code);
+  font-size: 0.76rem;
+}
+
+.twin-tabs button:hover,
+.twin-switch button:hover {
+  color: var(--text-strong);
+}
+
+.twin-tabs button[aria-selected='true'],
+.twin-switch button[aria-selected='true'] {
+  color: var(--text-strong);
+  border-bottom-color: var(--marigold);
+}
+
+.twin-tabs button:focus-visible,
+.twin-switch button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Another generated file also has a counterpart for the hovered line. */
+.twin-tabs button[data-has-link]::after {
+  content: '';
+  width: 0.35rem;
+  height: 0.35rem;
+  margin-inline-start: 0.35rem;
+  border-radius: 50%;
+  background: var(--marigold);
+}
+
+.twin-panel {
+  height: var(--twin-height);
+  overflow: auto;
+  overscroll-behavior: contain;
+  position: relative;
+}
+
+.twin[data-ready] .twin-panel:not([data-active]) {
+  display: none;
+}
+
+.twin-panel:focus-visible {
+  outline-offset: -2px;
+}
+
+.twin-file {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0;
+  padding: 0.5rem 1rem 0.35rem;
+  font: 0.72rem/1.2 var(--font-code);
+  color: var(--muted-foreground);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.twin-panel .expressive-code .frame > .header,
+.twin-panel .expressive-code .copy {
+  display: none;
+}
+
+.twin-panel .expressive-code .frame {
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.twin-panel .expressive-code .frame pre {
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  overflow: visible;
+}
+
+.twin-panel .expressive-code {
+  margin: 0 !important;
+  --ec-codeFontSize: 0.8rem;
+  --ec-codeBg: transparent;
+}
+
+.twin .ec-line {
+  transition:
+    background-color 120ms var(--ease),
+    box-shadow 120ms var(--ease);
+}
+
+.twin .ec-line[data-linked] {
+  background-color: color-mix(in srgb, var(--marigold) 16%, transparent);
+  box-shadow: inset 2px 0 0 var(--marigold);
+}
+
+.twin figcaption {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  align-items: baseline;
+  min-height: 2.4rem;
+  padding: 0.55rem 1rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+}
+
+.twin figcaption code {
+  font-family: var(--font-code);
+  font-size: 0.95em;
+  color: var(--text-strong);
+}
+
+.twin-hint {
+  margin-inline-start: auto;
+}
+
+.twin[data-linking] .twin-hint {
+  display: none;
+}
+
+.twin-status:not(:empty) {
+  margin-inline-start: auto;
+  font-family: var(--font-code);
+  font-size: 0.76rem;
+  color: var(--text-strong);
+}
+
+.twin-status:not(:empty)::before {
+  content: '↔ ';
+  color: var(--marigold-ink);
+}
+
+.twin-switch {
+  display: none;
+}
+
+@media (max-width: 55.99rem) {
+  .twin {
+    --twin-height: 22rem;
+  }
+  .twin-panes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .twin-pane + .twin-pane {
+    border-inline-start: 0;
+  }
+  .twin[data-ready] .twin-switch {
+    display: flex;
+  }
+  .twin-switch button {
+    font-size: 0.85rem;
+    font-weight: 560;
+  }
+  .twin[data-ready][data-side='spec'] [data-pane='code'],
+  .twin[data-ready][data-side='code'] [data-pane='spec'] {
+    display: none;
+  }
+  /* The side switch and the file tabs read as two levels: files are the smaller row. */
+  .twin[data-ready] .twin-bar {
+    height: 2.25rem;
+  }
+  .twin-hint {
+    display: none;
+  }
+}

@@ -1,0 +1,101 @@
+---
+/** Every command and flag, from the command definitions the CLI parses its arguments with. */
+import { Code } from '@astrojs/starlight/components';
+import Disclosure from '../Disclosure.astro';
+import cli from '../../generated/cli.json';
+
+type Option = (typeof cli.globalOptions)[number];
+const flag = (option: Option): string =>
+  `${option.short === undefined || option.short === null ? '' : `-${option.short}, `}--${option.name}${
+    option.value === undefined || option.value === null ? '' : ` <${option.value}>`
+  }`;
+---
+
+<p>
+  Installed as <code>{cli.name}</code>{cli.aliases.length > 0 && <> and <code>{cli.aliases.join(', ')}</code></>}.
+  Run <code>{cli.name} &lt;command&gt; --help</code> for the same text in a terminal.
+</p>
+
+<div class="sl-heading-wrapper level-h2"><h2 id="commands">Commands</h2></div>
+<table class="ref-table">
+  <thead><tr><th>Command</th><th>Does</th></tr></thead>
+  <tbody>
+    {
+      cli.commands.map((command) => (
+        <tr>
+          <td>
+            <a href={`#command-${command.name}`}><code>{command.name}</code></a>
+            {command.aliases.length > 0 && <span class="ref-muted"> ({command.aliases.join(', ')})</span>}
+          </td>
+          <td>{command.summary}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
+
+{
+  cli.commands.map((command) => (
+    <section class="ref-entry">
+      <div class="sl-heading-wrapper level-h3">
+        <h3 id={`command-${command.name}`}>
+          <code>{cli.name} {command.name}</code>
+        </h3>
+      </div>
+      <p>{command.summary}</p>
+      {command.aliases.length > 0 && (
+        <p class="ref-muted">
+          Alias: <code>{command.aliases.join(', ')}</code>
+        </p>
+      )}
+      {command.options.length > 0 && (
+        <dl class="ref-options">
+          {command.options.map((option) => (
+            <>
+              <dt>
+                <code>{flag(option)}</code>
+              </dt>
+              <dd set:html={option.descriptionHtml} />
+            </>
+          ))}
+        </dl>
+      )}
+      <Disclosure id={`help-${command.name}`} class="ref-help">
+        <span slot="summary">
+          <code>--help</code> output
+        </span>
+        <Code code={command.help} lang="txt" />
+      </Disclosure>
+    </section>
+  ))
+}
+
+<div class="sl-heading-wrapper level-h2"><h2 id="global-options">Global options</h2></div>
+<p>Every command accepts these.</p>
+<dl class="ref-options">
+  {
+    cli.globalOptions.map((option) => (
+      <>
+        <dt>
+          <code>{flag(option)}</code>
+        </dt>
+        <dd set:html={option.descriptionHtml} />
+      </>
+    ))
+  }
+</dl>
+
+<div class="sl-heading-wrapper level-h2"><h2 id="exit-codes">Exit codes</h2></div>
+<table class="ref-table">
+  <thead><tr><th>Code</th><th>Meaning</th></tr></thead>
+  <tbody>
+    {
+      cli.exitCodes.map((exit) => (
+        <tr>
+          <td><code>{exit.code}</code></td>
+          <td>{exit.meaning}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
