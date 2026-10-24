@@ -3,7 +3,7 @@
  * chapter as a kicker and the logo. Text is laid out with the site's own fonts and drawn as
  * paths, so rendering needs no installed fonts; sharp turns the SVG into a PNG.
  */
-import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { openSync, type Font as FontkitFont } from 'fontkit';
 import sharp from 'sharp';
@@ -195,6 +195,8 @@ export async function ogImages(): Promise<void> {
     });
   }
   const directory = path.join(WEBSITE, 'public', 'og');
+  // From scratch, so a page that is gone leaves no image behind.
+  await rm(directory, { recursive: true, force: true });
   await Promise.all(
     cards.map(async (card) => {
       const file = path.join(directory, `${card.id}.png`);

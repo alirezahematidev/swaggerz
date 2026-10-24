@@ -21,3 +21,6 @@ export class DriftError extends Error {
     this.name = 'DriftError';
   }
 }
+
+/** `text` as a literal inside a regular expression: every pattern character escaped. */
+export const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&');

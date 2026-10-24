@@ -24,15 +24,20 @@ const exists = async (file: string): Promise<boolean> =>
   );
 
 async function sources(directory: string, relative: string) {
-  const entries = await readdir(path.join(directory, relative)).catch(() => [] as string[]);
+  // The listing says which entries are files, so nothing is checked first and read later.
+  const entries = await readdir(path.join(directory, relative), { withFileTypes: true }).catch(
+    () => [],
+  );
+  const names = entries
+    .filter((entry) => entry.isFile() && SOURCE_EXTENSIONS.test(entry.name))
+    .map((entry) => entry.name)
+    .sort();
   const files = [];
-  for (const entry of entries.sort()) {
-    const file = path.join(directory, relative, entry);
-    if (!SOURCE_EXTENSIONS.test(entry) || !(await stat(file)).isFile()) continue;
+  for (const name of names) {
     files.push({
-      path: path.posix.join(relative, entry),
-      language: languageOf(entry),
-      content: (await readFile(file, 'utf8')).trimEnd(),
+      path: path.posix.join(relative, name),
+      language: languageOf(name),
+      content: (await readFile(path.join(directory, relative, name), 'utf8')).trimEnd(),
     });
   }
   return files;

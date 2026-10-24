@@ -18,13 +18,14 @@ async function htmlFiles(directory: string): Promise<string[]> {
     .sort();
 }
 
+// `&amp;` last: decoding it first would turn `&amp;quot;` into `"` instead of `&quot;`.
 const decode = (value: string): string =>
   value
-    .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 
 /** The URL path a built file is served at. */
 function urlOf(file: string): string {

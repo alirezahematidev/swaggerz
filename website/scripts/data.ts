@@ -3,8 +3,8 @@
  * real generated code, written to `src/generated/`. Problems that mean a page would show stale
  * or wrong content fail the run.
  */
+import { favicon } from './data/favicon.ts';
 import { api } from './data/api.ts';
-import { brand } from './data/brand.ts';
 import { buildInfo } from './data/build-info.ts';
 import { cli } from './data/cli.ts';
 import { codeThemes } from './data/code-themes.ts';
@@ -24,7 +24,7 @@ const started = performance.now();
 const measure = process.argv.includes('--measure');
 await Promise.all([
   api(),
-  brand(),
+  favicon(),
   buildInfo(),
   fonts(),
   cli(),

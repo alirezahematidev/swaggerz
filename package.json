@@ -62,7 +62,7 @@
     "build": "node scripts/build.ts",
     "build:assets": "node scripts/build-assets.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p src/templates/tsconfig.json --noEmit && tsc -p src/dashboard/client/tsconfig.json --noEmit && tsc -p tests/integration/dashboard/tsconfig.json --noEmit",
-    "lint": "oxlint",
+    "lint": "oxlint --ignore-pattern \"website/**\"",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "knip": "knip",

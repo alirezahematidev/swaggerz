@@ -251,7 +251,6 @@ export const CHAPTERS: readonly Chapter[] = [
         source: 'docs/roadmap.md',
         description: 'What is done, what comes next.',
       },
-      { id: 'brand', label: 'Brand', external: true },
     ],
   },
 ];

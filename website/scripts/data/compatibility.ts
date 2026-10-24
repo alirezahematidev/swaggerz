@@ -8,7 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DEPENDENCIES } from '../../../scripts/compat-versions.ts';
 import { markdownTables } from './markdown.ts';
-import { DriftError, ROOT } from './output.ts';
+import { DriftError, ROOT, escapeRegExp } from './output.ts';
 
 const SOURCE = 'docs/compatibility.md';
 
@@ -28,7 +28,7 @@ async function installed(name: string): Promise<string> {
 }
 
 const mentions = (cell: string, version: string): boolean =>
-  new RegExp(`(^|[^\\d.])${version.replace(/\./g, '\\.')}([^\\d]|$)`).test(cell);
+  new RegExp(`(^|[^\\d.])${escapeRegExp(version)}([^\\d]|$)`).test(cell);
 
 export async function compatibility(): Promise<void> {
   const text = await readFile(path.join(ROOT, SOURCE), 'utf8');

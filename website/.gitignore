@@ -4,7 +4,6 @@ dist/
 .cache/
 .measurements/
 src/generated/
-public/brand/
 public/favicon.svg
 samples/*/generated/
 samples/.extracted/

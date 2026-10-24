@@ -2,7 +2,7 @@
 # (`pnpm example:<name>` builds it first).
 packages:
   - examples/*
-  # The docs website (website.md); it builds this checkout and documents it.
+  # The docs website (website/README.md); it builds this checkout and documents it.
   - website
 
 allowBuilds:

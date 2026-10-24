@@ -14,7 +14,22 @@ export type CompileResponse =
   | { readonly id: number; readonly result: BrowserCompileResult; readonly elapsed: number }
   | { readonly id: number; readonly error: string };
 
-addEventListener('message', (event: MessageEvent<CompileRequest>) => {
+function isRequest(value: unknown): value is CompileRequest {
+  if (typeof value !== 'object' || value === null) return false;
+  const { id, input } = value as { id?: unknown; input?: unknown };
+  return (
+    typeof id === 'number' &&
+    typeof input === 'object' &&
+    input !== null &&
+    typeof (input as { files?: unknown }).files === 'object'
+  );
+}
+
+addEventListener('message', (event: MessageEvent<unknown>) => {
+  // A dedicated worker only hears from the page that started it (whose messages carry an empty
+  // origin, or the page's own); anything else, or anything malformed, is ignored.
+  if (event.origin !== '' && event.origin !== self.location.origin) return;
+  if (!isRequest(event.data)) return;
   const { id, input } = event.data;
   const started = performance.now();
   compileInBrowser(input).then(

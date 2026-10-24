@@ -12,7 +12,6 @@ export const TEMPLATES = [
   { name: 'examples', path: '/examples/' },
   { name: 'example', path: '/examples/react-query/' },
   { name: 'changelog', path: '/changelog/' },
-  { name: 'brand', path: '/brand/' },
   { name: 'playground', path: '/playground/' },
   { name: 'not-found', path: '/this-page-does-not-exist/' },
 ] as const;

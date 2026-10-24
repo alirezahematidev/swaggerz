@@ -26,10 +26,6 @@ export const collections = {
     loader: repositoryFilesLoader({ changelog: 'CHANGELOG.md' }),
     schema: z.object({ title: z.string(), source: z.string() }),
   }),
-  brand: defineCollection({
-    loader: repositoryFilesLoader({ brand: 'brand/README.md' }),
-    schema: z.object({ title: z.string(), source: z.string() }),
-  }),
   examples: defineCollection({
     loader: examplesLoader(),
     schema: z.object({

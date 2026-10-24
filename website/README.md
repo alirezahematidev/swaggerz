@@ -1,6 +1,6 @@
 # swaggerz docs website
 
-The documentation site: Astro with Starlight, a custom editorial layout, references generated from the source, real generated code beside its specification, measured numbers and an in-browser playground. The plan and the notes on how it was built are in [website.md](../website.md).
+The documentation site: Astro with Starlight, a custom editorial layout, references generated from the source, real generated code beside its specification, measured numbers and an in-browser playground.
 
 ```sh
 pnpm install                 # from the repository root
@@ -16,7 +16,7 @@ pnpm --filter swaggerz-website run data --measure   # measure bundle sizes and t
 | Path                 | What                                                                                                                                                                                                                |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/navigation.ts`  | Chapters and pages, and which repository file each page renders. Every `docs/*.md` needs a page here.                                                                                                               |
-| `src/loaders/`       | Content loaders that read `docs/*.md`, the examples' READMEs, `CHANGELOG.md` and `brand/README.md` in place.                                                                                                        |
+| `src/loaders/`       | Content loaders that read `docs/*.md`, the examples' READMEs and `CHANGELOG.md` in place.                                                                                                                           |
 | `scripts/data.ts`    | Generates `src/generated/` from the repository: references (CLI, config, API, diagnostics), twins, measurements, examples, OG images, font fallbacks, the code theme and the playground's compiler. Fails on drift. |
 | `scripts/samples.ts` | Type-checks `samples/` and the ` ```ts check ` blocks of `docs/*.md` and `README.md` against freshly generated clients.                                                                                             |
 | `twins/`             | The specifications of the spec ↔ code panels (`twins.ts` lists them); their right-hand side is compiled at build time.                                                                                              |
@@ -24,7 +24,7 @@ pnpm --filter swaggerz-website run data --measure   # measure bundle sizes and t
 | `src/overrides/`     | Starlight component overrides: chapter sidebar, margin column, the "On this page" menu, page title, theme switch and footer.                                                                                        |
 | `src/components/`    | The site's own components: search dialog, disclosures, spec ↔ code twins, samples, measured tables, references.                                                                                                     |
 | `src/styles/`        | `theme.css` maps the shared palette (`src/dashboard/client/tokens.css`) onto Starlight; layout, twin and reference styles.                                                                                          |
-| `src/pages/`         | The landing page, the playground, examples, changelog and brand pages.                                                                                                                                              |
+| `src/pages/`         | The landing page, the playground, examples and changelog pages.                                                                                                                                                     |
 | `integrations/`      | Completes each page's Content Security Policy with the hashes of its inline scripts after the build.                                                                                                                |
 | `tests/`             | Playwright: accessibility (axe, both themes), CSP and console errors, budgets, the search dialog and menus, visual regression.                                                                                      |
 

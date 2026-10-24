@@ -18,7 +18,7 @@ import type {
 import { loadConfig } from '../../../src/config/load.ts';
 import { compile } from '../../../src/pipeline/compile.ts';
 import { TWINS, type TwinDefinition } from '../../twins/twins.ts';
-import { DriftError, WEBSITE, writeGenerated } from './output.ts';
+import { DriftError, WEBSITE, writeGenerated, escapeRegExp } from './output.ts';
 
 const TWINS_DIR = path.join(WEBSITE, 'twins');
 
@@ -184,14 +184,14 @@ class CodeIndex {
   typedefProperty(typedef: string, property: string): Range[] {
     const lines = this.#text.split('\n');
     const start = lines.findIndex((line) =>
-      new RegExp(`@typedef\\s+\\{[^}]*\\}\\s+${typedef}\\b`).test(line),
+      new RegExp(`@typedef\\s+\\{[^}]*\\}\\s+${escapeRegExp(typedef)}\\b`).test(line),
     );
     if (start === -1) return [];
     for (let index = start + 1; index < lines.length && !lines[index]?.includes('*/'); index++) {
       const line = lines[index] ?? '';
       if (
         new RegExp(
-          `@property\\s+\\{.*\\}\\s+\\[?['"]?${property.replace(/[-]/g, '\\-')}['"]?[\\]=\\s]`,
+          `@property\\s+\\{.*\\}\\s+\\[?['"]?${escapeRegExp(property)}['"]?[\\]=\\s]`,
         ).test(`${line} `)
       ) {
         return [[index + 1, index + 1]];

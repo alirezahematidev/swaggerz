@@ -9,10 +9,10 @@
     "build": "pnpm --dir .. build && node scripts/data.ts && node scripts/samples.ts && astro build && node scripts/check-links.ts",
     "build:site": "astro build",
     "links": "node scripts/check-links.ts",
-    "check": "node scripts/contrast.ts && astro check",
+    "check": "node scripts/contrast.ts && astro check && oxlint --config ../.oxlintrc.json .",
     "preview": "astro preview",
     "test": "playwright test",
-    "test:gates": "playwright test tests/accessibility.spec.ts tests/security.spec.ts tests/budgets.spec.ts tests/interaction.spec.ts",
+    "test:gates": "playwright test tests/accessibility.spec.ts tests/security.spec.ts tests/budgets.spec.ts tests/interaction.spec.ts tests/playground.spec.ts",
     "test:visual": "playwright test tests/visual.spec.ts",
     "astro": "astro"
   },

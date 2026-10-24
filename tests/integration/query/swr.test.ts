@@ -148,7 +148,13 @@ describe('generated SWR hooks', () => {
         call(
           'useListShapesInfinite',
           { 'X-Request-ID': 'r4', limit: 1 },
-          { initialPageParam: undefined, getNextPageParam: () => 'next' },
+          {
+            initialPageParam: undefined,
+            getNextPageParam: () => 'next',
+            // SWR refetches the first page when the size changes, at a moment that depends on
+            // timing; off, every request is one the list asked for.
+            revalidateFirstPage: false,
+          },
         ) as SwrResult & { size: number; setSize(size: number): Promise<unknown> },
     );
     await waitFor(() => {
@@ -158,6 +164,8 @@ describe('generated SWR hooks', () => {
     await waitFor(() => {
       expect(result.current.size).toBe(2);
     });
+    // A second page would be requested right after the size changes; give it time to arrive.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     expect(result.current.data).toEqual([null]);
     expect(server.requests).toHaveLength(1);
   });

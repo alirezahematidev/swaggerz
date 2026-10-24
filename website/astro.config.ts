@@ -58,7 +58,7 @@ export default defineConfig({
       description: 'Typed, tree-shakeable API clients compiled from Swagger and OpenAPI documents.',
       editLink: { baseUrl: `${REPOSITORY.url}/edit/${REPOSITORY.branch}/website/` },
       social: [{ icon: 'github', label: 'GitHub', href: REPOSITORY.url }],
-      markdown: { processedDirs: ['../docs', '../examples', '../brand'] },
+      markdown: { processedDirs: ['../docs', '../examples'] },
       routeMiddleware: './src/route-data.ts',
       // src/pages/404.astro instead.
       disable404Route: true,

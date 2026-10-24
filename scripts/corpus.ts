@@ -97,6 +97,22 @@ function verify(entry: Entry, content: Buffer): void {
 }
 
 /**
+ * Where corpus documents may come from. `corpus.json` is data, so its URLs are checked against
+ * these before anything is fetched; every download is also pinned by its checksum.
+ */
+const DOWNLOAD_HOSTS: ReadonlySet<string> = new Set(['raw.githubusercontent.com']);
+const GIT_HOSTS: ReadonlySet<string> = new Set(['github.com']);
+
+function allowed(address: string, hosts: ReadonlySet<string>, name: string): URL {
+  const url = new URL(address);
+  if (url.protocol !== 'https:' || !hosts.has(url.host))
+    throw new Error(
+      `${name}: ${url.origin} is not an allowed source (https, ${[...hosts].join(', ')}).`,
+    );
+  return url;
+}
+
+/**
  * Downloads a document once and verifies its checksum. A download is verified before it is
  * cached, so a changed or tampered document never reaches `.corpus/`.
  */
@@ -105,6 +121,7 @@ async function download(entry: Entry): Promise<string> {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(entry.name))
     throw new Error(`Invalid corpus name ${entry.name}.`);
   if (entry.git !== undefined && entry.path !== undefined) {
+    allowed(entry.git.repo, GIT_HOSTS, entry.name);
     const directory = path.join(CACHE, entry.name);
     await mkdir(directory, { recursive: true });
     checkout(directory, entry.git);
@@ -113,8 +130,7 @@ async function download(entry: Entry): Promise<string> {
     return file;
   }
   if (entry.url === undefined) throw new Error(`${entry.name}: needs a url, or git and path.`);
-  const url = new URL(entry.url);
-  if (url.protocol !== 'https:') throw new Error(`${entry.name}: only https URLs are downloaded.`);
+  const url = allowed(entry.url, DOWNLOAD_HOSTS, entry.name);
   const file = path.join(CACHE, entry.name, path.basename(url.pathname));
   const cached = await readIfExists(file);
   if (cached !== undefined) {

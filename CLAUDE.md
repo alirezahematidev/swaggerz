@@ -26,8 +26,8 @@ node dist/cli/bin.js dashboard --config <file>        # run the dashboard agains
 node src/cli/bin.ts mcp --config <file>               # the MCP server on stdio (logs on stderr)
 pnpm website:dev      # docs website on http://localhost:4321 (regenerates its data first; needs `pnpm build`)
 pnpm website:build    # build swaggerz, generate the site's data, type-check samples, build the site, check links
-pnpm website:check    # contrast check of the palette + astro check (after a website build)
-pnpm website:test     # Playwright on the built site: axe in both themes, CSP, budgets, screenshots
+pnpm website:check    # contrast check of the palette + astro check + oxlint of the website (after a website build; `pnpm lint` skips website/, whose types need the generated data)
+pnpm website:test     # Playwright on the built site: axe in both themes, CSP, budgets, search, menus, playground, screenshots
 ```
 
 The vitest global setup builds the runtime templates and the dashboard bundle once per run, so the first test run is slower.
@@ -46,7 +46,7 @@ The vitest global setup builds the runtime templates and the dashboard bundle on
 - `tests/unit`, `tests/integration` (generated code is compiled with `tsc` and executed; the MCP tests drive `swaggerz mcp` with the official SDK clients), `fixtures/specs` (shared specs; `advanced-3.1.yaml` covers webhooks, callbacks, dates, read/write split, multiple media types and assertions; `features-3.2.yaml` every OpenAPI 3.2 addition).
 - `examples/` — pnpm workspace packages (`swaggerz: workspace:*`), run from the root with `pnpm example:<name>`.
 - `brand/` — logo sources; `scripts/` — build, pack verification, compat, release notes.
-- `website/` — the docs website (Astro + Starlight; plan and notes in [website.md](website.md)). It renders `docs/*.md`, the examples' READMEs, `CHANGELOG.md` and `brand/README.md` in place; `website/scripts/data.ts` generates the references, twin panels, measurements and the playground's browser compiler from this checkout into `website/src/generated/`. The palette lives in `src/dashboard/client/tokens.css`, shared with the dashboard.
+- `website/` — the docs website (Astro + Starlight; see [website/README.md](website/README.md)). It renders `docs/*.md`, the examples' READMEs and `CHANGELOG.md` in place; `website/scripts/data.ts` generates the references, twin panels, measurements and the playground's browser compiler from this checkout into `website/src/generated/`. The palette lives in `src/dashboard/client/tokens.css`, shared with the dashboard.
 
 ## Rules that are not negotiable
 

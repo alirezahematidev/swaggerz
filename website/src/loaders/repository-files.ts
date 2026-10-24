@@ -1,4 +1,4 @@
-/** Single Markdown files of the repository rendered as pages of their own (changelog, brand). */
+/** Single Markdown files of the repository rendered as pages of their own (the changelog). */
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

@@ -119,9 +119,6 @@ export function resolveTarget(target: string, source: string, base: string): str
   const example = /^examples\/([a-z0-9-]+)\/?$/.exec(resolved);
   if (example !== null) return `${base}examples/${example[1] ?? ''}/${hash}`;
   if (resolved === 'CHANGELOG.md') return `${base}changelog/${hash}`;
-  if (resolved === 'brand' || resolved === 'brand/README.md') return `${base}brand/${hash}`;
-  // Brand files are copied into the site (scripts/data/brand.ts), so they link to the download.
-  if (/^brand\/[^/]+\.(svg|png)$/.test(resolved)) return `${base}${resolved}`;
   if (resolved.startsWith('..'))
     throw new Error(`${source} links outside the repository: ${target}`);
   const kind = /\.[a-z0-9]+$/i.test(resolved) ? 'blob' : 'tree';
