@@ -129,7 +129,7 @@ try {
 
 ## Documentation
 
-Every guide is a file in [`docs/`](docs), readable here on GitHub. The [docs website](website) renders them with references generated from the source, real generated code next to its specification, measured numbers and an in-browser playground.
+Every guide is a file in [`docs/`](docs), readable here on GitHub. The [docs website](https://swaggerz.dev) renders them with references generated from the source, real generated code next to its specification, measured numbers and an in-browser playground.
 
 - **Start:** [configuration](docs/configuration.md) · [troubleshooting](docs/troubleshooting.md)
 - **Guides:** [fetch and axios](docs/http-client.md) · [data fetching](docs/data-fetching.md) (TanStack Query for React, Vue, Svelte and Solid; SWR) · [validation](docs/validation.md) (Zod, Valibot, ArkType) · [overlays](docs/overlays.md) · [linting](docs/lint.md) · [MCP server](docs/mcp.md) · [dates](docs/dates.md) · [read and write models](docs/read-write-models.md) · [bodies and uploads](docs/bodies-and-uploads.md) · [webhooks and callbacks](docs/webhooks-and-callbacks.md) · [servers](docs/servers.md) · [plugins](docs/plugins.md) · [dashboard](docs/dashboard.md) · [JavaScript output](docs/javascript-output.md) · [CI and monorepos](docs/ci-and-monorepos.md) · [migrating](docs/migrating.md) from openapi-typescript, orval or openapi-generator

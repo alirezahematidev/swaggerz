@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/alirezahematidev/swaggerz/security/advisories/new
     about: Report vulnerabilities privately, never in a public issue.
   - name: Documentation
-    url: https://github.com/alirezahematidev/swaggerz#readme
+    url: https://swaggerz.dev
     about: Configuration, generated code, React Query, plugins and the dashboard.
