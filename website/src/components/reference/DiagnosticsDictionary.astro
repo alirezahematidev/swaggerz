@@ -5,7 +5,7 @@
  */
 import { Code } from '@astrojs/starlight/components';
 import diagnostics from '../../generated/diagnostics.json';
-import { AREA_TITLES, areas, diagnosticAnchor } from '../../reference/headings.ts';
+import { areas, areaTitle, diagnosticAnchor } from '../../reference/headings.ts';
 
 const [lead, ...rest] = diagnostics.intro;
 const severities = rest.slice(0, 3);
@@ -22,7 +22,7 @@ const after = rest.slice(3);
   {
     areas().map((area) => (
       <a href={`#area-${area}`}>
-        {AREA_TITLES[area] ?? area}
+        {areaTitle(area)}
         <span>{diagnostics.entries.filter((entry) => entry.area === area).length}</span>
       </a>
     ))
@@ -35,7 +35,7 @@ const after = rest.slice(3);
       {/* docs/diagnostics.md calls this section "Lint findings"; links to it keep working. */}
       {area === 'lint' && <span id="lint-findings" />}
       <div class="sl-heading-wrapper level-h2">
-        <h2 id={`area-${area}`}>{AREA_TITLES[area] ?? area}</h2>
+        <h2 id={`area-${area}`}>{areaTitle(area)}</h2>
       </div>
       <dl class="dictionary">
         {diagnostics.entries

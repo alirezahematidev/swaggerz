@@ -38,8 +38,13 @@ const ALWAYS_SKIPPED = new Set([
   '.output',
   '.turbo',
 ]);
-/** Generated modules that only re-export others: the main, hooks and schema barrels. */
-const BARREL_ORIGINS = new Set(['core:barrel', 'core:query-barrel', 'core:validation-barrel']);
+/** Generated modules that only re-export others: the main, hooks, schema and mocks barrels. */
+const BARREL_ORIGINS = new Set([
+  'core:barrel',
+  'core:query-barrel',
+  'core:validation-barrel',
+  'core:mocks-barrel',
+]);
 /** A statement of a re-export-only module: `export * from '…';`, `export { a, type B } from '…';`. */
 const RE_EXPORT =
   /^export\s+(?:type\s+)?(?:\*(?:\s+as\s+[\w$]+)?|\{[^}]*\})\s+from\s+(['"])[^'"]+\1;?$/;

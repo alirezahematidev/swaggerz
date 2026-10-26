@@ -4,7 +4,7 @@
     "ok": true,
     "operations": 944,
     "models": 635,
-    "files": 3467,
+    "files": 5049,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -13,8 +13,9 @@
     "ok": true,
     "operations": 174,
     "models": 48,
-    "files": 511,
+    "files": 736,
     "diagnostics": {
+      "warning mock/invalid-example": 62,
       "warning schema/tuple-items": 27,
       "warning schema/type-array": 32
     },
@@ -25,8 +26,9 @@
     "ok": true,
     "operations": 612,
     "models": 1538,
-    "files": 4313,
+    "files": 6466,
     "diagnostics": {
+      "warning mock/unsatisfiable": 9,
       "warning operation/body-on-get": 273
     },
     "typeErrors": 0
@@ -36,8 +38,10 @@
     "ok": true,
     "operations": 1242,
     "models": 996,
-    "files": 5081,
+    "files": 7322,
     "diagnostics": {
+      "warning mock/invalid-example": 210,
+      "warning mock/unsatisfiable": 3,
       "warning operation/body-on-get": 1
     },
     "typeErrors": 0
@@ -47,8 +51,10 @@
     "ok": true,
     "operations": 1242,
     "models": 975,
-    "files": 5302,
+    "files": 7522,
     "diagnostics": {
+      "warning mock/invalid-example": 253,
+      "warning mock/unsatisfiable": 15,
       "warning operation/body-on-get": 1
     },
     "typeErrors": 0
@@ -58,8 +64,10 @@
     "ok": true,
     "operations": 197,
     "models": 150,
-    "files": 790,
-    "diagnostics": {},
+    "files": 1140,
+    "diagnostics": {
+      "warning mock/invalid-example": 22
+    },
     "typeErrors": 0
   },
   "box": {
@@ -67,8 +75,10 @@
     "ok": true,
     "operations": 297,
     "models": 318,
-    "files": 1443,
-    "diagnostics": {},
+    "files": 2061,
+    "diagnostics": {
+      "warning mock/invalid-example": 9
+    },
     "typeErrors": 0
   },
   "asana": {
@@ -76,8 +86,11 @@
     "ok": true,
     "operations": 251,
     "models": 312,
-    "files": 1259,
+    "files": 1825,
     "diagnostics": {
+      "info mock/unsupported-pattern": 2,
+      "warning mock/invalid-example": 5,
+      "warning mock/unsatisfiable": 3,
       "warning naming/collision": 1,
       "warning schema/ref-siblings-ignored": 6
     },
@@ -88,8 +101,10 @@
     "ok": true,
     "operations": 350,
     "models": 2479,
-    "files": 6268,
-    "diagnostics": {},
+    "files": 9100,
+    "diagnostics": {
+      "warning mock/invalid-example": 2
+    },
     "typeErrors": 0
   },
   "spotify": {
@@ -97,8 +112,10 @@
     "ok": true,
     "operations": 97,
     "models": 90,
-    "files": 416,
-    "diagnostics": {},
+    "files": 606,
+    "diagnostics": {
+      "warning mock/unsatisfiable": 6
+    },
     "typeErrors": 0
   },
   "swagger-petstore": {
@@ -106,7 +123,7 @@
     "ok": true,
     "operations": 19,
     "models": 6,
-    "files": 66,
+    "files": 94,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -115,10 +132,12 @@
     "ok": true,
     "operations": 858,
     "models": 1351,
-    "files": 4884,
+    "files": 7096,
     "diagnostics": {
       "info operation/ignored-header": 2,
       "info spec/non-standard-ref": 858,
+      "warning mock/invalid-example": 4,
+      "warning mock/unsatisfiable": 4,
       "warning naming/collision": 1
     },
     "typeErrors": 0
@@ -128,10 +147,13 @@
     "ok": true,
     "operations": 360,
     "models": 2097,
-    "files": 4999,
+    "files": 7459,
     "diagnostics": {
+      "info mock/unsupported-pattern": 2,
       "info schema/assertion-keyword": 10,
       "info schema/validation-only-keyword": 35,
+      "warning mock/invalid-example": 17,
+      "warning mock/unsatisfiable": 127,
       "warning naming/collision": 1,
       "warning schema/discriminator-ignored": 1,
       "warning schema/nullable-31": 7
@@ -143,7 +165,7 @@
     "ok": true,
     "operations": 246,
     "models": 538,
-    "files": 1658,
+    "files": 2445,
     "diagnostics": {
       "warning schema/empty-enum": 2
     },
@@ -154,7 +176,7 @@
     "ok": true,
     "operations": 9,
     "models": 15,
-    "files": 69,
+    "files": 96,
     "diagnostics": {
       "info operation/item-schema": 2,
       "info schema/validation-only-keyword": 2
@@ -166,7 +188,7 @@
     "ok": true,
     "operations": 4,
     "models": 3,
-    "files": 27,
+    "files": 37,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -175,7 +197,7 @@
     "ok": true,
     "operations": 2,
     "models": 0,
-    "files": 17,
+    "files": 22,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -184,7 +206,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 16,
+    "files": 20,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -193,7 +215,7 @@
     "ok": true,
     "operations": 6,
     "models": 3,
-    "files": 31,
+    "files": 43,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -202,7 +224,7 @@
     "ok": true,
     "operations": 3,
     "models": 1,
-    "files": 22,
+    "files": 29,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -211,7 +233,7 @@
     "ok": true,
     "operations": 0,
     "models": 1,
-    "files": 15,
+    "files": 19,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -220,7 +242,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 15,
+    "files": 19,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -229,7 +251,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 15,
+    "files": 19,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -238,7 +260,7 @@
     "ok": true,
     "operations": 4,
     "models": 0,
-    "files": 24,
+    "files": 31,
     "diagnostics": {},
     "typeErrors": 0
   }

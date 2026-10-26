@@ -87,6 +87,12 @@ export const CHAPTERS: readonly Chapter[] = [
           'Zod, Valibot and ArkType schemas and runtime validation of responses and requests.',
       },
       {
+        id: 'docs/guides/mocks',
+        source: 'docs/mocks.md',
+        description:
+          'Mock Service Worker handlers per operation and deterministic fixtures per model.',
+      },
+      {
         id: 'docs/guides/overlays',
         source: 'docs/overlays.md',
         twin: 'overlay',

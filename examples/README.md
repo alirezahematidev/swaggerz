@@ -1,14 +1,14 @@
 # Examples
 
-| Example                            | Shows                                                                                                                                                      |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [react-query](react-query)         | OpenAPI 3.1, React with TanStack Query hooks (queries, infinite queries, mutations with invalidation), Zod response validation, a typed mock API for Vite  |
-| [node-javascript](node-javascript) | OpenAPI 3.0, a plain JavaScript Node.js project using the generated JavaScript client with JSDoc and `.d.ts` types, API-key auth, middleware, typed errors |
-| [custom-plugin](custom-plugin)     | Swagger 2.0, two plugins: naming operations from a vendor extension, and emitting a typed operation catalog with documentation links                       |
-| [vue-query](vue-query)             | The react-query app in Vue 3 with TanStack Vue Query composables (getter parameters, `select`, infinite query, invalidation) and Valibot validation        |
-| [svelte-query](svelte-query)       | The react-query app in Svelte 5 with TanStack Svelte Query 6 (runes, accessor parameters and options), checked with `svelte-check`                         |
-| [solid-query](solid-query)         | The react-query app in Solid with TanStack Solid Query primitives (accessor parameters and options, `select`, infinite query, invalidation)                |
-| [swr](swr)                         | The react-query app with SWR hooks (`useSWR`, `useSWRInfinite` by cursor, `useSWRMutation` with invalidation) and ArkType validation                       |
+| Example                            | Shows                                                                                                                                                                            |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [react-query](react-query)         | OpenAPI 3.1, React with TanStack Query hooks (queries, infinite queries, mutations with invalidation), Zod response validation, the API served by the generated MSW mocks        |
+| [node-javascript](node-javascript) | OpenAPI 3.0, a plain JavaScript Node.js project using the generated JavaScript client with JSDoc and `.d.ts` types, API-key auth, middleware, typed errors, MSW mocks in Node.js |
+| [custom-plugin](custom-plugin)     | Swagger 2.0, two plugins: naming operations from a vendor extension, and emitting a typed operation catalog with documentation links                                             |
+| [vue-query](vue-query)             | The react-query app in Vue 3 with TanStack Vue Query composables (getter parameters, `select`, infinite query, invalidation), Valibot validation and the same mocks              |
+| [svelte-query](svelte-query)       | The react-query app in Svelte 5 with TanStack Svelte Query 6 (runes, accessor parameters and options), checked with `svelte-check`                                               |
+| [solid-query](solid-query)         | The react-query app in Solid with TanStack Solid Query primitives (accessor parameters and options, `select`, infinite query, invalidation)                                      |
+| [swr](swr)                         | The react-query app with SWR hooks (`useSWR`, `useSWRInfinite` by cursor, `useSWRMutation` with invalidation) and ArkType validation                                             |
 
 ## Running an example
 
@@ -17,7 +17,7 @@ The examples are workspace packages of this repository and use its checkout of s
 ```sh
 pnpm install                    # once; also installs the examples' dependencies
 pnpm example:react-query        # build swaggerz, generate the client, start the Vite dev server
-pnpm example:node-javascript    # build, generate, run the script against a local in-memory API
+pnpm example:node-javascript    # build, generate, run the script against the generated mocks
 pnpm example:custom-plugin      # build, generate, print the catalog the plugin emitted
 pnpm example:vue-query          # also svelte-query, solid-query and swr: start the Vite dev server
 pnpm example react-query check  # any script of an example: build, generate, then run it

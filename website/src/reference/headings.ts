@@ -13,7 +13,7 @@ export interface Heading {
   readonly text: string;
 }
 
-export const AREA_TITLES: Readonly<Record<string, string>> = {
+const AREA_TITLES: Readonly<Record<string, string>> = {
   config: 'Configuration',
   spec: 'Specification',
   overlay: 'Overlays',
@@ -23,12 +23,21 @@ export const AREA_TITLES: Readonly<Record<string, string>> = {
   security: 'Security',
   naming: 'Naming',
   query: 'Data fetching',
+  mock: 'Mocks',
   output: 'Output',
   plugin: 'Plugins',
   dashboard: 'Dashboard',
   internal: 'Internal',
   lint: 'Lint findings',
 };
+
+/** The title of a diagnostic area; a new area needs one above, or the build fails. */
+export function areaTitle(area: string): string {
+  const title = AREA_TITLES[area];
+  if (title === undefined)
+    throw new Error(`No title for the diagnostic area "${area}" (AREA_TITLES).`);
+  return title;
+}
 
 export function areas(): string[] {
   return [...new Set(diagnostics.entries.map((entry) => entry.area))];
@@ -83,7 +92,7 @@ export function headingsFor(id: string): Heading[] {
       return areas().map((area) => ({
         depth: 2,
         slug: `area-${area}`,
-        text: AREA_TITLES[area] ?? area,
+        text: areaTitle(area),
       }));
     default:
       return [];

@@ -56,6 +56,7 @@ export async function compatibility(): Promise<void> {
     { row: 'Zod', oldest: [exact('zod')], newest: [] },
     { row: 'Valibot', oldest: [exact('valibot')], newest: [] },
     { row: 'ArkType', oldest: [exact('arktype')], newest: [] },
+    { row: 'MSW', oldest: [exact('msw')], newest: [] },
     { row: 'Node.js (generator)', oldest: [pkg.engines.node.replace(/^>=/, '')], newest: [] },
   ];
   // Newest versions: what the repository installs for its integration tests.
@@ -69,6 +70,7 @@ export async function compatibility(): Promise<void> {
     Zod: 'zod',
     Valibot: 'valibot',
     ArkType: 'arktype',
+    MSW: 'msw',
   };
   const frameworks: Record<string, { name: string; label: string; oldest: string }> = {
     '@tanstack/vue-query': { name: 'vue', label: 'Vue', oldest: exact('vue') },

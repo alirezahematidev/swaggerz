@@ -16,6 +16,7 @@
         "src/cli/bin.ts",
         // Copied into every generated client rather than imported.
         "src/templates/runtime/*.ts",
+        "src/templates/mocks/*.ts",
         // Bundled by scripts/build-assets.ts through Vite's API (there is no vite.config).
         "src/dashboard/client/main.tsx",
         // Passed as file paths: to the bundler by scripts/runtimes.ts, to the CLI by `test:smoke`.

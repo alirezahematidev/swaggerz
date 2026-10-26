@@ -10,7 +10,7 @@ Or, inside this directory once swaggerz is built:
 
 ```sh
 pnpm generate     # src/generated/api
-pnpm dev          # http://localhost:5173, served by an in-memory mock API (mock-api.ts)
+pnpm dev          # http://localhost:5173, the API served by the generated mocks (src/mocks.ts)
 pnpm check        # type-checks the app and builds it
 ```
 
@@ -18,4 +18,4 @@ What to look at:
 
 - [swaggerz.config.ts](swaggerz.config.ts) enables Solid Query primitives (`features.query.framework: 'solid'`), an infinite list for `listTasks` paginated by its `cursor` parameter and invalidation of every `Tasks` query after mutations.
 - [src/App.tsx](src/App.tsx) passes accessors to `createListTasksInfiniteQuery` and `createGetTaskQuery`: reading signals and props inside them makes the queries follow them. Errors are typed: `ApiError` with the operation's error body (`Problem`) or `RequestError`.
-- [mock-api.ts](mock-api.ts) implements the API with the generated model types, so it stops compiling when the specification changes.
+- [src/mocks.ts](src/mocks.ts) serves the API in the browser with the generated Mock Service Worker handlers: fixtures (`makeTask`) seed an in-memory list that the handlers read and change. [src/index.tsx](src/index.tsx) starts it during development only; [vite.config.ts](vite.config.ts) serves the worker script with MSW's Vite plugin. It is typed with the generated models, so it stops compiling when the specification changes. See [mocks](../../docs/mocks.md).

@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "mock-api.ts", "swaggerz.config.ts"]
+  "include": ["vite.config.ts", "swaggerz.config.ts"]
 }

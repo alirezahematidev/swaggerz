@@ -1,7 +1,7 @@
 /**
  * Verifies that generated code type-checks with the oldest supported versions of its peer
  * dependencies (TanStack Query for React, Vue, Svelte and Solid, SWR, axios, Zod, Valibot,
- * ArkType) under the oldest and newest supported TypeScript. The newest versions are covered by
+ * ArkType, MSW) under the oldest and newest supported TypeScript. The newest versions are covered by
  * the integration tests, which use the repository's own dependencies. Dependencies are installed
  * into `.compat/` (network required).
  *
@@ -30,6 +30,7 @@ import {
   REACT_QUERY_CONFIG,
   REACT_QUERY_CONSUMER,
 } from '../tests/integration/react-query/config.ts';
+import { MOCKS_CONSUMER } from '../tests/integration/mocks/consumers.ts';
 import { ARKTYPE_CONSUMER, VALIBOT_CONSUMER } from '../tests/integration/validation/consumers.ts';
 import { DEPENDENCIES } from './compat-versions.ts';
 
@@ -142,6 +143,25 @@ const CASES: readonly Case[] = [
     consumer: "import * as api from './api';\nexport const client: object = api;\n",
     ...(library === 'arktype' ? { minimumTypeScript: '5.4' as const } : {}),
   })),
+  {
+    name: 'mocks',
+    config: {
+      spec: { version: '3.1', input: fixture('mocks-3.1.yaml') },
+      features: { mocks: 'msw', validation: 'zod' },
+    },
+    consumer: MOCKS_CONSUMER,
+  },
+  // Mock handlers encode and revive dates with the models' date shapes.
+  {
+    name: 'mocks-dates',
+    config: {
+      spec: { version: '3.1', input: fixture('advanced-3.1.yaml') },
+      types: { dates: 'Date' },
+      features: { mocks: 'msw' },
+    },
+    consumer:
+      "import * as mocks from './api/mocks/index.js';\nexport const handlers: object = mocks;\n",
+  },
   {
     name: 'react-query-js',
     config: {

@@ -8,13 +8,16 @@ import {
   isGetTaskApiError,
   listTasks,
 } from './generated/api/index.js';
-import { startServer } from './server.js';
+import { setupServer } from 'msw/node';
+import { taskHandlers } from './mocks.js';
 
 const apiKey = process.env.TASKS_API_KEY ?? 'demo-key';
-const server = await startServer({ apiKey });
+// The generated mock handlers answer the client's requests in this process: no server, no port.
+// To call the real API instead, remove these lines and set `baseUrl` to its URL.
+const server = setupServer(...taskHandlers(apiKey));
+server.listen({ onUnhandledFrame: 'error' });
 
 client.setConfig({
-  baseUrl: server.url,
   timeout: 5_000,
   // Values for the security schemes in openapi.yaml. Functions are called for every request.
   auth: { apiKey: () => apiKey },

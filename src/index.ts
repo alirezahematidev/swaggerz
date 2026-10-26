@@ -22,6 +22,7 @@ export type {
   InlineHooks,
   LintConfig,
   LintSeverity,
+  MockLibrary,
   NamingConfig,
   OutputConfig,
   QueryConfig,

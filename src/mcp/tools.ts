@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { ModelSymbol, OperationSymbol, ProjectModel } from '../analysis/types.ts';
 import type { EmitContext } from '../codegen/context.ts';
 import { generateModel } from '../codegen/models.ts';
-import { planOperation } from '../codegen/operation-plan.ts';
+import { planOperation, type OperationPlan } from '../codegen/operation-plan.ts';
 import { generateOperation } from '../codegen/operations.ts';
 import { generateQueryModule, QUERY_LABELS } from '../codegen/query/index.ts';
 import { literal } from '../codegen/printer.ts';
@@ -147,6 +147,9 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     const specifier = `${directory.startsWith('..') ? '' : './'}${directory}/${module}${extension}`;
     return `import ${typeOnly ? 'type ' : ''}{ ${names.join(', ')} } from '${specifier}';`;
   };
+  /** The module mocks are imported from: their barrel, or the module itself without barrels. */
+  const mocksModule = (module: string): string =>
+    service.loaded.config.output.barrel ? 'mocks/index' : module;
   const route = (symbol: OperationSymbol): string =>
     `${wireMethod(symbol.operation.method)} ${symbol.operation.path}`;
 
@@ -255,6 +258,13 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     const value = fromSpec ? parameter.examples[0]?.value : undefined;
     return value === undefined ? example(parameter.schema, fromSpec) : literal(value);
   };
+  /** Options of an example mock: a documented error status, or a delay. */
+  const mockExample = (symbol: OperationSymbol, plan: OperationPlan): string => {
+    const error = plan.errors.find((r) => /^\d{3}$/.test(r.response.status));
+    if (error !== undefined) return `{ status: ${error.response.status} }`;
+    return symbol.mock === undefined ? '' : '{ delay: 300 }';
+  };
+
   const exampleCall = (symbol: OperationSymbol, fromSpec: boolean): string => {
     const plan = planOperation(symbol, project().ir);
     const entries = plan.parameters
@@ -283,6 +293,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
     ...(symbol.operation.deprecated ? { deprecated: true } : {}),
     import: importLine([symbol.name], 'index'),
     ...(symbol.query === undefined ? {} : { hook: symbol.query.hook }),
+    ...(symbol.mock === undefined ? {} : { mock: symbol.mock.name }),
     ...(symbol.operation.summary === undefined
       ? {}
       : { specification: { summary: symbol.operation.summary } }),
@@ -351,6 +362,19 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
               declaration: declaration(hooks.dts),
             },
           }),
+      ...(symbol.mock === undefined
+        ? {}
+        : {
+            mock: {
+              handler: symbol.mock.name,
+              import: importLine(
+                [symbol.mock.name, symbol.mock.options],
+                mocksModule(symbol.mock.module),
+              ),
+              example: `server.use(${symbol.mock.name}(${mockExample(symbol, plan)}));`,
+              note: `A Mock Service Worker handler. Without options it responds with the first success status and an example body; \`status\` selects a documented response and types \`body\`, a value or a function of the request ({ params, query, body() }). ${symbol.mock.options} lists the statuses.`,
+            },
+          }),
       specification: {
         ...(op.summary === undefined ? {} : { summary: op.summary }),
         ...(op.description === undefined ? {} : { description: op.description }),
@@ -404,6 +428,15 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
       module: moduleFile(model.module),
       import: importLine([model.name], 'index', true),
       declaration: declaration(generateModel(model, context).dts),
+      ...(model.fixtureName === undefined || model.fixtureModule === undefined
+        ? {}
+        : {
+            fixture: {
+              name: model.fixtureName,
+              import: importLine([model.fixtureName], mocksModule(model.fixtureModule)),
+              note: "Returns a new value of the model made of the specification's examples or of deterministic generated values; object models take Partial overrides.",
+            },
+          }),
       ...(model.schemaName === undefined || validator === undefined
         ? {}
         : {
@@ -636,6 +669,15 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
                 schemas: {
                   library: validator.label,
                   barrel: `${outputDirectory()}/${validator.library}/index`,
+                },
+              }),
+          ...(service.project?.mockHandlers === undefined
+            ? {}
+            : {
+                mocks: {
+                  library: 'Mock Service Worker',
+                  barrel: `${outputDirectory()}/mocks/index`,
+                  handlers: service.project.mockHandlers,
                 },
               }),
           configure:
@@ -898,6 +940,9 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
         library === undefined
           ? ''
           : `${QUERY_LABELS[library]} hooks are generated too; get_operation lists them.`,
+        service.project?.mockHandlers === undefined
+          ? ''
+          : `Mock Service Worker handlers and fixtures are generated too (${outputDirectory()}/mocks): use them in tests and stories instead of writing mocks; get_operation names an operation's handler and get_model a model's fixture.`,
         'Never write fetch calls for endpoints the client covers, and do not edit generated files: they are overwritten. Use check after changing the specification.',
         DATA_NOTE,
       ]

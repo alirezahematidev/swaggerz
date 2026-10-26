@@ -22,4 +22,5 @@ export const DEPENDENCIES: Record<string, string> = {
   zod: '4.0.15',
   valibot: '1.0.0',
   arktype: '2.0.0',
+  msw: '2.11.0',
 };

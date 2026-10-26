@@ -21,6 +21,10 @@ export interface ProjectModel {
   readonly queryGroups: readonly QueryGroup[];
   /** Webhooks and callbacks (empty when `output.webhooks` is false), sorted by module. */
   readonly webhooks: readonly WebhookSymbol[];
+  /** `features.mocks`: the function returning a mock handler for every operation (`mockHandlers`). */
+  readonly mockHandlers?: string;
+  /** `features.mocks`: the export name of `mockFetch` in the mocks barrel. */
+  readonly mockFetch?: string;
 }
 
 /** One request the API sends: an operation of a webhook or of an operation's callback. */
@@ -114,6 +118,17 @@ export interface OperationSymbol {
     /** Mutations: key prefixes of the queries invalidated on success (`invalidates` option). */
     readonly invalidates?: readonly (readonly string[])[];
   };
+  /** `features.mocks`: the operation's mock handler. */
+  readonly mock?: {
+    /** Module path, e.g. `mocks/pet/get-pet-by-id`. */
+    readonly module: string;
+    /** The handler factory, e.g. `mockGetPetById`. */
+    readonly name: string;
+    /** Its options type, e.g. `GetPetByIdMockOptions`. */
+    readonly options: string;
+    /** What response functions receive, e.g. `GetPetByIdMockRequest`. */
+    readonly request: string;
+  };
 }
 
 export interface ModelSymbol {
@@ -134,6 +149,9 @@ export interface ModelSymbol {
   /** `types.dates: 'Date'`: name and module of the model's date shape, if it contains dates. */
   readonly datesName?: string;
   readonly datesModule?: string;
+  /** `features.mocks`: name and module of the model's fixture factory (`makePet`). */
+  readonly fixtureName?: string;
+  readonly fixtureModule?: string;
   /**
    * JavaScript output of recursive models: names of the helper typedefs that hold the model's
    * top-level array types (`JsonValueArray`), which a JSDoc typedef cannot refer to itself through.

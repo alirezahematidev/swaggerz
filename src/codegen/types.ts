@@ -25,6 +25,10 @@ export type GeneratedExportKind =
   | 'query-key'
   | 'mutation-options'
   | 'schema'
+  /** A mock handler factory (`mockGetPetById`, `mockHandlers`). */
+  | 'mock'
+  /** A fixture factory (`makePet`). */
+  | 'fixture'
   | 'client'
   | 'runtime';
 

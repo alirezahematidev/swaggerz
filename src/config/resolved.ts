@@ -1,5 +1,5 @@
 import type { StandardHttpMethod } from '../ir/types.ts';
-import type { LintSeverity, QueryFramework, ValidationLibrary } from './types.ts';
+import type { LintSeverity, MockLibrary, QueryFramework, ValidationLibrary } from './types.ts';
 
 /** Resolved options of a data-fetching integration (TanStack Query or SWR). */
 export interface ResolvedDataFetching {
@@ -72,6 +72,7 @@ export interface ResolvedConfig {
           readonly response: boolean;
           readonly request: boolean;
         };
+    readonly mocks: false | { readonly library: MockLibrary };
   };
   readonly naming: {
     readonly operations: 'camelCase' | 'PascalCase' | 'snake_case' | 'preserve';

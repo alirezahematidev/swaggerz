@@ -503,6 +503,8 @@ export class ProjectService {
     const hooksLabel = symbol.query === undefined ? undefined : QUERY_LABELS[symbol.query.library];
     if (hooks !== undefined)
       code.push(...this.#codeVariants(hooks.module, undefined, `${hooksLabel ?? ''} · `));
+    if (symbol.mock !== undefined)
+      code.push(...this.#codeVariants(symbol.mock.module, undefined, 'Mocks · '));
     const op = symbol.operation;
     const schemeKeys = new Set(this.#cachedOperationSummary(symbol).auth);
     const dependencies = [...project.graph.operationClosure(key)]
@@ -606,7 +608,12 @@ export class ProjectService {
         .sort((a, b) => compareStrings(a.name, b.name)),
       usedBy,
       duplicates: duplicates.filter((other) => other !== id).map((other) => this.#link(other)),
-      code: this.#codeVariants(model.module, generateModel(model, emit)),
+      code: [
+        ...this.#codeVariants(model.module, generateModel(model, emit)),
+        ...(model.fixtureModule === undefined
+          ? []
+          : this.#codeVariants(model.fixtureModule, undefined, 'Mocks · ')),
+      ],
       source: this.#source(model.definition.source.file, model.definition.source.pointer),
     };
   }
