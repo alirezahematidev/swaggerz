@@ -1,5 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { access, copyFile, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  copyFile,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -134,6 +143,7 @@ describe('init', () => {
       files: {
         'package.json': JSON.stringify({
           dependencies: { '@tanstack/vue-query': '^5.0.0', valibot: '^1.0.0' },
+          devDependencies: { msw: '^2.11.0' },
         }),
       },
     });
@@ -144,15 +154,18 @@ describe('init', () => {
         await readFile(path.join(project, 'swaggerz.config.json'), 'utf8'),
       ) as Record<string, unknown>;
     };
-    // Hooks follow the dependencies; validation (it checks responses) is only enabled on request.
-    expect((await config()).features).toEqual({ query: { framework: 'vue' } });
+    // Hooks and mocks follow the dependencies; validation (it checks responses) is only enabled on
+    // request.
+    expect((await config()).features).toEqual({ query: { framework: 'vue' }, mocks: 'msw' });
     expect((await config('--swr', '--validation', 'arktype')).features).toEqual({
       swr: true,
       validation: 'arktype',
+      mocks: 'msw',
     });
     expect((await config('--react-query', '--no-detect')).features).toEqual({
       query: { framework: 'react' },
     });
+    expect((await config('--mocks', '--no-detect')).features).toEqual({ mocks: 'msw' });
     expect((await config('--no-detect')).features).toBeUndefined();
     expect((await run(['init', '--force', '--query', 'svelte', '--swr'], project)).code).toBe(2);
     expect((await run(['init', '--force', '--validation', 'yup'], project)).code).toBe(2);
@@ -375,6 +388,29 @@ describe('commands on a project', () => {
     expect(checks.map((c) => c.name)).toEqual(
       expect.arrayContaining(['@tanstack/vue-query', 'vue', 'valibot']),
     );
+
+    // MSW is supported from 2.11 (custom request predicates) through 3.x.
+    const mocks = await createProject('cli-doctor-mocks', {
+      config: { features: { mocks: 'msw' } },
+    });
+    const mswCheck = async (version: string): Promise<{ status: string; detail: string }> => {
+      await mkdir(path.join(mocks, 'node_modules/msw'), { recursive: true });
+      await writeFile(
+        path.join(mocks, 'node_modules/msw/package.json'),
+        JSON.stringify({ name: 'msw', version }),
+      );
+      const { checks: found } = JSON.parse((await run(['doctor', '--json'], mocks)).stdout) as {
+        checks: { name: string; status: string; detail: string }[];
+      };
+      return found.find((c) => c.name === 'msw') ?? { status: 'missing', detail: '' };
+    };
+    expect(await mswCheck('2.10.0')).toMatchObject({
+      status: 'fail',
+      detail: expect.stringContaining('>=2.11.0 <4') as string,
+    });
+    expect(await mswCheck('2.11.0')).toMatchObject({ status: 'ok' });
+    expect(await mswCheck('3.0.3')).toMatchObject({ status: 'ok' });
+    expect(await mswCheck('4.0.0')).toMatchObject({ status: 'fail' });
   });
 });
 

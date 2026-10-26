@@ -41,12 +41,13 @@ export function responseBodyType(
   media: MediaTypeIR,
   parseAs: ParseAsHint,
   ctx: TypeContext,
+  indent = '',
 ): string {
   switch (responseKind(media, parseAs)) {
     case 'json':
-      return printType(media.schema, ctx);
+      return printType(media.schema, ctx, indent);
     case 'text':
-      return isStringSchema(media.schema) ? printType(media.schema, ctx) : 'string';
+      return isStringSchema(media.schema) ? printType(media.schema, ctx, indent) : 'string';
     case 'binary':
       return binaryType({ ...ctx, direction: 'output' }).text;
   }

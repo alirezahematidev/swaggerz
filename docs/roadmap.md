@@ -39,6 +39,7 @@ Implemented after the first version, with tests and documentation:
 | OpenAPI Overlays                              | [overlays](overlays.md), [decision 19](decisions.md#19-overlays-patch-the-root-document-before-anything-reads-it-with-the-11-rules)                                                       |
 | Valibot and ArkType validation                | [generated code](generated-code.md#validation), [decision 17](decisions.md#17-each-validation-library-gets-its-own-printer-behind-one-interface)                                          |
 | `swaggerz lint`                               | [linting](lint.md), [decision 21](decisions.md#21-the-linter-reports-what-changes-the-generated-client-nothing-else)                                                                      |
+| Mock Service Worker handlers and fixtures     | [mocks](mocks.md), [decision 22](decisions.md#22-mocks-are-msw-handlers-over-seeded-fixtures-with-a-dependency-free-fake-data-module)                                                     |
 | Docs website                                  | [website/](../website)                                                                                                                                                                    |
 | `sz` alias of the CLI                         | [README](../README.md#cli)                                                                                                                                                                |
 

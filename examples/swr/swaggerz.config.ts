@@ -13,5 +13,7 @@ export default defineConfig({
     },
     // Check responses at runtime against the specification with ArkType.
     validation: 'arktype',
+    // Mock Service Worker handlers and fixtures: src/mocks.ts serves the API from them.
+    mocks: 'msw',
   },
 });

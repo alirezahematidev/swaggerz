@@ -1,0 +1,462 @@
+openapi: 3.1.0
+info:
+  title: Mocks
+  version: 1.0.0
+  description: Mock handlers and fixtures — examples, constraints, route matching, statuses and media types.
+servers:
+  - url: https://api.example.com/v1
+tags:
+  - name: Pets
+  - name: Files
+paths:
+  /pets:
+    get:
+      operationId: listPets
+      tags: [Pets]
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+      responses:
+        '200':
+          description: A page of pets.
+          headers:
+            X-Total-Count:
+              required: true
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+    post:
+      operationId: createPet
+      tags: [Pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPet'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '422':
+          description: Invalid pet.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /pets/mine:
+    get:
+      operationId: listMyPets
+      tags: [Pets]
+      responses:
+        '200':
+          description: The caller's pets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pet'
+              examples:
+                two:
+                  value:
+                    - id: 1
+                      name: Rex
+                      kind: dog
+                      tags: []
+                    - id: 2
+                      name: Tom
+                      kind: cat
+                      tags: [indoor]
+  /pets/{petId}:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: getPet
+      tags: [Pets]
+      responses:
+        '200':
+          description: The pet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '404':
+          description: No such pet.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        4XX:
+          description: Another client error.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    head:
+      operationId: petExists
+      tags: [Pets]
+      responses:
+        '200':
+          description: The pet exists.
+          headers:
+            X-Pet-Name:
+              required: true
+              schema:
+                type: string
+                example: "two\nlines"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+        '404':
+          description: No such pet.
+    patch:
+      operationId: updatePet
+      tags: [Pets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewPet'
+      responses:
+        '200':
+          description: The updated pet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+    delete:
+      operationId: deletePet
+      tags: [Pets]
+      responses:
+        '204':
+          description: Deleted.
+        default:
+          description: An error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /pets/{petId}/photo:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: getPetPhoto
+      tags: [Pets]
+      responses:
+        '200':
+          description: The pet's photo.
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+  /pets/{petId}/note:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: getPetNote
+      tags: [Pets]
+      responses:
+        '200':
+          description: A note about the pet.
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: A very good pet.
+  /pets/{petId}/visits:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: listVisits
+      tags: [Pets]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pet's visits, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPage'
+  /visits/{visitId}:
+    get:
+      operationId: getVisit
+      tags: [Pets]
+      parameters:
+        - name: visitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A visit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '404':
+          description: No such visit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /pets/{petId}/card:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: getPetCard
+      tags: [Pets]
+      responses:
+        '200':
+          description: The pet's card, in XML.
+          content:
+            application/xml:
+              schema:
+                $ref: '#/components/schemas/PetCard'
+  /files/{name}:download:
+    get:
+      operationId: downloadFile
+      tags: [Files]
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The file's text.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /shelves/{shelf}/books/{id}:
+    get:
+      operationId: getBook
+      tags: [Files]
+      parameters:
+        - name: shelf
+          in: path
+          required: true
+          style: label
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          style: matrix
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The book.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [shelf, id]
+                properties:
+                  shelf:
+                    type: string
+                  id:
+                    type: string
+  /uploads:
+    post:
+      operationId: upload
+      tags: [Files]
+      servers:
+        - url: https://uploads.example.com
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                label:
+                  type: string
+      responses:
+        '201':
+          description: Uploaded.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [size]
+                properties:
+                  size:
+                    type: integer
+                    minimum: 0
+components:
+  parameters:
+    PetId:
+      name: petId
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+  schemas:
+    Pet:
+      type: object
+      required: [id, name, kind, tags]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 10
+        name:
+          type: string
+          minLength: 1
+          maxLength: 20
+          example: Rex
+        kind:
+          $ref: '#/components/schemas/Kind'
+        tags:
+          type: array
+          items:
+            type: string
+        born:
+          type: string
+          format: date
+        chip:
+          type: string
+          pattern: '^[A-Z]{3}-\d{4}$'
+        contact:
+          type: string
+          format: email
+        weight:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 80
+          multipleOf: 0.5
+        siblings:
+          type: array
+          minItems: 2
+          items:
+            $ref: '#/components/schemas/Pet'
+    Kind:
+      type: string
+      enum: [dog, cat, bird]
+    PetCard:
+      type: object
+      xml:
+        name: card
+        namespace: https://example.com/pets
+        prefix: p
+      required: [id, name, tags]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          xml:
+            attribute: true
+        name:
+          type: string
+          example: Rex
+        tags:
+          type: array
+          xml:
+            wrapped: true
+          items:
+            type: string
+            xml:
+              name: tag
+    VisitPage:
+      type: object
+      required: [items, nextCursor, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Visit'
+        nextCursor:
+          type: [string, 'null']
+        total:
+          type: integer
+          minimum: 0
+    Visit:
+      type: object
+      required: [id, petId, status, vet, at, notes]
+      properties:
+        id:
+          type: string
+          example: vis_3k9f2a7d1b
+        petId:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [scheduled, completed, cancelled]
+        vet:
+          $ref: '#/components/schemas/Person'
+        at:
+          type: string
+          format: date-time
+          example: '2026-10-20T09:30:00.000Z'
+        notes:
+          type: [string, 'null']
+          example: Healthy and happy.
+    Person:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          example: Ada Lovelace
+        email:
+          type: string
+          format: email
+          example: ada@vets.example.com
+        phone:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
+    NewPet:
+      type: object
+      required: [name, kind]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        kind:
+          $ref: '#/components/schemas/Kind'
+        born:
+          type: string
+          format: date
+    Problem:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599

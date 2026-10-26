@@ -41,7 +41,12 @@ export const PEER_REQUIREMENTS = {
   zod: '4.0.15',
   valibot: '1.0.0',
   arktype: '2.0.0',
+  // Custom request predicates, which the mock handlers match with, are an MSW 2.11 addition.
+  msw: '2.11.0',
 } as const;
+
+/** Packages supported across several major versions: the newest supported major. */
+const NEWEST_MAJOR: Partial<Record<keyof typeof PEER_REQUIREMENTS, number>> = { msw: 3 };
 
 const MINIMUM_NODE = '22.18.0';
 
@@ -65,7 +70,13 @@ async function dependencyCheck(
   minimum: string = PEER_REQUIREMENTS[name],
 ): Promise<Check> {
   const version = await installedVersion(name, root);
-  const range = MINIMUM_ONLY.has(name) ? `>=${minimum}` : `^${minimum}`;
+  const newest = NEWEST_MAJOR[name];
+  const range =
+    newest !== undefined
+      ? `>=${minimum} <${newest + 1}`
+      : MINIMUM_ONLY.has(name)
+        ? `>=${minimum}`
+        : `^${minimum}`;
   if (version === undefined) {
     return {
       name,
@@ -73,9 +84,12 @@ async function dependencyCheck(
       detail: `not installed (${reason}; requires ${range})`,
     };
   }
-  const ok = MINIMUM_ONLY.has(name)
-    ? compareVersions(version, minimum) >= 0
-    : satisfiesCaret(version, minimum);
+  const ok =
+    newest !== undefined
+      ? compareVersions(version, minimum) >= 0 && Number(version.split('.')[0]) <= newest
+      : MINIMUM_ONLY.has(name)
+        ? compareVersions(version, minimum) >= 0
+        : satisfiesCaret(version, minimum);
   return {
     name,
     status: ok ? 'ok' : 'fail',
@@ -193,6 +207,11 @@ async function runChecks(ctx: CommandContext): Promise<Check[]> {
   if (validation !== false)
     checks.push(
       await dependencyCheck(validation.library, root, true, 'required by the generated schemas'),
+    );
+  const mocks = config.features.mocks;
+  if (mocks !== false)
+    checks.push(
+      await dependencyCheck(mocks.library, root, true, 'required by the generated mock handlers'),
     );
   if (config.output.language === 'typescript') {
     // ArkType's types need TypeScript 5.4 (verified by `pnpm compat`).

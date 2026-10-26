@@ -31,12 +31,16 @@ const VARIANTS: Record<string, UserConfig> = {
   full: { spec: petstore, client: { responseStyle: 'full' } },
   swr: { spec: petstore, features: { swr: true } },
   vue: { spec: petstore, features: { query: { framework: 'vue' } } },
+  mocks: { spec: petstore, features: { mocks: 'msw' } },
   dates: {
     spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'dates.yaml') },
     types: { dates: 'Date' },
   },
   bodies: { spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'bodies.yaml') } },
-  webhooks: { spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'webhook.yaml') } },
+  webhooks: {
+    spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'webhook.yaml') },
+    features: { mocks: 'msw' },
+  },
   servers: { spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'servers.yaml') } },
   'read-write': { spec: { version: '3.1', input: path.join(WEBSITE, 'twins', 'read-write.yaml') } },
 };

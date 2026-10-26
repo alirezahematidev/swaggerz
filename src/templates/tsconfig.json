@@ -1,5 +1,5 @@
 {
-  "//": "Runtime templates are emitted into user projects, so they are checked with the strictest common consumer settings against a browser-only (ES2020 + DOM) environment.",
+  "//": "Runtime templates (and the mocks support module) are emitted into user projects, so they are checked with the strictest common consumer settings against a browser-only (ES2020 + DOM) environment. Only mocks/ may import a package (msw).",
   "compilerOptions": {
     "target": "ES2020",
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
@@ -22,5 +22,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["runtime"]
+  "include": ["runtime", "mocks"]
 }

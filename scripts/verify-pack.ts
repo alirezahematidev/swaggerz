@@ -57,8 +57,11 @@ try {
   );
   check(files.includes('dist/cli/bin.js'), 'tarball contains the CLI');
   check(
-    files.some((f) => f.startsWith('assets/runtime/')) && files.includes('assets/dashboard/app.js'),
-    'tarball contains runtime templates and the dashboard bundle',
+    files.some((f) => f.startsWith('assets/runtime/')) &&
+      files.includes('assets/mocks/support.js') &&
+      files.includes('assets/mocks/fake.js') &&
+      files.includes('assets/dashboard/app.js'),
+    'tarball contains runtime and mocks templates and the dashboard bundle',
   );
   check(
     !files.some((f) => /^(src|tests|fixtures|scripts|examples)\//.test(f)),

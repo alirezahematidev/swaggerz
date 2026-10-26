@@ -55,6 +55,7 @@ const RESERVED_MODULE_ROOTS = [
   'webhooks',
   'callbacks',
   'dates',
+  'mocks',
 ];
 
 /** The enabled data-fetching integration and its options, if any. */
@@ -354,6 +355,57 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     }
   }
 
+  // Mocks: claimed after every name of the client itself, so enabling them never renames it.
+  // Fixtures mirror `models/`, handlers the operation directories; `models` is a reserved root,
+  // so the two never share a directory.
+  let mockHandlers: string | undefined;
+  let mockFetch: string | undefined;
+  let mockStart: { name: string; options: string } | undefined;
+  if (config.features.mocks !== false) {
+    mockHandlers = exports.claim('mockHandlers');
+    mockFetch = exports.claim('mockFetch');
+    mockStart = { name: exports.claim('startMocks'), options: exports.claim('StartMocksOptions') };
+    for (const module of [
+      'mocks/fake',
+      'mocks/support',
+      'mocks/handlers',
+      'mocks/start',
+      'mocks/index',
+    ])
+      modules.reserve(module);
+    models.forEach((model, index) => {
+      models[index] = {
+        ...model,
+        fixtureName: exports.claim(`make${derivedBase(model.name, 'PascalCase')}`),
+        fixtureModule: modules.claim(`mocks/models/${toFileName(model.name, fileStyle)}`, '-'),
+      };
+    });
+    webhooks.forEach((symbol, index) => {
+      // `PetAdoptedWebhookRequest` → `makePetAdoptedWebhookRequest`, `sendPetAdoptedWebhook`.
+      const request = symbol.typeNames.request;
+      webhooks[index] = {
+        ...symbol,
+        mock: {
+          module: modules.claim(`mocks/${symbol.module}`, '-'),
+          make: exports.claim(`make${request}`),
+          send: exports.claim(`send${request.replace(/Request(\d*)$/, '$1')}`),
+        },
+      };
+    });
+    operations.forEach((symbol, index) => {
+      const pascal = derivedBase(symbol.name, 'PascalCase');
+      operations[index] = {
+        ...symbol,
+        mock: {
+          module: modules.claim(`mocks/${symbol.module}`, '-'),
+          name: exports.claim(`mock${pascal}`),
+          options: exports.claim(`${pascal}MockOptions`),
+          request: exports.claim(`${pascal}MockRequest`),
+        },
+      };
+    });
+  }
+
   // JavaScript output: a JSDoc typedef cannot refer to itself through an array (TypeScript defers
   // only arrays that are a whole typedef), so the top-level arrays of recursive models become
   // helper typedefs. Their names are claimed last, after every other export.
@@ -378,6 +430,9 @@ export function buildProject(options: BuildProjectOptions): ProjectModel {
     models,
     operationByKey: new Map(operations.map((op) => [op.key, op])),
     modelById: new Map(models.map((model) => [model.id, model])),
+    ...(mockHandlers === undefined ? {} : { mockHandlers }),
+    ...(mockFetch === undefined ? {} : { mockFetch }),
+    ...(mockStart === undefined ? {} : { mockStart }),
   };
 }
 

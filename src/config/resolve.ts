@@ -49,6 +49,7 @@ export function resolveConfig(
         : { ...reactQuery, framework: 'react' });
   const swr = config.features?.swr ?? false;
   const validation = config.features?.validation ?? false;
+  const mocks = config.features?.mocks ?? false;
   const dataFetching = (settings: DataFetchingConfig | true): ResolvedDataFetching => ({
     queryMethods: (settings === true ? undefined : settings.queryMethods) ?? ['get', 'query'],
     infinite: (settings === true ? undefined : settings.infinite) ?? {},
@@ -119,6 +120,7 @@ export function resolveConfig(
                 response: validation.response ?? true,
                 request: validation.request ?? false,
               },
+      mocks: mocks === false ? false : { library: mocks },
     },
     naming: {
       operations: config.naming?.operations ?? 'camelCase',

@@ -42,6 +42,7 @@ describe('config validation', () => {
           reactQuery: { queryMethods: ['get', 'head'] },
           jsdoc: false,
           validation: 'zod',
+          mocks: 'msw',
         },
         naming: { operations: 'snake_case', parameters: 'camelCase' },
         types: { enums: 'const' },
@@ -77,6 +78,15 @@ describe('config validation', () => {
       { path: 'plugins[0].name', message: 'This option is required.' },
     ]);
     expect(validateUserConfig({})).toEqual([{ path: 'spec', message: 'This option is required.' }]);
+    expect(
+      validateUserConfig({ spec: { version: '3.1', input: 'x' }, features: { mocks: 'mws' } }),
+    ).toEqual([
+      {
+        path: 'features.mocks',
+        message: 'Expected one of false, "msw" but received "mws".',
+        hint: 'Did you mean "msw"?',
+      },
+    ]);
     expect(
       validateUserConfig({ spec: { version: '3.1', input: 'x', fetch: { poll: 100 } } }),
     ).toEqual([

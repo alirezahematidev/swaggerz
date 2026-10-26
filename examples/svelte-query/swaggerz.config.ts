@@ -12,5 +12,7 @@ export default defineConfig({
       // Refresh every task query after a change.
       invalidates: { createTask: ['Tasks'], updateTask: ['Tasks'], deleteTask: ['Tasks'] },
     },
+    // Mock Service Worker handlers and fixtures: src/mocks.ts serves the API from them.
+    mocks: 'msw',
   },
 });

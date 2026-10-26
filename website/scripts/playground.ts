@@ -29,10 +29,12 @@ const NODE_MODULES: Record<string, string> = {
 };
 
 async function embeddedFiles(): Promise<string> {
-  const runtime = path.join(ROOT, 'assets', 'runtime');
   const files: Record<string, string> = {};
-  for (const name of (await readdir(runtime)).sort()) {
-    files[`/assets/runtime/${name}`] = await readFile(path.join(runtime, name), 'utf8');
+  for (const set of ['runtime', 'mocks']) {
+    const directory = path.join(ROOT, 'assets', set);
+    for (const name of (await readdir(directory)).sort()) {
+      files[`/assets/${set}/${name}`] = await readFile(path.join(directory, name), 'utf8');
+    }
   }
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8')) as Record<
     string,
@@ -110,7 +112,7 @@ const VARIANTS: readonly Omit<UserConfig, 'spec'>[] = [
     features: { query: { framework: 'vue' }, validation: 'valibot' },
   },
   { features: { swr: true, validation: 'arktype' }, types: { dates: 'Date', readWrite: 'merged' } },
-  { features: { query: true, validation: 'zod' }, types: { dates: 'Date' } },
+  { features: { query: true, validation: 'zod', mocks: 'msw' }, types: { dates: 'Date' } },
 ];
 
 interface Compiler {

@@ -10,7 +10,7 @@ Or, inside this directory once swaggerz is built:
 
 ```sh
 pnpm generate     # src/generated/api
-pnpm dev          # http://localhost:5173, served by an in-memory mock API (mock-api.ts)
+pnpm dev          # http://localhost:5173, the API served by the generated mocks (src/mocks.ts)
 pnpm check        # type-checks the app (svelte-check) and builds it
 ```
 
@@ -18,4 +18,4 @@ What to look at:
 
 - [swaggerz.config.ts](swaggerz.config.ts) enables Svelte Query functions (`features.query.framework: 'svelte'`), an infinite list for `listTasks` paginated by its `cursor` parameter and invalidation of every `Tasks` query after mutations.
 - [src/Tasks.svelte](src/Tasks.svelte) passes accessors to `createListTasksInfiniteQuery`: reading the `$state` filter inside them makes the query follow it. [src/TaskDetails.svelte](src/TaskDetails.svelte) does the same with a prop and uses `select`. Errors are typed: `ApiError` with the operation's error body (`Problem`) or `RequestError`.
-- [mock-api.ts](mock-api.ts) implements the API with the generated model types, so it stops compiling when the specification changes.
+- [src/mocks.ts](src/mocks.ts) serves the API in the browser with the generated Mock Service Worker handlers: fixtures (`makeTask`) seed an in-memory list that the handlers read and change. [src/main.ts](src/main.ts) passes those handlers to the generated `startMocks()` during development only (one line: `if (import.meta.env.DEV) await startMocks({ handlers })`); [vite.config.ts](vite.config.ts) serves the worker script with MSW's Vite plugin. It is typed with the generated models, so it stops compiling when the specification changes. See [mocks](../../docs/mocks.md).

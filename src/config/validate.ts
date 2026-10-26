@@ -286,6 +286,11 @@ const configCheck: Check = t.object(
           'Generate schemas with Zod 4, Valibot 1 or ArkType 2 and validate at runtime.',
           { default: false },
         ),
+        mocks: t.doc(
+          t.literal(false, 'msw'),
+          "Generate a Mock Service Worker handler per operation and a fixture factory per model: false or 'msw' (MSW 2.11 or 3).",
+          { default: false },
+        ),
       }),
       'Optional generators.',
     ),

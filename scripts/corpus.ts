@@ -164,7 +164,7 @@ async function compileEntry(entry: Entry): Promise<Result> {
         input: file,
       },
       output: { directory },
-      features: { reactQuery: true, validation: { library: 'zod', request: true } },
+      features: { reactQuery: true, validation: { library: 'zod', request: true }, mocks: 'msw' },
       types: { dates: 'Date' },
     },
     { root: path.dirname(file) },

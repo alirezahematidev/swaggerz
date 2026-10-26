@@ -1,7 +1,9 @@
 /**
  * Runs generated clients in other JavaScript runtimes: Node.js, Deno, Bun, Chromium, Firefox,
  * WebKit (Playwright) and workerd, Cloudflare's edge runtime (through miniflare). Every runtime
- * executes `tests/runtimes/suite.js` against the server in `tests/runtimes/server.mjs`.
+ * executes `tests/runtimes/suite.js` against the server in `tests/runtimes/server.mjs`, and
+ * `tests/runtimes/mocks-suite.js` against the generated mock handlers (MSW, through
+ * `mockFetch()`).
  *
  * Usage: node scripts/runtimes.ts [runtime…] [--require] [--install-deps]
  *   runtimes: node, deno, bun, chromium, firefox, webkit, workerd (default: all)
@@ -117,6 +119,7 @@ async function generate(): Promise<void> {
       {
         spec: { version: '3.0', input: path.join(ROOT, 'fixtures', 'specs', 'petstore-3.0.yaml') },
         output: { directory: path.join(OUTPUT, name), language, importExtension },
+        features: { mocks: 'msw' },
       },
       { root: ROOT },
     );
@@ -126,6 +129,16 @@ async function generate(): Promise<void> {
   // Node.js treats the generated files as ES modules (and strips the types of the .ts client).
   await writeFile(path.join(OUTPUT, 'package.json'), '{ "type": "module" }\n');
   await cp(path.join(SUITE, 'suite.js'), path.join(OUTPUT, 'suite.js'));
+  await cp(path.join(SUITE, 'mocks-suite.js'), path.join(OUTPUT, 'mocks-suite.js'));
+  // Browsers load the mocks natively; an import map points `msw` at this bundle.
+  await esbuild.build({
+    stdin: { contents: "export * from 'msw';", resolveDir: ROOT, loader: 'js' },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    outfile: path.join(OUTPUT, 'msw.js'),
+    logLevel: 'silent',
+  });
 }
 
 /** Runs `entry.js` with a server-side runtime and parses the printed results. */
@@ -235,11 +248,14 @@ async function workerd(base: string): Promise<{ checks: Check[]; version: string
     entry,
     [
       "import * as api from './js/index.js';",
+      "import * as mocks from './js/mocks/index.js';",
+      "import { runMocksSuite } from './mocks-suite.js';",
       "import { runSuite } from './suite.js';",
       'export default {',
       '  async fetch(request) {',
       '    const url = new URL(request.url);',
       "    const results = await runSuite(api, url.searchParams.get('base'), url.searchParams.get('run'));",
+      '    results.push(...(await runMocksSuite(api, mocks)));',
       '    return Response.json(results);',
       '  },',
       '};',
@@ -251,6 +267,9 @@ async function workerd(base: string): Promise<{ checks: Check[]; version: string
     bundle: true,
     format: 'esm',
     platform: 'neutral',
+    // Packages (MSW) as workers import them.
+    mainFields: ['module', 'main'],
+    conditions: ['worker', 'browser'],
     write: false,
     logLevel: 'silent',
   });
@@ -264,6 +283,9 @@ async function workerd(base: string): Promise<{ checks: Check[]; version: string
     modules: true,
     script: bundle.outputFiles[0]?.text ?? '',
     compatibilityDate: '2026-01-01',
+    // MSW (the mock handlers) takes a runtime without `process` for a browser and wants
+    // `localStorage` there; workers get `process` with Node.js compatibility.
+    compatibilityFlags: ['nodejs_compat'],
   });
   try {
     const response = await mf.dispatchFetch(
@@ -330,7 +352,8 @@ try {
               client,
               await spawnSuite(
                 command,
-                [...prefix, 'run', '--allow-net', '--allow-read'],
+                // MSW (the mock handlers) reads environment variables.
+                [...prefix, 'run', '--allow-net', '--allow-read', '--allow-env'],
                 client,
                 server.url,
               ),

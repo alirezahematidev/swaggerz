@@ -4,6 +4,7 @@
  * - `assets/runtime/`: the runtime emitted into generated clients. Each template in
  *   `src/templates/runtime/*.ts` is published as `.ts` (TypeScript output), `.js` and `.d.ts`
  *   (JavaScript output).
+ * - `assets/mocks/`: the same for `src/templates/mocks/*.ts`, emitted with `features.mocks`.
  * - `assets/dashboard/`: the bundled dashboard web app.
  *
  * Usage: `node scripts/build-assets.ts [runtime|dashboard]`
@@ -14,21 +15,31 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const TEMPLATE_DIR = path.join(ROOT, 'src', 'templates', 'runtime');
-const RUNTIME_OUT = path.join(ROOT, 'assets', 'runtime');
+/** Template directories below `src/templates`, each published to `assets/<name>`. */
+const TEMPLATE_SETS = ['runtime', 'mocks'] as const;
 const DASHBOARD_ENTRY = path.join(ROOT, 'src', 'dashboard', 'client', 'main.tsx');
 const DASHBOARD_OUT = path.join(ROOT, 'assets', 'dashboard');
 
+/** Builds every template set; returns the templates as `<set>/<file>`. */
 export async function buildRuntimeTemplates(): Promise<string[]> {
-  const files = (await readdir(TEMPLATE_DIR))
+  const built: string[] = [];
+  for (const set of TEMPLATE_SETS)
+    for (const file of await buildTemplateSet(set)) built.push(`${set}/${file}`);
+  return built;
+}
+
+async function buildTemplateSet(set: (typeof TEMPLATE_SETS)[number]): Promise<string[]> {
+  const templates = path.join(ROOT, 'src', 'templates', set);
+  const out = path.join(ROOT, 'assets', set);
+  const files = (await readdir(templates))
     .filter((file) => file.endsWith('.ts') && !file.endsWith('.d.ts'))
     .sort();
-  await rm(RUNTIME_OUT, { recursive: true, force: true });
-  await mkdir(RUNTIME_OUT, { recursive: true });
+  await rm(out, { recursive: true, force: true });
+  await mkdir(out, { recursive: true });
 
   const declarations = new Map<string, string>();
   const program = ts.createProgram(
-    files.map((file) => path.join(TEMPLATE_DIR, file)),
+    files.map((file) => path.join(templates, file)),
     {
       target: ts.ScriptTarget.ES2020,
       module: ts.ModuleKind.ESNext,
@@ -57,21 +68,24 @@ export async function buildRuntimeTemplates(): Promise<string[]> {
   });
 
   for (const file of files) {
-    const source = await readFile(path.join(TEMPLATE_DIR, file), 'utf8');
+    const source = await readFile(path.join(templates, file), 'utf8');
     const base = file.slice(0, -'.ts'.length);
-    const js = ts.transpileModule(source, {
-      compilerOptions: {
-        target: ts.ScriptTarget.ES2020,
-        module: ts.ModuleKind.ESNext,
-        verbatimModuleSyntax: true,
-        removeComments: false,
-      },
-    }).outputText;
+    const js = ts
+      .transpileModule(source, {
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2020,
+          module: ts.ModuleKind.ESNext,
+          verbatimModuleSyntax: true,
+          removeComments: false,
+        },
+      })
+      // Directives of TypeScript-only lint rules refer to code the transpilation removed.
+      .outputText.replace(/^[ \t]*\/\/ oxlint-disable-next-line typescript\/.*\n/gm, '');
     const dts = declarations.get(`${base}.d.ts`);
     if (dts === undefined) throw new Error(`No declarations emitted for ${file}`);
-    await writeFile(path.join(RUNTIME_OUT, `${base}.ts`), source);
-    await writeFile(path.join(RUNTIME_OUT, `${base}.js`), js);
-    await writeFile(path.join(RUNTIME_OUT, `${base}.d.ts`), dts);
+    await writeFile(path.join(out, `${base}.ts`), source);
+    await writeFile(path.join(out, `${base}.js`), js);
+    await writeFile(path.join(out, `${base}.d.ts`), dts);
   }
   return files;
 }

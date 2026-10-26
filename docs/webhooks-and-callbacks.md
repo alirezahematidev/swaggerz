@@ -45,7 +45,11 @@ The cast is the trust boundary: the types say what the API promises, not what ar
 
 The payload comes from the API, so it is typed like a response: `readOnly` properties are kept and `writeOnly` ones left out. Your handler's response goes back to the API, so it is typed like a request body (the `…Input` variant, see [read and write models](read-write-models.md)). `output.webhooks: false` turns the types off.
 
+## Testing what receives them
+
+With `features.mocks` ([mocks](mocks.md#webhooks-and-callbacks)), every webhook and callback also gets a request fixture and a sender: `makeAccountClosedWebhookRequest()` makes a request the API could send (a realistic one, the specification's examples by default, another for each seed), to call your handler with, and `sendAccountClosedWebhook(url)` sends it to your route as the API would.
+
 ## Limitations
 
-- Types only: no routing, signature verification or server adapters are generated.
+- No routing, signature verification or server adapters are generated: the types fit any framework.
 - The generated types describe requests; nothing checks at runtime that a request really came from the API.

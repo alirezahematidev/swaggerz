@@ -101,7 +101,23 @@ export async function compile(options: CompileOptions): Promise<CompileResult> {
     const project = buildProject({ ir, config, diagnostics, hooks: runner.namingHooks() });
     lap('analyze');
 
-    const emit: EmitContext = { project, config, hooks: runner.codegenHooks() };
+    const documents = store;
+    const emit: EmitContext = {
+      project,
+      config,
+      hooks: runner.codegenHooks(),
+      report: ({ severity, source, ...diagnostic }) => {
+        const file =
+          source === undefined
+            ? config.spec.input
+            : (documents.byDisplay(source.file)?.location ?? source.file);
+        diagnostics.add({
+          ...diagnostic,
+          severity,
+          location: { file, ...(source === undefined ? {} : { pointer: source.pointer }) },
+        });
+      },
+    };
     const base: Omit<GenerateContext, keyof PluginContext> = { project };
     await runner.beforeGenerate(base);
     let files = generateBuiltinFiles(emit);

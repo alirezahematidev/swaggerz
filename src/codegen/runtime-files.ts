@@ -16,16 +16,11 @@ const COMMON_RUNTIME = [
 ] as const;
 
 /** `src/codegen` and `dist/codegen` both sit two levels below the package root. */
-const ASSETS = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'assets',
-  'runtime',
-);
+const ASSETS = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets');
 
 const cache = new Map<string, string>();
 
+/** A built template, e.g. `runtime/client.ts` or `mocks/support.js`. */
 function readTemplate(file: string): string {
   let content = cache.get(file);
   if (content === undefined) {
@@ -50,7 +45,10 @@ export function runtimeModules(config: ResolvedConfig): string[] {
   ];
 }
 
-/** Emits the runtime files for the configured language and adapter. */
+/**
+ * Emits the runtime files for the configured language and adapter, and the mocks support and
+ * fake data modules with `features.mocks`.
+ */
 export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
   const extension = importExtension(config);
   const rewrite = (source: string): string =>
@@ -58,8 +56,17 @@ export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
       /(from\s+['"])\.\/([\w-]+)\.js(['"])/g,
       (_match, start: string, name: string, end: string) => `${start}./${name}${extension}${end}`,
     );
+  const templates: { name: string; origin: string }[] = runtimeModules(config).map((name) => ({
+    name: `runtime/${name}`,
+    origin: 'core:runtime',
+  }));
+  if (config.features.mocks !== false)
+    templates.push(
+      { name: 'mocks/fake', origin: 'core:mocks' },
+      { name: 'mocks/support', origin: 'core:mocks' },
+    );
   const files: GeneratedFile[] = [];
-  for (const name of runtimeModules(config)) {
+  for (const { name, origin } of templates) {
     const variants: [string, string][] =
       config.output.language === 'typescript'
         ? [['ts', `${name}.ts`]]
@@ -72,9 +79,9 @@ export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
       // `.d.ts` next to it, so `checkJs` projects that include the output skip checking it.
       const nocheck = extensionName === 'js' ? '// @ts-nocheck\n' : '';
       files.push({
-        path: `runtime/${name}.${extensionName}`,
+        path: `${name}.${extensionName}`,
         content: header(config) + nocheck + rewrite(readTemplate(file)),
-        origin: 'core:runtime',
+        origin,
       });
     }
   }

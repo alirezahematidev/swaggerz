@@ -4,6 +4,8 @@ import { collectRefs, operationSchemas, webhookOperations } from '../ir/utils.ts
 import { stableStringify } from '../utils/object.ts';
 import { compareStrings } from '../utils/strings.ts';
 
+const EMPTY: ReadonlySet<string> = new Set();
+
 /**
  * Dependency indexes between operations and named schemas. Built once per compilation and shared
  * by generators and the dashboard.
@@ -25,6 +27,8 @@ export class DependencyGraph {
   readonly #usingCache = new Map<string, string[]>();
   #used: ReadonlySet<string> | undefined;
   #recursive: ReadonlySet<string> | undefined;
+  /** Recursive schema id → its strongly connected component. */
+  readonly #cycles = new Map<string, ReadonlySet<string>>();
 
   private constructor(maps: {
     schemaDeps: Map<string, Set<string>>;
@@ -180,13 +184,27 @@ export class DependencyGraph {
             if (member === frame.node) break;
           }
           const selfLoop = this.structuralDeps.get(frame.node)?.has(frame.node) === true;
-          if (component.length > 1 || selfLoop)
-            for (const member of component) recursive.add(member);
+          if (component.length > 1 || selfLoop) {
+            const cycle: ReadonlySet<string> = new Set(component);
+            for (const member of component) {
+              recursive.add(member);
+              this.#cycles.set(member, cycle);
+            }
+          }
         }
       }
     }
     this.#recursive = recursive;
     return recursive;
+  }
+
+  /**
+   * The schemas a recursive schema reaches that reach it back (its strongly connected component,
+   * itself included); empty for schemas that are not recursive.
+   */
+  cycleOf(id: string): ReadonlySet<string> {
+    this.recursiveSchemas();
+    return this.#cycles.get(id) ?? EMPTY;
   }
 
   /**

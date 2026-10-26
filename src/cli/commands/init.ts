@@ -71,6 +71,8 @@ export interface InitAnswers {
   /** Data-fetching hooks: TanStack Query for a framework, or SWR. */
   readonly hooks?: { readonly query: QueryFramework } | { readonly swr: true };
   readonly validation?: ValidationChoice;
+  /** Mock Service Worker handlers and fixtures. */
+  readonly mocks?: 'msw';
 }
 
 export type ConfigFormat = 'ts' | 'js' | 'json' | 'yaml';
@@ -88,6 +90,7 @@ function features(answers: InitAnswers): Record<string, unknown> {
         ? { swr: true }
         : { query: { framework: hooks.query } }),
     ...(answers.validation === undefined ? {} : { validation: answers.validation }),
+    ...(answers.mocks === undefined ? {} : { mocks: answers.mocks }),
   };
 }
 
@@ -120,12 +123,15 @@ export function configTemplate(answers: InitAnswers, format: ConfigFormat = 'ts'
       answers.validation === undefined
         ? '  # validation: zod'
         : `  validation: ${answers.validation}`;
+    const mocksLine = answers.mocks === undefined ? '  # mocks: msw' : `  mocks: ${answers.mocks}`;
     const block = [
       'features:',
       '  # Data-fetching hooks: TanStack Query v5 (framework react, vue, svelte or solid), or swr: true.',
       hooksLine,
       '  # Validate responses at runtime with zod, valibot or arktype.',
       validationLine,
+      '  # Mock Service Worker handlers and fixtures, for UIs and tests without the backend.',
+      mocksLine,
     ];
     // Without any feature the block is a comment: an empty `features:` is null in YAML.
     const featuresBlock = (
@@ -162,6 +168,8 @@ ${featuresBlock}
     answers.validation === undefined
       ? "    // validation: 'zod',"
       : `    validation: ${quote(answers.validation)},`;
+  const mocksLine =
+    answers.mocks === undefined ? "    // mocks: 'msw'," : `    mocks: ${quote(answers.mocks)},`;
   return `import { defineConfig } from ${quote(PACKAGE_NAME)};
 
 export default defineConfig({
@@ -185,6 +193,8 @@ export default defineConfig({
 ${hooksLine}
     // Validate responses at runtime with 'zod', 'valibot' or 'arktype'.
 ${validationLine}
+    // Mock Service Worker handlers and fixtures, for UIs and tests without the backend.
+${mocksLine}
   },
 });
 `;
@@ -238,11 +248,14 @@ function choice<T extends string>(
   return value as T;
 }
 
-/** Hooks (from the options, or else detected from package.json) and validation. */
+/**
+ * Hooks and mocks (from the options, or else detected from package.json), and validation. A
+ * project that depends on `msw` gets mocks: they only add files, and change nothing at runtime.
+ */
 async function chosenFeatures(
   ctx: CommandContext,
   cwd: string,
-): Promise<Pick<InitAnswers, 'hooks' | 'validation'>> {
+): Promise<Pick<InitAnswers, 'hooks' | 'validation' | 'mocks'>> {
   let query = choice(ctx, 'query', ['react', 'vue', 'svelte', 'solid'] as const);
   if (flag(ctx, 'react-query')) {
     if (query !== undefined && query !== 'react')
@@ -253,17 +266,21 @@ async function chosenFeatures(
   if (swr && query !== undefined)
     throw new UsageError('Choose TanStack Query (--query) or SWR (--swr), not both.');
   const validation = choice(ctx, 'validation', ['zod', 'valibot', 'arktype'] as const);
+  const detect = !flag(ctx, 'no-detect');
+  const installed = detect ? await dependencies(cwd) : new Set<string>();
   const hooks =
     query !== undefined
       ? { query }
       : swr
         ? ({ swr: true } as const)
-        : flag(ctx, 'no-detect')
-          ? undefined
-          : detectHooks(await dependencies(cwd));
+        : detect
+          ? detectHooks(installed)
+          : undefined;
+  const mocks = flag(ctx, 'mocks') || installed.has('msw');
   return {
     ...(hooks === undefined ? {} : { hooks }),
     ...(validation === undefined ? {} : { validation }),
+    ...(mocks ? { mocks: 'msw' as const } : {}),
   };
 }
 
@@ -310,9 +327,13 @@ export const initCommand: Command = {
         value: 'zod|valibot|arktype',
         description: 'Validate responses at runtime with this library.',
       },
+      mocks: {
+        type: 'boolean',
+        description: 'Generate Mock Service Worker handlers and fixtures (default: detected).',
+      },
       'no-detect': {
         type: 'boolean',
-        description: "Do not pick the hooks from package.json's dependencies.",
+        description: "Do not pick the hooks and mocks from package.json's dependencies.",
       },
       format: {
         type: 'string',

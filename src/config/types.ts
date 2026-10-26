@@ -168,6 +168,9 @@ export interface ValidationOptions {
   request?: boolean;
 }
 
+/** The mocking libraries request handlers can be generated for. */
+export type MockLibrary = 'msw';
+
 export interface FeaturesConfig {
   /**
    * Generate TanStack Query v5 hooks and option factories for a framework. `true` generates
@@ -185,6 +188,11 @@ export interface FeaturesConfig {
    * `false`.
    */
   validation?: false | ValidationLibrary | ({ library: ValidationLibrary } & ValidationOptions);
+  /**
+   * Generate a mock request handler per operation and a fixture factory per model, for UIs and
+   * tests that run without the backend: `'msw'` (Mock Service Worker 2.11 or 3). Default `false`.
+   */
+  mocks?: false | MockLibrary;
 }
 
 /** Severity of a lint rule, or `'off'`. */

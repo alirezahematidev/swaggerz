@@ -1,5 +1,7 @@
 import type { ProjectModel } from '../analysis/types.ts';
 import type { ResolvedConfig } from '../config/resolved.ts';
+import type { Severity } from '../diagnostics/types.ts';
+import type { SourceRef } from '../ir/types.ts';
 import { TOOL_NAME } from '../meta.ts';
 import type { JsDocTarget } from '../plugins/types.ts';
 import { ImportManager, type Lang } from './imports.ts';
@@ -14,10 +16,21 @@ export interface CodegenHooks {
   resolveImport?: (request: { from: string; to: string; specifier: string }) => string | undefined;
 }
 
+/** A problem found while generating code, located in the specification by its source. */
+export interface CodegenDiagnostic {
+  readonly code: string;
+  readonly severity: Exclude<Severity, 'error'>;
+  readonly message: string;
+  readonly source?: SourceRef;
+  readonly hint?: string;
+}
+
 export interface EmitContext {
   readonly project: ProjectModel;
   readonly config: ResolvedConfig;
   readonly hooks: CodegenHooks;
+  /** Receives generator diagnostics; absent when code is rendered for display only. */
+  readonly report?: (diagnostic: CodegenDiagnostic) => void;
 }
 
 /** One logical module, rendered for one or more languages. */

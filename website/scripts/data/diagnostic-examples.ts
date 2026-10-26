@@ -343,6 +343,62 @@ paths:
     fix: 'Name a query operation or a tag; the hint suggests the closest one.',
   },
   {
+    code: 'mock/invalid-example',
+    title: 'An example its own schema rejects',
+    config: { spec: spec(), features: { mocks: 'msw' } },
+    files: [
+      openapi(`
+paths: {}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        age:
+          type: integer
+          minimum: 0
+          example: -1
+`),
+    ],
+    fix: 'Correct the example: documentation and fixtures both show it.',
+  },
+  {
+    code: 'mock/unsatisfiable',
+    title: 'A model that requires itself',
+    config: { spec: spec(), features: { mocks: 'msw' } },
+    files: [
+      openapi(`
+paths: {}
+components:
+  schemas:
+    Node:
+      type: object
+      required: [next]
+      properties:
+        next:
+          $ref: '#/components/schemas/Node'
+`),
+    ],
+    fix: 'Make the reference optional or nullable, so that a chain of values can end.',
+  },
+  {
+    code: 'mock/unsupported-pattern',
+    title: 'A pattern no string of the allowed length matches',
+    config: { spec: spec(), features: { mocks: 'msw' } },
+    files: [
+      openapi(`
+paths: {}
+components:
+  schemas:
+    Code:
+      type: string
+      maxLength: 4
+      pattern: '^[A-Z]{3}-[0-9]{4}$'
+`),
+    ],
+    fix: 'Add an `example` that matches the pattern; the fixture uses it.',
+  },
+  {
     code: 'overlay/no-match',
     title: 'An overlay action whose target matches nothing',
     config: { spec: { ...spec(), overlays: ['./fixes.overlay.yaml'] } },

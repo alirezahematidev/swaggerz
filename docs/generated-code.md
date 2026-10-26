@@ -2,27 +2,30 @@
 
 ## Layout
 
-| Path                                                                | Content                                                                                                                                                     |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `client.ts`                                                         | `client` (the default instance) and `RequestOptions`                                                                                                        |
-| `runtime/types.ts`                                                  | Transport contract, client and option types                                                                                                                 |
-| `runtime/client.ts`                                                 | `createClient()` — URL building, auth, middleware, retries, error mapping                                                                                   |
-| `runtime/middleware.ts`                                             | `retry()` and `refreshAuth()` middleware (tree-shaken when unused)                                                                                          |
-| `runtime/serialization.ts`                                          | Parameter and body serialization                                                                                                                            |
-| `runtime/errors.ts`                                                 | `ApiError`, `RequestError`, type guards                                                                                                                     |
-| `runtime/signal.ts`                                                 | Timeout and signal composition                                                                                                                              |
-| `runtime/fetch.ts` or `runtime/axios.ts`                            | The selected transport                                                                                                                                      |
-| `runtime/dates.ts`                                                  | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                                                                                               |
-| `models/<model>.ts`                                                 | One type per schema (plus `const` enum objects when enabled)                                                                                                |
-| `models/<model>-input.ts`                                           | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`)                                                                  |
-| `dates/<model>.ts`                                                  | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                                                                                        |
-| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`      | Payload, request, response and handler types (`output.webhooks`)                                                                                            |
-| `<tag>/<operation>.ts`                                              | One function per operation with its types and an error guard (`isGetPetByIdApiError`)                                                                       |
-| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts`     | Hooks, option factories, key factories ([data fetching](data-fetching.md)); `vue-query/`, `svelte-query/`, `solid-query/` or `swr/` for the other libraries |
-| `zod/<model>.ts`                                                    | Schemas ([validation](#validation)); `valibot/` or `arktype/` for the other libraries                                                                       |
-| `arktype/support.ts`                                                | ArkType only: the reference and intersection helpers the schemas use                                                                                        |
-| `index.ts`, `<hooks library>/index.ts`, `<schema library>/index.ts` | Barrels                                                                                                                                                     |
-| `.swaggerz-manifest.json`                                           | Generator ownership manifest                                                                                                                                |
+| Path                                                                                  | Content                                                                                                                                                     |
+| ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `client.ts`                                                                           | `client` (the default instance) and `RequestOptions`                                                                                                        |
+| `runtime/types.ts`                                                                    | Transport contract, client and option types                                                                                                                 |
+| `runtime/client.ts`                                                                   | `createClient()` — URL building, auth, middleware, retries, error mapping                                                                                   |
+| `runtime/middleware.ts`                                                               | `retry()` and `refreshAuth()` middleware (tree-shaken when unused)                                                                                          |
+| `runtime/serialization.ts`                                                            | Parameter and body serialization                                                                                                                            |
+| `runtime/errors.ts`                                                                   | `ApiError`, `RequestError`, type guards                                                                                                                     |
+| `runtime/signal.ts`                                                                   | Timeout and signal composition                                                                                                                              |
+| `runtime/fetch.ts` or `runtime/axios.ts`                                              | The selected transport                                                                                                                                      |
+| `runtime/dates.ts`                                                                    | `reviveDates`/`encodeDates` (only with `types.dates: 'Date'`)                                                                                               |
+| `models/<model>.ts`                                                                   | One type per schema (plus `const` enum objects when enabled)                                                                                                |
+| `models/<model>-input.ts`                                                             | Request-side variant of a model with `readOnly`/`writeOnly` properties (`types.readWrite`)                                                                  |
+| `dates/<model>.ts`                                                                    | Where `Date` values sit in a model (only with `types.dates: 'Date'`)                                                                                        |
+| `webhooks/<webhook>.ts`, `callbacks/<operation>-<callback>.ts`                        | Payload, request, response and handler types (`output.webhooks`)                                                                                            |
+| `<tag>/<operation>.ts`                                                                | One function per operation with its types and an error guard (`isGetPetByIdApiError`)                                                                       |
+| `react-query/<tag>/<operation>.ts`, `react-query/<tag>/keys.ts`                       | Hooks, option factories, key factories ([data fetching](data-fetching.md)); `vue-query/`, `svelte-query/`, `solid-query/` or `swr/` for the other libraries |
+| `zod/<model>.ts`                                                                      | Schemas ([validation](#validation)); `valibot/` or `arktype/` for the other libraries                                                                       |
+| `arktype/support.ts`                                                                  | ArkType only: the reference and intersection helpers the schemas use                                                                                        |
+| `mocks/models/<model>.ts`, `mocks/<tag>/<operation>.ts`                               | Fixture factories (`makePet`) and Mock Service Worker handlers (`mockGetPetById`) ([mocks](#mocks))                                                         |
+| `mocks/webhooks/<webhook>.ts`, `mocks/callbacks/<callback>.ts`                        | Request fixtures and senders for webhooks and callbacks (`makeAccountClosedWebhookRequest`, `sendAccountClosedWebhook`)                                     |
+| `mocks/handlers.ts`, `mocks/start.ts`, `mocks/support.ts`, `mocks/fake.ts`            | `mockHandlers()`, `startMocks()`, the request matching and response building the handlers share, and the seeded fake data fixtures are made of              |
+| `index.ts`, `<hooks library>/index.ts`, `<schema library>/index.ts`, `mocks/index.ts` | Barrels                                                                                                                                                     |
+| `.swaggerz-manifest.json`                                                             | Generator ownership manifest                                                                                                                                |
 
 Every file starts with `/* eslint-disable */` and `// @generated by swaggerz. Do not edit…`. Output is deterministic: no timestamps or versions in files; the generator version is only recorded in the manifest.
 
@@ -143,6 +146,79 @@ All three keep unknown properties, enforce `additionalProperties: false` and typ
 Where the libraries' defaults differ from JSON Schema, the schemas follow JSON Schema and the generated types, identically in all three: string lengths count characters (not UTF-16 code units), a decimal `multipleOf` such as `0.01` tolerates floating-point rounding, integers may exceed 2^53 (`int64` ids), optional properties named like `Object.prototype` members (`constructor`, `toString`) are only checked when the object has them, `allOf` reads like the TypeScript intersection (a member's `additionalProperties: false` does not reject the properties other members declare), and `patternProperties` of an object without `additionalProperties` leave its other keys open. The client validates request bodies without their `undefined` properties, which `JSON.stringify` drops when sending. One exception in Valibot and ArkType: a closed model that contains itself through `allOf` reads like the intersection at its first level of nesting only; deeper levels refer to the closed schema, which rejects the other members' properties.
 
 ArkType resolves definitions eagerly and rejects contradictory intersections (`string & number`) when they are defined, which would make importing a module throw. The generated `arktype/support.ts` therefore provides `lazy()` (a reference resolved when data is validated, keeping the target's error paths), `allOf()` (an intersection that falls back to checking every member when ArkType cannot combine them) and `rest()` (typed additional properties). ArkType's types need TypeScript 5.4 or later.
+
+## Mocks
+
+With `features.mocks: 'msw'` ([mocks](mocks.md)), every model gets a fixture factory, every operation a Mock Service Worker handler factory, and every webhook and callback a request fixture and a sender:
+
+```ts
+// mocks/models/pet.ts
+export function makePet(overrides?: Partial<Pet>, options?: FixtureOptions): Pet;
+// mocks/models/status.ts: types that are not one object type take no overrides
+export function makeStatus(options?: FixtureOptions): Status;
+// mocks/pet/get-pet-by-id.ts
+// What a response function receives; `generated()` returns the default status's body.
+export type GetPetByIdMockRequest = MockRequest<{ petId: string }, undefined, Pet>;
+export type GetPetByIdMockOptions = MockSettings &
+  (
+    | { status?: 200; body?: MockBody<Pet, GetPetByIdMockRequest> }
+    | { status: 404; body?: MockBody<ErrorModel, GetPetByIdMockRequest> }
+    | {
+        status: Exclude<HttpStatus<1 | 3 | 4 | 5>, 404>;
+        body?: MockBody<unknown, GetPetByIdMockRequest>;
+      }
+  );
+// …
+export function mockGetPetById(options?: GetPetByIdMockOptions): HttpHandler;
+// mocks/webhooks/account-closed.ts
+export function makeAccountClosedWebhookRequest(
+  overrides?: Partial<AccountClosedWebhookRequest>,
+  options?: FixtureOptions,
+): AccountClosedWebhookRequest;
+export function sendAccountClosedWebhook(
+  url: string | URL,
+  request?: AccountClosedWebhookRequest,
+  options?: SendWebhookOptions,
+): Promise<Response>;
+// mocks/handlers.ts
+export function mockHandlers(options?: MockSettings): HttpHandler[];
+// mocks/start.ts: no runtime imports; loads `msw/browser` and the handlers when called
+export function startMocks(options?: StartMocksOptions): Promise<SetupWorker>;
+// mocks/support.ts and mocks/fake.ts, exported by the barrel
+export function mockFetch(
+  handlers: readonly HttpHandler[],
+  options?: { fallback?: typeof fetch },
+): typeof fetch;
+export interface FixtureOptions {
+  readonly seed?: number;
+  readonly empty?: boolean;
+}
+```
+
+A fixture is a recipe over the `Fake` of `mocks/fake.ts`: every value is a call that carries the specification's example (or a value the generator made) and how to vary it, keyed by where the value sits, so that adding a property does not change the others:
+
+```ts
+export function makePet(overrides?: Partial<Pet>, options?: FixtureOptions): Pet {
+  const f = fake(options);
+  return f.optional(
+    '',
+    {
+      id: f.id(f.int('id', 10, 1, 100000)),
+      name: f.text('name', 'doggie', 'firstName'),
+      category: makeCategory(undefined, f.at('category')),
+      tags: f.array('tags', 2, 0, 4, (f) => makeTag(undefined, f.at())),
+      status: f.pick('status', ['available', 'pending', 'sold'] as const),
+      ...overrides,
+    },
+    ['category', 'tags', 'status'],
+    overrides,
+  );
+}
+```
+
+With seed `0` every call returns its example, so `makePet()` is the specification's examples; other seeds derive a seed for each value from the fixture's seed and the value's key, and each method keeps the value within its schema (`text` fits its length, `pattern` matches its pattern, `pick` chooses among enum values, `oneOf` among union members, `nullable` makes `null` sometimes, `optional` leaves optional properties out, `array` makes `min` to `max` items). An example object is kept whole for seed `0` (`f.example((examples) => examples ? { … } : { … })`), and literal types (`'cat'`, `true`) are written with `as const`, so TypeScript keeps them in nested calls. Values that must stay constant (assertions, fixtures whose trial seeds failed) are plain literals. The members of an `allOf` of objects become one object literal; references call the referenced fixture with a seed derived from the key.
+
+The status members of the options mirror the operation's `ApiError` union, so `status` selects the body's type; a body function may also return a `Response`, which is sent unchanged. Default bodies are functions of the fixture options (`body: (options) => makePet(undefined, options)`), which the support module calls with the request's seed; a descriptor also lists where path parameters reappear in the body (`fill`), the parameter that names its entity (`entity`), the status `error: true` responds with, and how XML and sequential bodies are written (`write`). Handlers match with an MSW custom predicate (MSW 2.11 or later) implemented in `mocks/support.ts`, which reads the base URL from the client when a request arrives, compares paths segment by segment and answers CORS preflights for the route; with `types.dates: 'Date'` they encode response dates with the models' date shapes and revive request dates in `body()`. `mockFetch()` answers a `fetch` call with MSW's `getResponse()` and the given handlers, without intercepting anything.
 
 ## Runtime contract
 

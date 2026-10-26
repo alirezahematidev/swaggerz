@@ -19,7 +19,7 @@ import { DriftError, ROOT, WEBSITE, writeGenerated } from './output.ts';
 
 const SOURCE = 'docs/diagnostics.md';
 const CODE_PATTERN =
-  /['`"]((?:config|spec|overlay|ref|schema|operation|security|naming|query|output|plugin|dashboard|internal)\/[a-z0-9]+(?:-[a-z0-9]+)*)['`"]/g;
+  /['`"]((?:config|spec|overlay|ref|schema|operation|security|naming|query|mock|output|plugin|dashboard|internal)\/[a-z0-9]+(?:-[a-z0-9]+)*)['`"]/g;
 
 interface Entry {
   readonly code: string;

@@ -7,6 +7,7 @@ import { generateOperation } from './operations.ts';
 import { generateQueryModules } from './query/index.ts';
 import { generateRuntimeFiles } from './runtime-files.ts';
 import { generateDatesModule } from './dates.ts';
+import { generateMockModules } from './mocks/index.ts';
 import { generateWebhookModule, webhookModules } from './webhooks.ts';
 import { generateValidationModules } from './validation/index.ts';
 import type { GeneratedFile } from './types.ts';
@@ -30,6 +31,7 @@ export function generateModules(ctx: EmitContext): ModuleOutput[] {
   if (ctx.config.output.barrel) modules.push(generateBarrel(ctx, modules));
   modules.push(...generateValidationModules(ctx));
   modules.push(...generateQueryModules(plans, ctx));
+  modules.push(...generateMockModules(plans, ctx));
   return modules;
 }
 

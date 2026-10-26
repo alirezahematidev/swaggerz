@@ -15,20 +15,33 @@ const TYPES = /** @type {Record<string, string | undefined>} */ ({
   '.json': 'application/json',
 });
 
-/** Page that imports a generated client and the suite, and publishes the results. */
+/**
+ * Page that imports a generated client, its mocks and the suites, and publishes the results. The
+ * import map points `msw` at the browser bundle `scripts/runtimes.ts` builds.
+ */
 const PAGE = `<!doctype html>
 <meta charset="utf-8" />
 <title>swaggerz runtime suite</title>
+<script type="importmap">{ "imports": { "msw": "/static/msw.js" } }</script>
 <script type="module">
   const run = new URL(location.href).searchParams.get('run') ?? 'browser';
   const client = new URL(location.href).searchParams.get('client') ?? 'js';
+  let results;
   try {
     const api = await import('/static/' + client + '/index.js');
     const { runSuite } = await import('/static/suite.js');
-    window.__results = await runSuite(api, location.origin, run);
+    results = await runSuite(api, location.origin, run);
+    try {
+      const mocks = await import('/static/' + client + '/mocks/index.js');
+      const { runMocksSuite } = await import('/static/mocks-suite.js');
+      results.push(...(await runMocksSuite(api, mocks)));
+    } catch (error) {
+      results.push({ name: 'mocks: load', ok: false, error: String(error && error.stack || error) });
+    }
   } catch (error) {
-    window.__results = [{ name: 'load', ok: false, error: String(error && error.stack || error) }];
+    results = [{ name: 'load', ok: false, error: String(error && error.stack || error) }];
   }
+  window.__results = results;
 </script>
 `;
 
