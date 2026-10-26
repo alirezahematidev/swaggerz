@@ -14,6 +14,12 @@ export interface FixtureOptions {
   readonly seed?: number;
   /** Make arrays as short as their schema allows, to see empty states. */
   readonly empty?: boolean;
+  /**
+   * The HTTP status the value is the body of (handlers pass the status they respond with). Error
+   * models follow an error status (`4XX`, `5XX`): their `status` repeats it, and their `title`,
+   * `detail` or `message`, `code` and `type` describe it.
+   */
+  readonly status?: number;
 }
 
 /** FNV-1a (32 bits). */
@@ -1057,8 +1063,36 @@ function iban(random: Random): string {
   return `GB${pad(98 - remainder)}${bban}`;
 }
 
-function personName(random: Random): readonly [string, string] {
+/** A person's first and last name. */
+export function personName(random: Random): readonly [string, string] {
   return [random.pick(FIRST_NAMES), random.pick(LAST_NAMES)];
+}
+
+/**
+ * Text of a kind that names a person, for `person`, or `undefined` for other kinds: the `name`,
+ * `email` and `username` of one object belong to the same person.
+ */
+export function personText(
+  kind: TextKind,
+  person: readonly [string, string],
+  random: Random,
+  example: string,
+): string | undefined {
+  const [first, last] = person;
+  switch (kind) {
+    case 'firstName':
+      return first;
+    case 'lastName':
+      return last;
+    case 'fullName':
+      return `${first} ${last}`;
+    case 'username':
+      return `${ascii(first)}.${ascii(last)}${random.int(1, 99)}`;
+    case 'email':
+      return `${ascii(first)}.${ascii(last)}@${domainOf(example, random)}`;
+    default:
+      return undefined;
+  }
 }
 
 /** The domain of an example email address, or a documentation domain. */
@@ -1294,6 +1328,177 @@ export function generateText(
   maxLength = Infinity,
 ): string {
   return fit(TEXT[kind](random, example), random, minLength, maxLength);
+}
+
+// Errors --------------------------------------------------------------------------------------
+
+/**
+ * What a property of an error model (RFC 9457 Problem Details and the like) says about the error:
+ * its reason phrase, an explanation, a code, a problem type URI, the occurrence's URI, or, in the
+ * errors of single fields, the field (by name or JSON Pointer) and what is wrong with it.
+ */
+export type ErrorPart =
+  | 'title'
+  | 'detail'
+  | 'code'
+  | 'type'
+  | 'instance'
+  | 'field'
+  | 'pointer'
+  | 'fieldMessage';
+
+/** The status the examples of error models describe, when the status is not known. */
+export const DEFAULT_ERROR_STATUS = 404;
+
+/** The statuses errors describe when the status is not known (a fixture called on its own). */
+const ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 429, 500, 503] as const;
+
+/** Reason phrases (RFC 9110). */
+const REASONS: Readonly<Record<number, string>> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  402: 'Payment Required',
+  403: 'Forbidden',
+  404: 'Not Found',
+  405: 'Method Not Allowed',
+  406: 'Not Acceptable',
+  407: 'Proxy Authentication Required',
+  408: 'Request Timeout',
+  409: 'Conflict',
+  410: 'Gone',
+  411: 'Length Required',
+  412: 'Precondition Failed',
+  413: 'Content Too Large',
+  414: 'URI Too Long',
+  415: 'Unsupported Media Type',
+  416: 'Range Not Satisfiable',
+  417: 'Expectation Failed',
+  421: 'Misdirected Request',
+  422: 'Unprocessable Content',
+  423: 'Locked',
+  424: 'Failed Dependency',
+  425: 'Too Early',
+  426: 'Upgrade Required',
+  428: 'Precondition Required',
+  429: 'Too Many Requests',
+  431: 'Request Header Fields Too Large',
+  451: 'Unavailable For Legal Reasons',
+  500: 'Internal Server Error',
+  501: 'Not Implemented',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+  504: 'Gateway Timeout',
+  505: 'HTTP Version Not Supported',
+  507: 'Insufficient Storage',
+  508: 'Loop Detected',
+  511: 'Network Authentication Required',
+};
+
+/** What went wrong, by status; other statuses get their class's explanation. */
+const ERROR_DETAILS: Readonly<Record<number, readonly [string, ...string[]]>> = {
+  400: list(
+    'The request body is not valid JSON.|The cursor parameter is malformed.|The limit parameter must be between 1 and 100.',
+  ),
+  401: list(
+    'The access token is missing or has expired.|Sign in to continue.|The API key is not valid.',
+  ),
+  403: list(
+    'You do not have permission to perform this action.|Only workspace admins can change this setting.|Your plan does not include this feature.',
+  ),
+  404: list(
+    'The requested resource does not exist.|No resource matches this ID.|The resource may have been deleted or moved.',
+  ),
+  405: list('This endpoint does not support this method.'),
+  408: list('The request took too long to arrive. Try again.'),
+  409: list(
+    'The resource was changed by someone else. Reload it and try again.|A resource with this name already exists.',
+  ),
+  410: list('This resource was permanently deleted.'),
+  412: list('The resource changed since you last read it. Reload it and try again.'),
+  413: list('The request body is larger than 10 MB.'),
+  415: list('Send the request body as application/json.'),
+  422: list(
+    'Some fields are invalid. Check them and try again.|The request contains invalid values.|A required field is missing.',
+  ),
+  423: list('The resource is locked while another change is in progress.'),
+  429: list(
+    'Too many requests. Try again in 30 seconds.|You reached the limit of 100 requests per minute.',
+  ),
+  500: list(
+    'Something went wrong on our side. Try again later.|An unexpected error occurred. Our team has been notified.',
+  ),
+  501: list('This feature is not available yet.'),
+  502: list('An upstream service returned an invalid response.'),
+  503: list(
+    'The service is temporarily unavailable. Try again in a few minutes.|Scheduled maintenance is in progress. Try again later.',
+  ),
+  504: list('An upstream service did not respond in time.'),
+};
+const CLIENT_ERROR_DETAILS = list(
+  'The request could not be processed.|Check the request and try again.',
+);
+const SERVER_ERROR_DETAILS = list(
+  'The server could not complete the request.|Something went wrong on our side. Try again later.',
+);
+
+/** Fields named in the errors of single fields, and what is wrong with them. */
+const ERROR_FIELDS = list('email|title|name|password|dueDate|quantity|phone|startDate|amount|url');
+const FIELD_ERRORS = list(
+  'This field is required.|Must be at most 80 characters.|Must be a valid email address.|Must be a date in the future.|Must be greater than 0.|Must be at least 12 characters.|This value is already taken.|Must be a valid URL.',
+);
+
+/** The reason phrase of a status. */
+function reasonOf(status: number): string {
+  return REASONS[status] ?? (status >= 500 ? 'Server Error' : 'Client Error');
+}
+
+/**
+ * A status's reason phrase as a code, written the way `example` writes codes (`not_found`,
+ * `NOT_FOUND`, `not-found`, `NotFound`).
+ */
+function errorCode(status: number, example: string): string {
+  const parts = reasonOf(status)
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((part) => part !== '');
+  if (/^[A-Z][A-Z0-9]*(_[A-Z0-9]+)*$/.test(example) && example.length > 1)
+    return parts.join('_').toUpperCase();
+  if (/^[a-z0-9]+(-[a-z0-9]+)+$/.test(example)) return parts.join('-');
+  if (/^([A-Z][a-z0-9]+){2,}$/.test(example))
+    return parts.map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join('');
+  return parts.join('_');
+}
+
+/** What a property of an error model says about an error of `status`. */
+export function errorText(part: ErrorPart, status: number, random: Random, example = ''): string {
+  switch (part) {
+    case 'title':
+      return reasonOf(status);
+    case 'detail':
+      return random.pick(
+        ERROR_DETAILS[status] ?? (status >= 500 ? SERVER_ERROR_DETAILS : CLIENT_ERROR_DETAILS),
+      );
+    case 'code':
+      return errorCode(status, example);
+    case 'type':
+      // `about:blank` says the type is the status itself.
+      return example.startsWith('about:')
+        ? example
+        : `${originOf(example, random)}/problems/${errorCode(status, 'not-found')}`;
+    case 'instance':
+      return `urn:uuid:${uuid(random)}`;
+    case 'field':
+      return random.pick(ERROR_FIELDS);
+    case 'pointer':
+      return `/${random.pick(ERROR_FIELDS)}`;
+    case 'fieldMessage':
+      return random.pick(FIELD_ERRORS);
+  }
+}
+
+/** The key of the object a value's key belongs to (`owner.email` → `owner`, `email` → `''`). */
+function parentOf(key: string): string {
+  return key.slice(0, Math.max(0, key.lastIndexOf('.')));
 }
 
 // Dates ---------------------------------------------------------------------------------------
@@ -1707,6 +1912,8 @@ export class Fake {
   readonly #seed: number;
   readonly #path: string;
   readonly #empty: boolean;
+  /** The error status the value is the body of, which error models describe. */
+  readonly #status: number | undefined;
   /** Whether this makes a fixture's own value, not an item of one of its arrays. */
   readonly #root: boolean;
 
@@ -1714,6 +1921,11 @@ export class Fake {
     this.#seed = Number.isFinite(options.seed) ? Math.trunc(options.seed ?? 0) >>> 0 : 0;
     this.#path = path;
     this.#empty = options.empty === true;
+    const status = options.status;
+    this.#status =
+      status !== undefined && Number.isInteger(status) && status >= 400 && status <= 599
+        ? status
+        : undefined;
     this.#root = root;
   }
 
@@ -1727,7 +1939,21 @@ export class Fake {
   }
 
   #options(seed: number): FixtureOptions {
-    return this.#empty ? { seed, empty: true } : { seed };
+    return {
+      seed,
+      ...(this.#empty ? { empty: true } : {}),
+      ...(this.#status === undefined ? {} : { status: this.#status }),
+    };
+  }
+
+  /** The person the object at `key` names: its `name`, `email` and `username` agree. */
+  #person(key: string): readonly [string, string] {
+    return personName(this.#random(`${parentOf(key)}#person`));
+  }
+
+  /** The error status the object at `key` describes: the body's, or one of its own. */
+  #error(key: string): number {
+    return this.#status ?? this.#random(`${parentOf(key)}#status`).pick(ERROR_STATUSES);
   }
 
   /** The options of the fixture nested at `key`: examples within examples, otherwise its own seed. */
@@ -1738,23 +1964,57 @@ export class Fake {
   /**
    * What `make` returns: it is told whether to make the specification's example (seed `0`, not
    * an empty state) or another value. One callback lets TypeScript type both from the context.
+   * The examples of an error model describe one `status`; a body sent with another describes it.
    */
-  example<T>(make: (examples: boolean) => T): T {
-    return make(this.canonical && !this.#empty);
+  example<T>(make: (examples: boolean) => T, status?: number): T {
+    const other = status !== undefined && this.#status !== undefined && status !== this.#status;
+    return make(this.canonical && !this.#empty && !other);
   }
 
   /** Text of a kind (a name, a sentence…), or `example` for the examples. */
   text(key: string, example: string, kind: TextKind, minLength = 0, maxLength = Infinity): string {
     if (this.canonical) return example;
     const random = this.#random(key);
-    // Longer text keeps the example's wording a third of the time.
+    const named = personText(kind, this.#person(key), random, example);
+    if (named !== undefined) return fit(named, random, minLength, maxLength);
+    // Longer text keeps the example's wording a third of the time, where its numbers and codes
+    // vary: an example repeated word for word would show twice in a list.
     const long =
       kind === 'sentence' || kind === 'paragraph' || kind === 'task' || kind === 'headline';
-    const made =
-      long && example.includes(' ') && random.chance(1 / 3)
-        ? like(example, random)
-        : TEXT[kind](random, example);
-    return fit(made, random, minLength, maxLength);
+    const varied =
+      long && example.includes(' ') && random.chance(1 / 3) ? like(example, random) : example;
+    return fit(
+      varied === example ? TEXT[kind](random, example) : varied,
+      random,
+      minLength,
+      maxLength,
+    );
+  }
+
+  /** The `status` of an error model: the status the body is sent with, or `example`. */
+  errorStatus(key: string, example: number): number {
+    if (this.#status !== undefined) return this.#status;
+    return this.canonical ? example : this.#error(key);
+  }
+
+  /**
+   * What a property of an error model says about the error (`title`, `detail`, `code`…): it
+   * describes the status the body is sent with. For the examples, `example`, which describes
+   * `examples`: a body sent with another status describes that one instead.
+   */
+  errorText(
+    key: string,
+    example: string,
+    part: ErrorPart,
+    examples = DEFAULT_ERROR_STATUS,
+    minLength = 0,
+    maxLength = Infinity,
+  ): string {
+    const describes = part === 'title' || part === 'detail' || part === 'code' || part === 'type';
+    const other = this.#status !== undefined && this.#status !== examples;
+    if (this.canonical && !(describes && other)) return example;
+    const random = this.#random(key);
+    return fit(errorText(part, this.#error(key), random, example), random, minLength, maxLength);
   }
 
   /** A string matching `pattern`, or `example` for the examples. */
@@ -1843,8 +2103,9 @@ export class Fake {
   }
 
   /**
-   * An array of `count` items for the examples, otherwise of `min` to `max` items (`min` in empty
-   * states). Item 0 of the examples is made of examples too. With `unique`, equal items are left out.
+   * An array of `count` items for the examples, otherwise of `least` (by default `min`) to `max`
+   * items, and `min` in empty states: lists have `least` 1, so they are only empty when asked to
+   * be. Item 0 of the examples is made of examples too. With `unique`, equal items are left out.
    */
   array<T>(
     key: string,
@@ -1853,12 +2114,13 @@ export class Fake {
     max: number,
     make: (item: Fake, index: number) => T,
     unique = false,
+    least = min,
   ): T[] {
     const length = this.#empty
       ? min
       : this.canonical
         ? count
-        : this.#random(`${key}[]`).int(min, max);
+        : this.#random(`${key}[]`).int(least, max);
     const items: T[] = [];
     const seen = new Set<string>();
     for (let index = 0; items.length < length && index < length * 3; index++) {

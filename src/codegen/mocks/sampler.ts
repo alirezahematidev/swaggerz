@@ -11,12 +11,18 @@ import type {
 } from '../../ir/types.ts';
 import {
   dateNear,
+  DEFAULT_ERROR_STATUS,
+  errorText,
   Fake,
+  fit,
   generateText,
   matchesPattern,
+  personName,
+  personText,
   Random,
   samplePattern,
   type DateWhen,
+  type ErrorPart,
   type FixtureOptions,
   type TextKind,
   type XmlShape,
@@ -29,7 +35,11 @@ import { isXml, xmlShape } from './encodings.ts';
 import {
   booleanRate,
   dateWhen,
+  errorPart,
   isCollection,
+  isErrorModel,
+  isErrorStatus,
+  isFieldError,
   isPageProperty,
   numberRange,
   singular,
@@ -122,15 +132,34 @@ export type MockValue =
     }
   | { readonly kind: 'oneOf'; readonly key: string; readonly options: readonly MockValue[] }
   | { readonly kind: 'nullable'; readonly key: string; readonly value: MockValue }
-  /** `count` items for the examples, `min` to `max` otherwise, each made by `item`. */
+  /**
+   * `count` items for the examples, `least` to `max` otherwise (`min` in empty states), each made
+   * by `item`.
+   */
   | {
       readonly kind: 'list';
       readonly key: string;
       readonly count: number;
       readonly min: number;
       readonly max: number;
+      readonly least: number;
       readonly item: MockValue;
       readonly unique: boolean;
+    }
+  /** The `status` of an error model: the status its body is sent with. */
+  | { readonly kind: 'status'; readonly key: string; readonly value: number }
+  /**
+   * What a string of an error model says about the error (its `title`, `detail`, `code`…); its
+   * example describes `status`.
+   */
+  | {
+      readonly kind: 'error';
+      readonly key: string;
+      readonly value: string;
+      readonly part: ErrorPart;
+      readonly status: number;
+      readonly min: number;
+      readonly max: number;
     }
   /** Generated keys of a map (`additionalProperties`). */
   | {
@@ -143,8 +172,16 @@ export type MockValue =
     }
   /** File content of a media type: a picture, a PDF… */
   | { readonly kind: 'file'; readonly key: string; readonly mediaType: string }
-  /** The specification's example (a constant) for seed `0`, `make` otherwise. */
-  | { readonly kind: 'example'; readonly value: MockValue; readonly make: MockValue }
+  /**
+   * The specification's example (a constant) for seed `0`, `make` otherwise; the example of an
+   * error model describes `status`.
+   */
+  | {
+      readonly kind: 'example';
+      readonly value: MockValue;
+      readonly make: MockValue;
+      readonly status?: number;
+    }
   /** A value written as XML, or items as a sequential media type (JSON Lines, SSE…). */
   | {
       readonly kind: 'encoded';
@@ -182,6 +219,11 @@ interface Leaf {
   readonly collection?: boolean;
   /** A fixture's own value, whose `id` is remembered. */
   readonly root?: boolean;
+  /**
+   * A property of an error model, or of the error of one field (`{ field, message }`), whose
+   * examples describe `status`.
+   */
+  readonly error?: { readonly kind: 'model' | 'field'; readonly status: number };
   /** The media type of a binary value. */
   readonly mediaType?: string;
 }
@@ -499,9 +541,14 @@ export class MockSampler {
       let make = this.#sampleNode(schema, path, scope, leaf);
       if (make !== undefined && schema.assertions !== undefined)
         make = this.#assert(schema, make, path, scope, leaf);
-      return make === undefined || !varies(make)
-        ? constant
-        : { kind: 'example', value: constant, make };
+      if (make === undefined || !varies(make)) return constant;
+      const status = this.#exampleStatus(schema, leaf, canonical);
+      return {
+        kind: 'example',
+        value: constant,
+        make,
+        ...(status === undefined ? {} : { status }),
+      };
     }
     const value = this.#sampleNode(schema, path, scope, leaf, canonical);
     if (value === undefined) return undefined;
@@ -625,11 +672,40 @@ export class MockSampler {
         'info',
       );
     }
+    const error = leaf.error;
+    const part =
+      error === undefined
+        ? undefined
+        : errorPart(leaf.name, schema.format, error.kind === 'field', example);
+    if (error !== undefined && part !== undefined)
+      return {
+        kind: 'error',
+        key: leaf.key,
+        value: example ?? fit(errorText(part, error.status, random), random, min, max),
+        part,
+        status: error.status,
+        min,
+        max,
+      };
     const text = kind ?? (example === undefined ? 'words' : 'like');
+    // The properties of one object that name a person name the same one (`name` and `email`).
+    const named =
+      example === undefined
+        ? personText(
+            text,
+            personName(Random.of(`${path.slice(0, path.lastIndexOf('/'))}#person`)),
+            random,
+            '',
+          )
+        : undefined;
     return {
       kind: 'text',
       key: leaf.key,
-      value: example ?? generateText(text, random, '', min, max),
+      value:
+        example ??
+        (named === undefined
+          ? generateText(text, random, '', min, max)
+          : fit(named, random, min, max)),
       text,
       min,
       max,
@@ -659,6 +735,16 @@ export class MockSampler {
       high = c.exclusiveMaximum;
       highOpen = true;
     }
+    // The HTTP status of an error model, where its bounds allow every error status.
+    const statusFits = (lowOpen ? low < 400 : low <= 400) && (highOpen ? high > 599 : high >= 599);
+    if (
+      integer &&
+      leaf.error?.kind === 'model' &&
+      isErrorStatus(leaf.name) &&
+      c.multipleOf === undefined &&
+      statusFits
+    )
+      return { kind: 'status', key: leaf.key, value: example ?? leaf.error.status };
     const range = numberRange(leaf.name, integer);
     if (range !== undefined && Math.max(low, range.min) <= Math.min(high, range.max)) {
       // The name's range, where the schema allows it.
@@ -801,7 +887,9 @@ export class MockSampler {
     const min = Math.min(minItems, MAX_ITEMS);
     const max = Math.max(min, Math.min(maxItems, Math.max(most, min), distinct, MAX_ITEMS));
     const count = Math.min(Math.max(usual, min), max);
-    return { kind: 'list', key: leaf.key, count, min, max, item, unique };
+    // Lists have items outside empty states: their empty state is the one `empty` asks for.
+    const least = collection ? Math.min(max, Math.max(min, 1)) : min;
+    return { kind: 'list', key: leaf.key, count, min, max, least, item, unique };
   }
 
   /** How many different values a schema has, when that is a small number. */
@@ -816,6 +904,31 @@ export class MockSampler {
     return Infinity;
   }
 
+  /** The status an error model's example describes (its status property), if it is one. */
+  #exampleStatus(schema: SchemaIR, leaf: Leaf, example: JsonValue): number | undefined {
+    if (schema.kind !== 'object' || !isRecord(example)) return undefined;
+    const error = this.#errorOf(schema, leaf);
+    if (error === undefined) return undefined;
+    const name = statusProperty(schema)?.name;
+    const status = name === undefined ? undefined : getOwn(example, name);
+    return typeof status === 'number' ? status : error.status;
+  }
+
+  /**
+   * Whether an object describes an error (`Problem`, `{ field, message }`), and the status its
+   * examples describe: its status property's example, otherwise the examples' default.
+   */
+  #errorOf(schema: ObjectSchema, leaf: Leaf): Leaf['error'] {
+    const names = schema.properties.map((p) => p.name);
+    if (!isErrorModel(leaf.root === true ? leaf.owner : (leaf.name ?? leaf.owner), names))
+      return undefined;
+    const property = statusProperty(schema);
+    const example = property?.schema.examples?.[0] ?? property?.schema.default;
+    const status =
+      typeof example === 'number' && Number.isInteger(example) ? example : DEFAULT_ERROR_STATUS;
+    return { kind: isFieldError(names) ? 'field' : 'model', status };
+  }
+
   #object(schema: ObjectSchema, path: string, scope: Scope, leaf: Leaf): MockValue | undefined {
     const maxProperties = schema.constraints?.maxProperties ?? Infinity;
     const minProperties = schema.constraints?.minProperties ?? 0;
@@ -824,16 +937,17 @@ export class MockSampler {
     let budget = maxProperties - schema.properties.filter((p) => p.required).length;
     // A page: its array holds the listed items (`{ users: [...], total, nextCursor }`).
     const page = schema.properties.some((p) => isPageProperty(p.name));
+    // An error: its status, title and detail describe one error.
+    const error = this.#errorOf(schema, leaf);
     const entries: (readonly [string, MockValue])[] = [];
     const optional: string[] = [];
     for (const property of schema.properties) {
       if (!property.required && (budget <= 0 || property.schema.kind === 'never')) continue;
-      const value = this.#sample(
-        property.schema,
-        `${path}/${property.name}`,
-        scope,
-        page ? { ...child(leaf, property.name), collection: true } : child(leaf, property.name),
-      );
+      const value = this.#sample(property.schema, `${path}/${property.name}`, scope, {
+        ...child(leaf, property.name),
+        ...(page ? { collection: true } : {}),
+        ...(error === undefined ? {} : { error }),
+      });
       if (value === undefined) {
         if (property.required) return undefined;
         continue;
@@ -1582,6 +1696,17 @@ export class MockSampler {
       }
       case 'text':
         return fake.text(value.key, value.value, value.text, value.min, value.max);
+      case 'status':
+        return fake.errorStatus(value.key, value.value);
+      case 'error':
+        return fake.errorText(
+          value.key,
+          value.value,
+          value.part,
+          value.status,
+          value.min,
+          value.max,
+        );
       case 'pattern':
         return fake.pattern(
           value.key,
@@ -1633,6 +1758,7 @@ export class MockSampler {
             value.max,
             (item) => this.#evaluate(value.item, item, deep),
             value.unique,
+            value.least,
           ),
         );
       case 'record': {
@@ -1642,8 +1768,9 @@ export class MockSampler {
         return Object.values(record).includes(undefined) ? undefined : record;
       }
       case 'example':
-        return fake.example((examples) =>
-          this.#evaluate(examples ? value.value : value.make, fake, deep),
+        return fake.example(
+          (examples) => this.#evaluate(examples ? value.value : value.make, fake, deep),
+          value.status,
         );
       // Text, whose value was checked before it was encoded.
       case 'encoded':
@@ -1672,6 +1799,8 @@ export class MockSampler {
       case 'number':
       case 'multiple':
       case 'bool':
+      case 'status':
+      case 'error':
         return json(this.#evaluate(value, fake, false) as JsonValue);
       case 'pick':
         return literal(fake.pick(value.key, value.values));
@@ -1690,8 +1819,14 @@ export class MockSampler {
       case 'list':
         return {
           kind: 'array',
-          items: fake.array(value.key, value.count, value.min, value.max, (item, index) =>
-            this.#freeze(value.item, item, `${prefix}${value.key}[${index}].`),
+          items: fake.array(
+            value.key,
+            value.count,
+            value.min,
+            value.max,
+            (item, index) => this.#freeze(value.item, item, `${prefix}${value.key}[${index}].`),
+            value.unique,
+            value.least,
           ),
         };
       case 'record':
@@ -1728,8 +1863,9 @@ export class MockSampler {
           items: value.items.map((item) => this.#freeze(item, fake, prefix)),
         };
       case 'example':
-        return fake.example((examples) =>
-          examples ? value.value : this.#freeze(value.make, fake, prefix),
+        return fake.example(
+          (examples) => (examples ? value.value : this.#freeze(value.make, fake, prefix)),
+          value.status,
         );
       case 'encoded':
         return { ...value, value: this.#freeze(value.value, fake, prefix) };
@@ -1798,6 +1934,11 @@ export class MockSampler {
 }
 
 /** The leaf of a property of an object value. */
+/** The integer property of an error model that holds its HTTP status (`status`, `code`). */
+function statusProperty(schema: ObjectSchema): PropertyIR | undefined {
+  return schema.properties.find((p) => p.schema.kind === 'integer' && isErrorStatus(p.name));
+}
+
 function child(leaf: Leaf, name: string): Leaf {
   return {
     key: leaf.key === '' ? name : `${leaf.key}.${name}`,
@@ -1883,6 +2024,7 @@ function withEntry(value: MockValue, key: string, entry: MockValue): MockValue {
       kind: 'example',
       value: withEntry(value.value, key, entry),
       make: withEntry(value.make, key, entry),
+      ...(value.status === undefined ? {} : { status: value.status }),
     };
   return { kind: 'object', spreads: [value], entries: [[key, entry]] };
 }

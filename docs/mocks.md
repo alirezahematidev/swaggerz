@@ -119,21 +119,23 @@ export { another, bare, pets, rex };
 
 Values are chosen by what a property is, from its format, its name and the model it belongs to, then fitted to its schema:
 
-| What               | Values                                                                                                                             |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| People             | `name` of a `User`, `Member`, `Author`… is a full name; `firstName`, `username`, `jobTitle`, `phone`                               |
-| Things             | `name` of a `Project`, `Product`, `Company`, `Label`, `File`…; a `Task`'s `title` (`Fix the login redirect`)                       |
-| Text               | `description`, `body`, `bio`: paragraphs; `comment`, `message`, `note`, `summary`: sentences                                       |
-| Contact and places | `email` (keeping an example's domain), `url` (keeping its origin), `street`, `city`, `country`, `postalCode`                       |
-| Identifiers        | `uuid`, an example's shape kept (`usr_3k9f2a7d1b` → `usr_8q2m5x0c7e`, `WEB-12` → `QAP-48`), tokens, hashes                         |
-| Media              | `avatarUrl`, `imageUrl`: colorful SVG pictures as `data:` URLs, which render offline; `color`, `mimeType`, `fileName`              |
-| Numbers            | `price` and `amount` as money, `age`, `rating`, counts (`commentCount`: 0–50), percentages, coordinates                            |
-| Booleans           | `archived`, `deleted`, `disabled` rarely `true`; `active`, `enabled`, `verified` usually                                           |
-| Dates              | `createdAt`, `updatedAt` before the example (or 2026-01-01), `dueDate` around it, `expiresAt` after it, `birthDate` decades before |
-| Formats            | `email`, `uuid`, `uri`, `hostname`, `ipv4`, `ipv6`, `byte`, `date-time`, `duration`, `iban`, `isbn`, `semver`…                     |
-| Files              | Binary values and bodies are real files of their media type: PNG, JPEG, GIF, WebP, SVG, PDF, WAV, CSV, ZIP                         |
+| What               | Values                                                                                                                                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| People             | `name` of a `User`, `Member`, `Author`… is a full name; `firstName`, `username`, `jobTitle`, `phone`. The `name`, `email` and `username` of one object belong to the same person (`Chen Brown`, `chen.brown@acme.dev`) |
+| Things             | `name` of a `Project`, `Product`, `Company`, `Label`, `File`…; a `Task`'s `title` (`Fix the login redirect`)                                                                                                           |
+| Text               | `description`, `body`, `bio`: paragraphs; `comment`, `message`, `note`, `summary`: sentences. An example's wording comes back with its numbers and codes changed, never word for word                                  |
+| Errors             | In error models, `status` is the response's status, `title` its reason phrase, `detail` or `message` what went wrong (see below)                                                                                       |
+| Contact and places | `email` (keeping an example's domain), `url` (keeping its origin), `street`, `city`, `country`, `postalCode`                                                                                                           |
+| Identifiers        | `uuid`, an example's shape kept (`usr_3k9f2a7d1b` → `usr_8q2m5x0c7e`, `WEB-12` → `QAP-48`), tokens, page cursors, hashes                                                                                               |
+| Media              | `avatarUrl`, `imageUrl`: colorful SVG pictures as `data:` URLs, which render offline; `color`, `mimeType`, `fileName`                                                                                                  |
+| Numbers            | `price` and `amount` as money, `age`, `rating`, counts (`commentCount`: 0–50), percentages, coordinates                                                                                                                |
+| Booleans           | `archived`, `deleted`, `disabled` rarely `true`; `active`, `enabled`, `verified` usually                                                                                                                               |
+| Dates              | `createdAt`, `updatedAt` before the example (or 2026-01-01), `dueDate` around it, `expiresAt` after it, `birthDate` decades before                                                                                     |
+| Formats            | `email`, `uuid`, `uri`, `hostname`, `ipv4`, `ipv6`, `byte`, `date-time`, `duration`, `iban`, `isbn`, `semver`…                                                                                                         |
+| Files              | Binary values and bodies are real files of their media type: PNG, JPEG, GIF, WebP, SVG, PDF, WAV, CSV, ZIP                                                                                                             |
 
-- **Every state, in turn**: across seeds, values take every enum value, every member of a union, `null` where it is allowed and every optional property's absence; arrays vary in length (a page's items more, nested arrays fewer, and none in empty states). The examples' value keeps every optional property, and the first item of its arrays is made of examples too.
+- **Every state, in turn**: across seeds, values take every enum value, every member of a union, `null` where it is allowed and every optional property's absence; arrays vary in length (a list's items more, and at least one; nested arrays fewer, and sometimes none; none at all in empty states, so a list is only empty when `empty` asks for it). The examples' value keeps every optional property, and the first item of its arrays is made of examples too.
+- **Errors describe their status**: in an error model (a model named like `Problem`, `Error`, `ErrorResponse`, `…Exception`, or with the `title`, `status` and `detail` of RFC 9457 Problem Details), `status` is the status the body is sent with, `title` (or `error`) its reason phrase, `detail` or `message` what went wrong, `code` the status as a code written like the example (`NOT_FOUND`, `not-found`), `type` a problem URI and `instance` a `urn:uuid:`. The errors of single fields (`{ field, message }`, `{ pointer, detail }`) name a field and what is wrong with it. Handlers pass the status they respond with; a fixture takes it too (`makeProblem({}, { status: 503 })` is a `Service Unavailable` problem), and without one each seed describes an error status of its own, with fields that agree. An error model's examples describe one status (its status property's example, `404` without one): they are kept for that status, and a body sent with another status describes that one instead.
 - **Constraints hold for every seed**: `minLength`/`maxLength`, `pattern`, numeric bounds and `multipleOf`, `minItems`/`maxItems`, `uniqueItems`, `minProperties`/`maxProperties`, discriminator values, and for the examples `if`/`then`/`else`, `dependentSchemas`, `dependentRequired` and `not`. Every fixture is tried with several seeds against its schema when it is generated; one whose variants do not all match, and every value with such assertions, keeps its examples for every seed.
 - **Patterns** use the whole ECMAScript syntax, lookarounds, backreferences and Unicode property escapes included. They are parsed, never executed (specifications are untrusted input): generated strings are checked by a matcher of the parsed pattern with a step budget.
 - **Examples first**: a schema's `example`/`examples` (and, for response bodies, the media type's examples), then `default` for scalars. Examples that do not match their schema are replaced by generated values (`mock/invalid-example`); properties the type does not declare are left out.
@@ -177,6 +179,7 @@ The options of a handler select a documented response and its body; `status` and
 **Default bodies are generated for each request**, so screens look like a real API's:
 
 - A request without parameters gets the examples (the first page of a list starts with `makePet()`); other requests get values seeded by their path parameters and query string. The same request always gets the same body, and different pages different items, so infinite lists end where a cursor is `null`.
+- Error responses (`status: 404`, `error: true`) describe their status: `{ title: 'Not Found', status: 404, detail: 'No resource matches this ID.' }`, whatever seed made them.
 - Path parameters reappear where the body repeats them: `GET /projects/{projectId}/tasks` lists tasks whose `projectId` is the parameter, and `GET /tasks/{taskId}` returns a task whose `id` is `taskId`.
 - An `id` a fixture made is remembered: requesting it (`GET /tasks/{taskId}` after a list showed that task) returns the same entity, so lists and detail views agree.
 
@@ -321,6 +324,6 @@ export const Empty = {
 ## Limitations
 
 - Handlers keep no state: a request that creates or updates something responds with generated values, and later requests do not see the change. Keep state in response functions, as the examples do.
-- Values are generated property by property: they satisfy each schema, but do not follow rules between properties that the schema does not state (a `done` task's `completedAt`, a page's `total` and its items).
+- Values are generated property by property: they satisfy each schema, but do not follow rules between properties that the schema does not state (a `done` task's `completedAt`, a page's `total` and its items). The exceptions are the person an object names and the status an error describes.
 - Vocabularies are English.
 - Values of schemas with `not`, `if`/`then`/`else`, `dependentSchemas` or `dependentRequired`, and fixtures whose variants do not all match their schema, are the examples' for every seed.
