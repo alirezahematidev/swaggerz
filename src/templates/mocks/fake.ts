@@ -1191,7 +1191,7 @@ const TEXT: { readonly [K in TextKind]: (random: Random, example: string) => str
     `${random.pick(PRODUCT_ADJECTIVES)} ${random.pick(PRODUCT_MATERIALS)} ${random.pick(PRODUCT_NOUNS)}`,
   project: (random) => `${random.pick(PROJECT_AREAS)} ${random.pick(PROJECT_NOUNS)}`,
   task: (random) => `${random.pick(TASK_VERBS)} ${random.pick(TASK_OBJECTS)}`,
-  headline: (random) => random.pick(HEADLINE_TEMPLATES).replace('%', random.pick(HEADLINE_TOPICS)),
+  headline: (random) => random.pick(HEADLINE_TEMPLATES).replace(/%/g, random.pick(HEADLINE_TOPICS)),
   tag: (random) => random.pick(TAGS),
   slug: (random) => `${random.pick(TAGS)}-${random.pick(LOREM)}-${random.int(1, 99)}`,
   code: (random) => alphanumeric(random, 6).toUpperCase(),

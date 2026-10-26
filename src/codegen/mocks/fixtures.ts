@@ -3,7 +3,6 @@ import type { JsonValue } from '../../ir/types.ts';
 import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager } from '../imports.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
-import type { XmlShape } from '../../templates/mocks/fake.ts';
 import type { JsDocBlock } from '../types.ts';
 import { usesFake, type MockSampler, type MockValue } from './sampler.ts';
 
@@ -36,11 +35,6 @@ function printJson(value: JsonValue, indent: string): string {
       indent,
     );
   return literal(value);
-}
-
-/** An XML shape as JSON, for printing. */
-function toJson(shape: XmlShape): JsonValue {
-  return JSON.parse(JSON.stringify(shape)) as JsonValue;
 }
 
 /** A number as JavaScript: `Infinity` is not JSON. */
@@ -207,7 +201,7 @@ export function printValue(value: MockValue, p: PrintContext, indent = ''): stri
       const encode = p.imports.add(FAKE, value.encoding, { typeOnly: false });
       const printed = printValue(value.value, p, indent);
       return value.encoding === 'xml'
-        ? `${encode}(${printed}, ${printJson(toJson(value.shape ?? {}), indent)})`
+        ? `${encode}(${printed}, ${literal(value.shape ?? {})})`
         : `${encode}(${printed}, ${quote(value.mediaType)})`;
     }
     case 'example':
