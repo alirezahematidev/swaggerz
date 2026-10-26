@@ -1,6 +1,7 @@
 /**
  * Responses the runtime does not read as JSON, with response validation on: responses to `HEAD`,
- * which never have a body.
+ * which never have a body, and text media types (XML) whose schema describes a structure, which
+ * the runtime resolves as text.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -32,6 +33,22 @@ paths:
                 $ref: '#/components/schemas/Pet'
         '404':
           description: No such pet.
+  /pets/{petId}/card:
+    get:
+      operationId: getPetCard
+      parameters:
+        - name: petId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: The pet, in XML.
+          content:
+            application/xml:
+              schema:
+                $ref: '#/components/schemas/Pet'
 components:
   schemas:
     Pet:
@@ -44,6 +61,7 @@ components:
 
 type Operation = (params: object) => Promise<unknown>;
 interface Api {
+  readonly getPetCard: Operation;
   readonly petExists: Operation;
   readonly client: { setConfig(config: Record<string, unknown>): void };
 }
@@ -75,5 +93,15 @@ describe('responses without a JSON body', () => {
     expect(server.requests.at(-1)?.method).toBe('HEAD');
     server.respond(() => ({ status: 404 }));
     await expect(api.petExists({ petId: 2 })).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('resolve XML responses as their text, which is what validation checks', async () => {
+    const xml = '<?xml version="1.0"?><Pet><id>1</id></Pet>';
+    server.respond(() => ({
+      status: 200,
+      headers: { 'content-type': 'application/xml' },
+      body: xml,
+    }));
+    await expect(api.getPetCard({ petId: 1 })).resolves.toBe(xml);
   });
 });
