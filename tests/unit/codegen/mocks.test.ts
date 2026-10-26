@@ -18,6 +18,20 @@ import {
   seedOfEntity,
 } from '../../../src/templates/mocks/fake.ts';
 
+/**
+ * `RegExp`'s own answer, to compare with: `undefined` where this Node.js version does not know the
+ * syntax yet (modifiers such as `(?i:…)` came with V8 12.5, after Node.js 22).
+ */
+function native(pattern: string, text: string): boolean | undefined {
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, 'u');
+  } catch {
+    return undefined;
+  }
+  return regex.test(text);
+}
+
 describe('pattern sampling', () => {
   it.each([
     '^[A-Z]{3}-\\d{4}$',
@@ -47,7 +61,7 @@ describe('pattern sampling', () => {
     for (let index = 0; index < 5; index++) {
       const text = samplePattern(pattern, random);
       expect(text).toBeDefined();
-      expect(new RegExp(pattern, 'u').test(text ?? '')).toBe(true);
+      expect(native(pattern, text ?? '') ?? true).toBe(true);
       expect(matchesPattern(pattern, text ?? '')).toBe(true);
     }
   });
