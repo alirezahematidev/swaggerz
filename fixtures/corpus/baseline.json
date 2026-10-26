@@ -4,7 +4,7 @@
     "ok": true,
     "operations": 944,
     "models": 635,
-    "files": 5050,
+    "files": 5051,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -13,7 +13,7 @@
     "ok": true,
     "operations": 174,
     "models": 48,
-    "files": 737,
+    "files": 738,
     "diagnostics": {
       "warning mock/invalid-example": 62,
       "warning schema/tuple-items": 27,
@@ -26,7 +26,7 @@
     "ok": true,
     "operations": 612,
     "models": 1538,
-    "files": 6467,
+    "files": 6468,
     "diagnostics": {
       "warning mock/unsatisfiable": 9,
       "warning operation/body-on-get": 273
@@ -38,7 +38,7 @@
     "ok": true,
     "operations": 1242,
     "models": 996,
-    "files": 7323,
+    "files": 7324,
     "diagnostics": {
       "warning mock/invalid-example": 210,
       "warning mock/unsatisfiable": 1,
@@ -51,7 +51,7 @@
     "ok": true,
     "operations": 1242,
     "models": 975,
-    "files": 7798,
+    "files": 7799,
     "diagnostics": {
       "warning mock/invalid-example": 255,
       "warning mock/unsatisfiable": 13,
@@ -64,7 +64,7 @@
     "ok": true,
     "operations": 197,
     "models": 150,
-    "files": 1141,
+    "files": 1142,
     "diagnostics": {
       "warning mock/invalid-example": 22
     },
@@ -75,7 +75,7 @@
     "ok": true,
     "operations": 297,
     "models": 318,
-    "files": 2062,
+    "files": 2063,
     "diagnostics": {
       "warning mock/invalid-example": 9
     },
@@ -86,7 +86,7 @@
     "ok": true,
     "operations": 251,
     "models": 312,
-    "files": 1826,
+    "files": 1827,
     "diagnostics": {
       "warning mock/invalid-example": 6,
       "warning mock/unsatisfiable": 3,
@@ -100,7 +100,7 @@
     "ok": true,
     "operations": 350,
     "models": 2479,
-    "files": 9101,
+    "files": 9102,
     "diagnostics": {
       "warning mock/invalid-example": 2
     },
@@ -111,7 +111,7 @@
     "ok": true,
     "operations": 97,
     "models": 90,
-    "files": 607,
+    "files": 608,
     "diagnostics": {
       "warning mock/unsatisfiable": 6
     },
@@ -122,7 +122,7 @@
     "ok": true,
     "operations": 19,
     "models": 6,
-    "files": 95,
+    "files": 96,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -131,7 +131,7 @@
     "ok": true,
     "operations": 858,
     "models": 1351,
-    "files": 7097,
+    "files": 7098,
     "diagnostics": {
       "info operation/ignored-header": 2,
       "info spec/non-standard-ref": 858,
@@ -146,7 +146,7 @@
     "ok": true,
     "operations": 360,
     "models": 2097,
-    "files": 7490,
+    "files": 7491,
     "diagnostics": {
       "info schema/assertion-keyword": 10,
       "info schema/validation-only-keyword": 35,
@@ -163,7 +163,7 @@
     "ok": true,
     "operations": 246,
     "models": 538,
-    "files": 2446,
+    "files": 2447,
     "diagnostics": {
       "warning schema/empty-enum": 2
     },
@@ -174,7 +174,7 @@
     "ok": true,
     "operations": 9,
     "models": 15,
-    "files": 98,
+    "files": 99,
     "diagnostics": {
       "info operation/item-schema": 2,
       "info schema/validation-only-keyword": 2
@@ -186,7 +186,7 @@
     "ok": true,
     "operations": 4,
     "models": 3,
-    "files": 38,
+    "files": 39,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -195,7 +195,7 @@
     "ok": true,
     "operations": 2,
     "models": 0,
-    "files": 23,
+    "files": 24,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -204,7 +204,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 22,
+    "files": 23,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -213,7 +213,7 @@
     "ok": true,
     "operations": 6,
     "models": 3,
-    "files": 44,
+    "files": 45,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -222,7 +222,7 @@
     "ok": true,
     "operations": 3,
     "models": 1,
-    "files": 30,
+    "files": 31,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -231,7 +231,7 @@
     "ok": true,
     "operations": 0,
     "models": 1,
-    "files": 21,
+    "files": 22,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -240,7 +240,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 20,
+    "files": 21,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -249,7 +249,7 @@
     "ok": true,
     "operations": 1,
     "models": 0,
-    "files": 20,
+    "files": 21,
     "diagnostics": {},
     "typeErrors": 0
   },
@@ -258,7 +258,7 @@
     "ok": true,
     "operations": 4,
     "models": 0,
-    "files": 32,
+    "files": 33,
     "diagnostics": {},
     "typeErrors": 0
   }
