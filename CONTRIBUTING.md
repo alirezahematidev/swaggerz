@@ -82,8 +82,9 @@ Pushing the `v<version>` tag starts the release workflow, which:
 
 1. checks that the tag matches the `package.json` version and points to a commit on `main`;
 2. builds and runs `pnpm check` and `pnpm test:pack`;
-3. publishes to npm with provenance, using the `next` dist-tag for pre-releases. npm authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) when it is configured for the workflow, and otherwise with the `NPM_TOKEN` repository secret;
-4. creates the GitHub release with that version's section of `CHANGELOG.md`.
+3. packs the package once and attests the tarball's build provenance with [GitHub artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations);
+4. publishes that tarball to npm with provenance, using the `next` dist-tag for pre-releases. npm authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) when it is configured for the workflow, and otherwise with the `NPM_TOKEN` repository secret;
+5. creates the GitHub release with that version's section of `CHANGELOG.md`, and attaches the tarball and its provenance (`swaggerz-<version>.tgz.intoto.jsonl`, a Sigstore bundle). Check a downloaded tarball with `gh attestation verify swaggerz-<version>.tgz --repo alirezahematidev/swaggerz`.
 
 The same tag starts the website workflow (`website.yml`), which builds and tests the docs site from the tagged commit and deploys it to GitHub Pages, so the site documents the released version.
 

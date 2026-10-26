@@ -9,3 +9,11 @@ allowBuilds:
   esbuild: true
   # Its postinstall only switches between Vue 2 and 3; the published files already target Vue 3.
   vue-demi: false
+
+# Security fixes the parents' ranges do not admit yet; drop each once its parent allows the fix.
+overrides:
+  # get-uri (release-it > proxy-agent) asks for ^5. 6.2.1 fixes GHSA-c475-qrg2-pj4r, and 6.0's only
+  # breaking change (no separate transfer host by default) does not affect it.
+  get-uri>basic-ftp: ^6.2.3
+  # release-it pins 7.29.1; 7.30.1 fixes GHSA-xjj6-f33q-929c, GHSA-4qv8-2p9j-2685 and GHSA-f72v-6w45-q472.
+  release-it>undici: ^7.30.1
