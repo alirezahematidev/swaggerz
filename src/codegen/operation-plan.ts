@@ -1,5 +1,5 @@
 import type { OperationSymbol } from '../analysis/types.ts';
-import type { ApiDocument, MediaTypeIR, ParameterIR, ResponseIR } from '../ir/types.ts';
+import type { ApiDocument, MediaTypeIR, ParameterIR, ResponseIR, SchemaIR } from '../ir/types.ts';
 import { defaultBaseUrl } from './client-module.ts';
 
 export type ParseAsHint = 'blob' | 'text' | undefined;
@@ -104,6 +104,12 @@ export function bodyKind(media: MediaTypeIR): BodyKind {
 export type ResponseKind = 'json' | 'text' | 'binary';
 
 /** Non-JSON media types the runtime reads as text (mirrors `isTextMediaType` in the runtime). */
+/** A schema of strings: a `string`, or an enum of strings. */
+export function isStringSchema(schema: SchemaIR): boolean {
+  if (schema.kind === 'string') return true;
+  return schema.kind === 'enum' && schema.values.every((value) => typeof value === 'string');
+}
+
 function isTextResponse(type: string): boolean {
   return (
     type.startsWith('text/') ||

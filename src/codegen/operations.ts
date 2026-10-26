@@ -4,7 +4,6 @@ import {
   type MediaTypeIR,
   type ParameterIR,
   type ParameterLocation,
-  type SchemaIR,
 } from '../ir/types.ts';
 import { applyJsDocHook, renderAll, type EmitContext, type ModuleOutput } from './context.ts';
 import type { ImportManager, Lang } from './imports.ts';
@@ -12,6 +11,7 @@ import { schemaTags, splitSummary } from './jsdoc.ts';
 import { jsTypedef } from './models.ts';
 import {
   bodyKind,
+  isStringSchema,
   responseKind,
   type OperationPlan,
   type ParseAsHint,
@@ -30,12 +30,6 @@ export function mediaBodyType(media: MediaTypeIR, ctx: TypeContext, indent = '')
   return bodyKind(media) === 'raw'
     ? `string | ${binaryType({ ...ctx, direction: 'input' }).text}`
     : printType(media.schema, ctx, indent);
-}
-
-/** Whether a schema describes strings only, so a text response can keep its exact type. */
-function isStringSchema(schema: SchemaIR): boolean {
-  if (schema.kind === 'string') return true;
-  return schema.kind === 'enum' && schema.values.every((value) => typeof value === 'string');
 }
 
 /**

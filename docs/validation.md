@@ -16,7 +16,7 @@ features: { validation: { library: 'zod', response: true, request: true } },
 
 ## What is validated
 
-- **Responses** (`response`, default `true`): the body of every successful response is parsed with its schema before the operation resolves.
+- **Responses** (`response`, default `true`): the body of every successful response is parsed with its schema before the operation resolves. Bodies the runtime does not parse are checked as their type says: text (XML, CSV…) as a string, binary media types as a `Blob`.
 - **Request bodies** (`request`, default `false`): the body is checked before it is serialized; an invalid body is never sent.
 
 A failure rejects with a `RequestError` of kind `'validation'` whose `cause` is the library's error, with the path to the offending value:

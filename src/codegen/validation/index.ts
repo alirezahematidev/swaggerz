@@ -2,7 +2,13 @@ import type { ValidationLibrary } from '../../config/types.ts';
 import type { MediaTypeIR } from '../../ir/types.ts';
 import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager } from '../imports.ts';
-import { bodyKind, type OperationPlan, type PlannedResponse } from '../operation-plan.ts';
+import {
+  bodyKind,
+  isStringSchema,
+  responseKind,
+  type OperationPlan,
+  type PlannedResponse,
+} from '../operation-plan.ts';
 import { quote } from '../printer.ts';
 import type { GeneratedExport } from '../types.ts';
 import { ARKTYPE } from './arktype.ts';
@@ -34,7 +40,12 @@ export function responseValidation(
   const bodySchema = (response: PlannedResponse): string => {
     const media = response.media;
     if (media === undefined) return validator.undefined(imports);
-    if (media.schema.kind === 'binary' || plan.parseAs === 'blob') return validator.blob(imports);
+    // What the runtime resolves with, as the response type says: a `Blob` for binary media
+    // types, and a string for text (XML, CSV…) whose schema describes a structure.
+    const kind = responseKind(media, plan.parseAs);
+    if (kind === 'binary') return validator.blob(imports);
+    if (kind === 'text' && !isStringSchema(media.schema))
+      return validator.inline({ kind: 'string' }, imports, ctx);
     return validator.inline(media.schema, imports, ctx);
   };
   const members = [...new Set(plan.success.map(bodySchema))];
