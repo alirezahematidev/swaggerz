@@ -46,8 +46,8 @@ export function runtimeModules(config: ResolvedConfig): string[] {
 }
 
 /**
- * Emits the runtime files for the configured language and adapter, and the mocks support module
- * with `features.mocks`.
+ * Emits the runtime files for the configured language and adapter, and the mocks support and
+ * fake data modules with `features.mocks`.
  */
 export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
   const extension = importExtension(config);
@@ -61,7 +61,10 @@ export function generateRuntimeFiles(config: ResolvedConfig): GeneratedFile[] {
     origin: 'core:runtime',
   }));
   if (config.features.mocks !== false)
-    templates.push({ name: 'mocks/support', origin: 'core:mocks' });
+    templates.push(
+      { name: 'mocks/fake', origin: 'core:mocks' },
+      { name: 'mocks/support', origin: 'core:mocks' },
+    );
   const files: GeneratedFile[] = [];
   for (const { name, origin } of templates) {
     const variants: [string, string][] =

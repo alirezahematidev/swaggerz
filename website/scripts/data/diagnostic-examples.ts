@@ -383,16 +383,17 @@ components:
   },
   {
     code: 'mock/unsupported-pattern',
-    title: 'A pattern with a lookahead',
+    title: 'A pattern no string of the allowed length matches',
     config: { spec: spec(), features: { mocks: 'msw' } },
     files: [
       openapi(`
 paths: {}
 components:
   schemas:
-    Slug:
+    Code:
       type: string
-      pattern: '^(?!test)[a-z-]+$'
+      maxLength: 4
+      pattern: '^[A-Z]{3}-[0-9]{4}$'
 `),
     ],
     fix: 'Add an `example` that matches the pattern; the fixture uses it.',

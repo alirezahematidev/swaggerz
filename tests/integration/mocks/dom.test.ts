@@ -36,7 +36,7 @@ describe('mock handlers in happy-dom', () => {
     const page = (globalThis as unknown as { location: { origin: string } }).location;
     expect(page.origin).toMatch(/^http:\/\/localhost/);
     server.use(...(mocks.mockHandlers!() as never[]));
-    await expect(api.getPet!({ petId: 1 })).resolves.toEqual(mocks.makePet!());
+    await expect(api.getPet!({ petId: 1 })).resolves.toMatchObject({ id: 1 });
     const photo = (await api.getPetPhoto!({ petId: 1 })) as Blob;
     expect(photo.type).toBe('image/png');
     expect(await photo.text()).not.toBe('');
@@ -86,10 +86,10 @@ describe('cross-origin mock handlers in happy-dom', () => {
     'answer the preflight, then the request (%s), and count once without the preflight',
     async (adapter) => {
       const [api, mocks] = await load(`mocks-dom-cors-${adapter}`, adapter);
-      server.resetHandlers(mocks.mockGetPet!({ once: true }) as never);
-      await expect(api.getPet!({ petId: 1 })).resolves.toEqual(mocks.makePet!());
+      server.resetHandlers(mocks.mockGetPet!({ once: true, seed: 0 }) as never);
+      await expect(api.getPet!({ petId: 1 })).resolves.toEqual(mocks.makePet!({ id: 1 }));
       await expect(api.getPet!({ petId: 1 })).rejects.toMatchObject({ name: 'RequestError' });
-      server.resetHandlers(mocks.mockGetPet!({ status: 404 }) as never);
+      server.resetHandlers(mocks.mockGetPet!({ status: 404, seed: 0 }) as never);
       await expect(api.getPet!({ petId: 1 })).rejects.toMatchObject({
         status: 404,
         body: mocks.makeProblem!(),

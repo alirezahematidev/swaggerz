@@ -9,6 +9,7 @@ import type {
   SchemaIR,
   SchemaMeta,
   StringConstraints,
+  XmlIR,
 } from '../../ir/types.ts';
 import { looksLikeReference } from '../../loader/refs.ts';
 import { appendPointer, lastSegment, parsePointer } from '../../loader/pointer.ts';
@@ -85,6 +86,7 @@ const META_KEYS = new Set([
   'example',
   'examples',
   'default',
+  'xml',
   '$comment',
   '$id',
   '$anchor',
@@ -400,6 +402,8 @@ export class SchemaConverter {
     if (examples !== undefined) meta.examples = examples;
     const format = str(cursor, 'format');
     if (format !== undefined) meta.format = format;
+    const xml = readXml(child(cursor, 'xml'));
+    if (xml !== undefined) meta.xml = xml;
     const extensions = readExtensions(cursor);
     if (Object.keys(extensions).length > 0) meta.extensions = extensions;
     return meta;
@@ -886,4 +890,24 @@ function stringConstraints(cursor: Cursor): StringConstraints | undefined {
   const contentEncoding = str(cursor, 'contentEncoding');
   if (contentEncoding !== undefined) result.contentEncoding = contentEncoding;
   return Object.keys(result).length === 0 ? undefined : result;
+}
+
+const NODE_TYPES = new Set(['element', 'attribute', 'text', 'cdata', 'none']);
+
+/** The XML Object of a schema; keywords of the wrong type are ignored. */
+function readXml(cursor: Cursor): XmlIR | undefined {
+  if (!isRecord(cursor.value)) return undefined;
+  const xml: { -readonly [K in keyof XmlIR]: XmlIR[K] } = {};
+  for (const key of ['name', 'namespace', 'prefix'] as const) {
+    const value = str(cursor, key);
+    if (value !== undefined) xml[key] = value;
+  }
+  for (const key of ['attribute', 'wrapped'] as const) {
+    const value = bool(cursor, key);
+    if (value !== undefined) xml[key] = value;
+  }
+  const nodeType = str(cursor, 'nodeType');
+  if (nodeType !== undefined && NODE_TYPES.has(nodeType))
+    xml.nodeType = nodeType as NonNullable<XmlIR['nodeType']>;
+  return Object.keys(xml).length === 0 ? undefined : xml;
 }

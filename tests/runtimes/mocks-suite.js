@@ -57,14 +57,25 @@ export async function runMocksSuite(api, mocks) {
     });
   const client = answeredBy(mocks.mockHandlers());
 
-  await test('default handlers respond with the fixtures', async () => {
-    const pet = await api.getPetById({ petId: 1 }, { client });
-    assert(JSON.stringify(pet) === JSON.stringify(mocks.makePet()), JSON.stringify(pet));
+  await test('default handlers respond with generated values, the same for the same request', async () => {
+    const pet = await api.getPetById({ petId: 3 }, { client });
+    assert(pet.id === 3, JSON.stringify(pet));
+    const again = await api.getPetById({ petId: 3 }, { client });
+    assert(JSON.stringify(again) === JSON.stringify(pet), JSON.stringify(again));
+    const examples = answeredBy(mocks.mockHandlers({ seed: 0 }));
+    const example = await api.getPetById({ petId: 1 }, { client: examples });
+    assert(
+      JSON.stringify(example) === JSON.stringify(mocks.makePet({ id: 1 })),
+      JSON.stringify(example),
+    );
   });
 
   await test('documented statuses reject with their fixture', async () => {
     const error = await rejection(
-      api.getPetById({ petId: 1 }, { client: answeredBy([mocks.mockGetPetById({ status: 404 })]) }),
+      api.getPetById(
+        { petId: 1 },
+        { client: answeredBy([mocks.mockGetPetById({ status: 404, seed: 0 })]) },
+      ),
     );
     assert(api.isGetPetByIdApiError(error) && error.status === 404, String(error));
     assert(JSON.stringify(error.body) === JSON.stringify(mocks.makeError()), 'error body');

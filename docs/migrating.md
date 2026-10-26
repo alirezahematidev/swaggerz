@@ -64,20 +64,20 @@ if (result.status === 404) console.error(result.data.message);
 const pet = await getPetById({ petId: 10 }); // errors reject; see "Errors" in the fetch and axios guide
 ```
 
-| orval                                     | swaggerz                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------- |
-| `input`, `output.target`                  | `spec.input`, `output.directory`                                          |
-| `client: 'react-query'` (`vue-query`, …)  | `features.query: { framework }`, or `features.swr`                        |
-| `client: 'zod'`                           | `features.validation: 'zod'`: schemas, and validation inside calls        |
-| `mode: 'tags-split'`                      | `output.groupBy: 'tag'` (the default)                                     |
-| `override.mutator` (a custom fetcher)     | Middleware, or a custom transport (`createFetchTransport({ fetch })`)     |
-| Positional parameters `getPetById(petId)` | One object: `getPetById({ petId })`                                       |
-| `{ data, status }` for every status       | `client.responseStyle: 'full'` for successes; errors still reject         |
-| `mock` (MSW handlers filled by faker)     | `features.mocks: 'msw'`: handlers typed by status, fixtures without faker |
+| orval                                     | swaggerz                                                                     |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `input`, `output.target`                  | `spec.input`, `output.directory`                                             |
+| `client: 'react-query'` (`vue-query`, …)  | `features.query: { framework }`, or `features.swr`                           |
+| `client: 'zod'`                           | `features.validation: 'zod'`: schemas, and validation inside calls           |
+| `mode: 'tags-split'`                      | `output.groupBy: 'tag'` (the default)                                        |
+| `override.mutator` (a custom fetcher)     | Middleware, or a custom transport (`createFetchTransport({ fetch })`)        |
+| Positional parameters `getPetById(petId)` | One object: `getPetById({ petId })`                                          |
+| `{ data, status }` for every status       | `client.responseStyle: 'full'` for successes; errors still reject            |
+| `mock` (MSW handlers filled by faker)     | `features.mocks: 'msw'`: handlers typed by status, seeded realistic fixtures |
 
 Hook names stay the same (`useGetPetById`), but the parameters become one object, so call sites need a small change.
 
-orval's `mock` output (MSW handlers filled by faker) maps to generated handlers and fixtures ([mocks](mocks.md)): one handler factory per operation (`mockGetPetById({ body: pet })`, typed by status), all of them at once (`mockHandlers()`), and one fixture per model (`makePet()`). The values are the specification's examples or deterministic generated ones rather than faker's, so snapshots stay stable and there is no faker dependency.
+orval's `mock` output (MSW handlers filled by faker) maps to generated handlers and fixtures ([mocks](mocks.md)): one handler factory per operation (`mockGetPetById({ body: pet })`, typed by status), all of them at once (`mockHandlers()`), and one fixture per model (`makePet()`, or another realistic pet with `makePet({}, { seed: 3 })`). Where orval fills values with faker on every run, swaggerz makes them from the specification's examples and its own seeded generators: as realistic, the same on every run (snapshots stay stable), checked against the schema when they are generated, and without a faker dependency.
 
 ## From openapi-generator (typescript-fetch)
 

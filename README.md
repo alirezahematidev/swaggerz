@@ -19,7 +19,7 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - **Fetch or axios.** Interchangeable transports behind one contract; bring your own axios instance and interceptors.
 - **Optional data-fetching hooks**: TanStack Query v5 for **React, Vue, Svelte and Solid**, or **SWR** — option and key factories, infinite queries and invalidation, never imported unless enabled.
 - **Optional schemas and runtime validation** of requests and responses with **Zod 4, Valibot 1 or ArkType 2**.
-- **Optional mocks**: a **Mock Service Worker** handler per operation, typed by status, and a deterministic fixture factory per model (`makePet({ name: 'Rex' })`), for UIs and tests that run without the backend.
+- **Optional mocks**: a **Mock Service Worker** handler per operation, typed by status, a fixture factory per model with realistic, seeded data that covers every state the schema allows (`makePet({ name: 'Rex' })`, `makePet({}, { seed: 3 })`), and senders for webhooks, for UIs and tests that run without the backend.
 - **OpenAPI Overlays** (1.0–1.2) fix third-party specifications without forking them.
 - **Self-contained output.** The generated client has no runtime dependency on this package.
 - **Safe, deterministic regeneration.** Identical input produces identical output; unchanged files are not rewritten; files you own are never overwritten.

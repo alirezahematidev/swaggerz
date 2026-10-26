@@ -59,6 +59,7 @@ try {
   check(
     files.some((f) => f.startsWith('assets/runtime/')) &&
       files.includes('assets/mocks/support.js') &&
+      files.includes('assets/mocks/fake.js') &&
       files.includes('assets/dashboard/app.js'),
     'tarball contains runtime and mocks templates and the dashboard bundle',
   );

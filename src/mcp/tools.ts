@@ -372,7 +372,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
                 mocksModule(symbol.mock.module),
               ),
               example: `server.use(${symbol.mock.name}(${mockExample(symbol, plan)}));`,
-              note: `A Mock Service Worker handler. Without options it responds with the first success status and an example body; \`status\` selects a documented response and types \`body\`, a value or a function of the request ({ params, query, body() }). ${symbol.mock.options} lists the statuses.`,
+              note: `A Mock Service Worker handler. Without options it responds with the first success status and a realistic body generated for the request (the specification's examples for a request without parameters, the same body for the same request); \`status\` selects a documented response and types \`body\`, a value or a function of the request ({ params, query, body() }); \`seed\`, \`empty\` and \`error\` pick other values, empty lists or the documented error. ${symbol.mock.options} lists the statuses.`,
             },
           }),
       specification: {
@@ -434,7 +434,7 @@ export function createHandlers(service: ProjectService, options: ToolOptions): M
             fixture: {
               name: model.fixtureName,
               import: importLine([model.fixtureName], mocksModule(model.fixtureModule)),
-              note: "Returns a new value of the model made of the specification's examples or of deterministic generated values; object models take Partial overrides.",
+              note: "Returns a new value of the model: the specification's examples by default, another realistic value for another seed (make(overrides, { seed: 3 })), the same on every call; object models take Partial overrides.",
             },
           }),
       ...(model.schemaName === undefined || validator === undefined

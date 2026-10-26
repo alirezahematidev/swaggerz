@@ -9,33 +9,150 @@ import type {
   SchemaIR,
   SourceRef,
 } from '../../ir/types.ts';
+import {
+  dateNear,
+  Fake,
+  generateText,
+  matchesPattern,
+  Random,
+  samplePattern,
+  type DateWhen,
+  type FixtureOptions,
+  type TextKind,
+  type XmlShape,
+} from '../../templates/mocks/fake.ts';
 import { getOwn, isRecord, setOwn, stableStringify } from '../../utils/object.ts';
 import type { EmitContext } from '../context.ts';
 import { inheritedDiscriminators } from '../models.ts';
 import type { ResponseKind } from '../operation-plan.ts';
-import { samplePattern } from './pattern.ts';
-import { byName, fit, formatted, Random, words } from './random.ts';
+import { isXml, xmlShape } from './encodings.ts';
+import {
+  booleanRate,
+  dateWhen,
+  isCollection,
+  isPageProperty,
+  numberRange,
+  singular,
+  textKind,
+} from './semantics.ts';
 
 /**
- * A fixture value before it is printed: literals, `Date` and `Blob` values, calls of other
- * fixture factories, and the objects and arrays around them.
+ * How a fixture makes a value: a recipe printed as calls of the `Fake` of `mocks/fake.ts`. Every
+ * generated node carries the value it makes for the examples (seed `0`) and how to vary it for
+ * other seeds; `key` names the value within its fixture, which seeds the variation.
  */
 export type MockValue =
-  | { readonly kind: 'json'; readonly value: JsonValue }
+  // Constants.
+  /** `literal`: the value's type is a literal type (`'cat'`, `true`), which it keeps. */
+  | { readonly kind: 'json'; readonly value: JsonValue; readonly literal?: boolean }
   /** `new Date(value)` (with `types.dates: 'Date'`). */
   | { readonly kind: 'date'; readonly value: string }
-  | { readonly kind: 'blob'; readonly text: string; readonly type?: string }
-  /** A call of the model's fixture factory (`makePet()`). */
-  | { readonly kind: 'fixture'; readonly model: string }
-  /** `{ ...spreads, key: value }`: entries override what the spreads contain. */
+  /** A call of the model's fixture factory (`makePet(undefined, f.at(key))`). */
+  | { readonly kind: 'fixture'; readonly model: string; readonly key: string }
+  /** `{ ...spreads, key: value }`; `optional` properties are left out by some seeds. */
   | {
       readonly kind: 'object';
       readonly spreads: readonly MockValue[];
       readonly entries: readonly (readonly [string, MockValue])[];
+      readonly optional?: readonly string[];
+      readonly path?: string;
+      /** The entry that is the fixture's `id`, remembered so requests for it get the fixture. */
+      readonly id?: string;
     }
   | { readonly kind: 'array'; readonly items: readonly MockValue[] }
   /** No value can satisfy the schema. */
-  | { readonly kind: 'never' };
+  | { readonly kind: 'never' }
+  // Generated.
+  | {
+      readonly kind: 'text';
+      readonly key: string;
+      readonly value: string;
+      readonly text: TextKind;
+      readonly min: number;
+      readonly max: number;
+    }
+  | {
+      readonly kind: 'pattern';
+      readonly key: string;
+      readonly value: string;
+      readonly pattern: string;
+      readonly min: number;
+      readonly max: number;
+      readonly text?: TextKind;
+    }
+  | {
+      readonly kind: 'int';
+      readonly key: string;
+      readonly value: number;
+      readonly min: number;
+      readonly max: number;
+    }
+  | {
+      readonly kind: 'number';
+      readonly key: string;
+      readonly value: number;
+      readonly min: number;
+      readonly max: number;
+      readonly digits: number;
+      readonly exclusive: 'none' | 'min' | 'max' | 'both';
+    }
+  | {
+      readonly kind: 'multiple';
+      readonly key: string;
+      readonly value: number;
+      readonly first: number;
+      readonly last: number;
+      readonly step: number;
+      readonly digits: number;
+    }
+  | { readonly kind: 'bool'; readonly key: string; readonly value: boolean; readonly rate: number }
+  | {
+      readonly kind: 'when';
+      readonly key: string;
+      readonly value: string;
+      readonly format: 'date' | 'date-time' | 'time';
+      readonly when: DateWhen;
+      /** A `Date` (`types.dates: 'Date'`) rather than its string. */
+      readonly asDate: boolean;
+    }
+  | {
+      readonly kind: 'pick';
+      readonly key: string;
+      readonly values: readonly [JsonValue, ...JsonValue[]];
+    }
+  | { readonly kind: 'oneOf'; readonly key: string; readonly options: readonly MockValue[] }
+  | { readonly kind: 'nullable'; readonly key: string; readonly value: MockValue }
+  /** `count` items for the examples, `min` to `max` otherwise, each made by `item`. */
+  | {
+      readonly kind: 'list';
+      readonly key: string;
+      readonly count: number;
+      readonly min: number;
+      readonly max: number;
+      readonly item: MockValue;
+      readonly unique: boolean;
+    }
+  /** Generated keys of a map (`additionalProperties`). */
+  | {
+      readonly kind: 'record';
+      readonly key: string;
+      readonly count: number;
+      readonly min: number;
+      readonly max: number;
+      readonly value: MockValue;
+    }
+  /** File content of a media type: a picture, a PDF… */
+  | { readonly kind: 'file'; readonly key: string; readonly mediaType: string }
+  /** The specification's example (a constant) for seed `0`, `make` otherwise. */
+  | { readonly kind: 'example'; readonly value: MockValue; readonly make: MockValue }
+  /** A value written as XML, or items as a sequential media type (JSON Lines, SSE…). */
+  | {
+      readonly kind: 'encoded';
+      readonly encoding: 'xml' | 'sequence';
+      readonly value: MockValue;
+      readonly mediaType: string;
+      readonly shape?: XmlShape;
+    };
 
 /** Where values are generated for: the root's name for messages, its source for locations. */
 interface Scope {
@@ -53,6 +170,22 @@ interface Scope {
   readonly inline: { depth: number };
 }
 
+/** What a value is, beyond its schema: where it sits and what its name says. */
+interface Leaf {
+  /** The value's key within its fixture (`owner.name`); `''` for the fixture's own value. */
+  readonly key: string;
+  /** The property name, which suggests realistic values (`email`, `price`). */
+  readonly name?: string | undefined;
+  /** The model or property the value belongs to (`name` of a `User`). */
+  readonly owner?: string | undefined;
+  /** The items of a list or a page: there are more of them. */
+  readonly collection?: boolean;
+  /** A fixture's own value, whose `id` is remembered. */
+  readonly root?: boolean;
+  /** The media type of a binary value. */
+  readonly mediaType?: string;
+}
+
 /** An `allOf` of object types as one object type. */
 interface FlatObject {
   readonly properties: readonly PropertyIR[];
@@ -63,17 +196,30 @@ interface FlatObject {
   readonly risky: boolean;
 }
 
-/** A `Blob` in a materialized value. */
+/** A `Blob` in an evaluated value. */
 const BLOB = Symbol('blob');
-/** A fixture call in a shallow materialized value: assumed to match (checked on its own). */
+/** A fixture call in a shallow evaluated value: assumed to match (checked on its own). */
 const ANY = Symbol('any');
 
 const MAX_HOPS = 64;
 const MAX_ITEMS = 100;
 /** Nested `allOf` merges around one value. */
 const MAX_INLINE = 8;
+/** The seeds every fixture is tried with before its values vary: those that fail stay constant. */
+const TRIALS: readonly FixtureOptions[] = [
+  ...Array.from({ length: 8 }, (_, index) => ({ seed: index + 1 })),
+  { seed: 0, empty: true },
+  { seed: 5, empty: true },
+];
+/** The `Fake` of the examples. */
+const CANONICAL = new Fake();
 
 const json = (value: JsonValue): MockValue => ({ kind: 'json', value });
+/** A constant whose type is its literal type: a discriminator value, a `const` or an enum value. */
+const literal = (value: JsonValue): MockValue =>
+  value === null || typeof value === 'object'
+    ? json(value)
+    : { kind: 'json', value, literal: true };
 
 /** A copy of a schema without the keywords applied before it is sampled. */
 function withoutAssertions(schema: SchemaIR): SchemaIR {
@@ -99,11 +245,14 @@ function round(value: number, digits: number): number {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$/;
+/** Properties that identify a fixture. */
+const IDS = new Set(['id', '_id', 'uuid']);
 
 /**
- * Generates fixture values: examples from the specification where they fit their schema,
- * otherwise deterministic values that satisfy it. One sampler serves a whole generation, so every
- * model is sampled (and every problem reported) once.
+ * Generates fixture recipes: examples from the specification where they fit their schema, and
+ * realistic values that satisfy it for other seeds. Every recipe is tried with a few seeds against
+ * its schema; one that fails keeps its examples for every seed. One sampler serves a whole
+ * generation, so every model is sampled (and every problem reported) once.
  */
 export class MockSampler {
   readonly #ctx: EmitContext;
@@ -117,7 +266,7 @@ export class MockSampler {
     this.#definitions = new Map(ctx.project.ir.schemas.map((d) => [d.id, d]));
   }
 
-  /** The value a model's fixture factory returns. */
+  /** The recipe of a model's fixture factory. */
   fixture(model: ModelSymbol): MockValue {
     const cached = this.#fixtures.get(model.id);
     if (cached !== undefined) return cached;
@@ -130,7 +279,11 @@ export class MockSampler {
       flags: { risky: false },
       inline: { depth: 0 },
     };
-    let value = this.#sample(model.definition.schema, model.id, scope);
+    let value = this.#sample(model.definition.schema, model.id, scope, {
+      key: '',
+      owner: model.name,
+      root: true,
+    });
     if (value === undefined) {
       this.#report(
         scope,
@@ -142,13 +295,17 @@ export class MockSampler {
     // Subtypes of a discriminated base carry their discriminator value.
     for (const { property, values } of inheritedDiscriminators(model, this.#ctx)) {
       const tag = values[0];
-      if (tag !== undefined) value = withEntry(value, property, json(tag));
+      if (tag !== undefined) value = withEntry(value, property, literal(tag));
     }
-    this.#check(value, model.definition.schema, scope);
-    if (scope.flags.risky) this.#unfit.add(value);
+    value = this.#settle(value, model.definition.schema, scope);
     this.#inProgress.delete(model.id);
     this.#fixtures.set(model.id, value);
     return value;
+  }
+
+  /** Whether a model's fixture takes overrides: its type is one object type and so is its value. */
+  takesOverrides(model: ModelSymbol): boolean {
+    return this.overridable(model.definition.schema) && isObjectRecipe(this.fixture(model));
   }
 
   /** The default body of a response: its example, or a value generated from its schema. */
@@ -166,32 +323,59 @@ export class MockSampler {
       flags: { risky: false },
       inline: { depth: 0 },
     };
-    const random = new Random(label);
-    if (kind === 'binary') {
-      const type = media.mediaType.includes('*') ? undefined : media.mediaType;
-      return { kind: 'blob', text: words(random), ...(type === undefined ? {} : { type }) };
-    }
+    const random = Random.of(label);
+    if (kind === 'binary') return { kind: 'file', key: '', mediaType: media.mediaType };
     const example = media.examples.find((e) => e.value !== undefined)?.value;
     if (kind === 'text') {
       if (typeof example === 'string') return json(example);
+      // Sequential media types (OpenAPI 3.2 `itemSchema`): items, written as the type writes them.
+      if (media.itemSchema !== undefined) {
+        const items: SchemaIR = { kind: 'array', items: media.itemSchema };
+        const value = this.#sample(items, label, scope, { key: '', collection: true });
+        if (value !== undefined)
+          return {
+            kind: 'encoded',
+            encoding: 'sequence',
+            mediaType: media.mediaType,
+            value: this.#settle(value, items, scope),
+          };
+      }
       const schema = media.schema;
       const textual =
         schema.kind === 'string' ||
         (schema.kind === 'enum' && schema.values.every((v) => typeof v === 'string'));
-      return textual ? (this.#sample(schema, label, scope) ?? json('')) : json(words(random));
+      if (textual) return this.#sample(schema, label, scope, { key: '' }) ?? json('');
+      // XML: a value of the schema, written as its XML Objects describe.
+      if (isXml(media.mediaType)) {
+        const value = this.#sample(schema, label, scope, { key: '', collection: true });
+        if (value !== undefined)
+          return {
+            kind: 'encoded',
+            encoding: 'xml',
+            mediaType: media.mediaType,
+            value: this.#settle(value, schema, scope),
+            shape: this.xmlShape(schema),
+          };
+      }
+      return json(generateText('paragraph', random));
     }
+    const leaf: Leaf = { key: '', collection: true };
     if (example !== undefined) {
-      if (this.#conforms(example, media.schema)) return this.#fromJson(example, media.schema);
+      if (this.#conforms(example, media.schema)) {
+        const constant = this.#fromJson(example, media.schema);
+        const make = this.#sample(media.schema, label, scope, leaf);
+        return make === undefined
+          ? constant
+          : this.#settle({ kind: 'example', value: constant, make }, media.schema, scope);
+      }
       this.#invalidExample(scope, label, 'example');
     }
-    const value = this.#sample(media.schema, label, scope) ?? { kind: 'never' };
-    this.#check(value, media.schema, scope);
-    if (scope.flags.risky) this.#unfit.add(value);
-    return value;
+    const value = this.#sample(media.schema, label, scope, leaf) ?? { kind: 'never' };
+    return this.#settle(value, media.schema, scope);
   }
 
-  /** A string for a response header, or `undefined` when the header has no simple value. */
-  headerValue(schema: SchemaIR, label: string, source: SourceRef): string | undefined {
+  /** The recipe of a value of `schema` that is not a model's, e.g. a webhook request. */
+  value(schema: SchemaIR, label: string, source: SourceRef | undefined, owner: string): MockValue {
     const scope: Scope = {
       label,
       root: label,
@@ -200,8 +384,27 @@ export class MockSampler {
       flags: { risky: false },
       inline: { depth: 0 },
     };
-    const value = this.#sample(schema, label, scope);
-    const data = value === undefined ? undefined : this.#materialize(value, true);
+    const value = this.#sample(schema, label, scope, { key: '', owner }) ?? { kind: 'never' };
+    return this.#settle(value, schema, scope);
+  }
+
+  /** A string for a response header, or `undefined` when the header has no simple value. */
+  headerValue(
+    schema: SchemaIR,
+    label: string,
+    source: SourceRef,
+    name: string,
+  ): string | undefined {
+    const scope: Scope = {
+      label,
+      root: label,
+      source,
+      cycle: new Set(),
+      flags: { risky: false },
+      inline: { depth: 0 },
+    };
+    const value = this.#sample(schema, label, scope, { key: '', name });
+    const data = value === undefined ? undefined : this.#evaluate(value, CANONICAL, true);
     if (typeof data === 'string' || typeof data === 'number' || typeof data === 'boolean')
       return String(data);
     if (Array.isArray(data) && data.every((item) => typeof item !== 'object' || item === null))
@@ -209,17 +412,76 @@ export class MockSampler {
     return undefined;
   }
 
+  #names: ReadonlyMap<string, string> | undefined;
+
+  /** Model names by definition id, which name XML root elements. */
+  #modelNames(): ReadonlyMap<string, string> {
+    this.#names ??= new Map(this.#ctx.project.models.map((model) => [model.id, model.name]));
+    return this.#names;
+  }
+
+  /** How values of `schema` are written in XML. */
+  xmlShape(schema: SchemaIR): XmlShape {
+    return xmlShape(schema, this.#definitions, this.#modelNames());
+  }
+
+  /** The properties of an object type (through references and `allOf`), by name. */
+  objectProperties(schema: SchemaIR): ReadonlyMap<string, SchemaIR> {
+    return this.#objectView(schema, 0).properties;
+  }
+
+  /** The items of an array type (through references), or `undefined` for other types. */
+  arrayItemsOf(schema: SchemaIR, hops = 0): SchemaIR | undefined {
+    if (hops > MAX_HOPS) return undefined;
+    if (schema.kind === 'array') return schema.prefixItems === undefined ? schema.items : undefined;
+    if (schema.kind !== 'ref') return undefined;
+    const target = this.#definitions.get(schema.target)?.schema;
+    return target === undefined ? undefined : this.arrayItemsOf(target, hops + 1);
+  }
+
+  /** `'string'` or `'number'` for schemas of plain strings (not dates) or numbers. */
+  scalarType(schema: SchemaIR, hops = 0): 'string' | 'number' | undefined {
+    if (hops > MAX_HOPS) return undefined;
+    if (schema.kind === 'string') return dateFormat(schema) === undefined ? 'string' : undefined;
+    if (schema.kind === 'number' || schema.kind === 'integer') return 'number';
+    if (schema.kind !== 'ref') return undefined;
+    const target = this.#definitions.get(schema.target)?.schema;
+    return target === undefined ? undefined : this.scalarType(target, hops + 1);
+  }
+
+  /**
+   * Checks a root value: a value that does not match its schema is cast; one whose variants do
+   * not all match keeps its examples for every seed.
+   */
+  #settle(value: MockValue, schema: SchemaIR, scope: Scope): MockValue {
+    this.#check(value, schema, scope);
+    const unfit = scope.flags.risky || this.#unfit.has(value);
+    if (!unfit && (!varies(value) || this.#verify(value, schema))) return value;
+    const frozen = this.#freeze(value, CANONICAL);
+    if (unfit) this.#unfit.add(frozen);
+    return frozen;
+  }
+
+  /** Whether the value every trial seed makes matches the schema. */
+  #verify(value: MockValue, schema: SchemaIR): boolean {
+    return TRIALS.every((options) => {
+      const data = this.#evaluate(value, new Fake(options), false);
+      return data === undefined || this.#conforms(data, schema);
+    });
+  }
+
   // Sampling --------------------------------------------------------------------------------------
 
   /**
-   * A value for `schema`, or `undefined` when every value would call a fixture factory of the
+   * A recipe for `schema`, or `undefined` when every value would call a fixture factory of the
    * root's cycle (and so never return).
    */
-  #sample(schema: SchemaIR, path: string, scope: Scope, name?: string): MockValue | undefined {
+  #sample(schema: SchemaIR, path: string, scope: Scope, leaf: Leaf): MockValue | undefined {
+    let canonical: JsonValue | undefined;
     const example = schema.examples?.[0];
     if (example !== undefined) {
-      if (this.#conforms(example, schema)) return this.#fromJson(example, schema);
-      this.#invalidExample(scope, path, 'example');
+      if (this.#conforms(example, schema)) canonical = example;
+      else this.#invalidExample(scope, path, 'example');
     }
     const scalar =
       schema.kind === 'string' ||
@@ -227,54 +489,84 @@ export class MockSampler {
       schema.kind === 'integer' ||
       schema.kind === 'boolean' ||
       schema.kind === 'enum';
-    if (scalar && schema.default !== undefined) {
-      if (this.#conforms(schema.default, schema)) return this.#fromJson(schema.default, schema);
-      this.#invalidExample(scope, path, 'default value');
+    if (canonical === undefined && scalar && schema.default !== undefined) {
+      if (this.#conforms(schema.default, schema)) canonical = schema.default;
+      else this.#invalidExample(scope, path, 'default value');
     }
-    const value = this.#sampleNode(schema, path, scope, name);
-    if (value === undefined || schema.assertions === undefined) return value;
-    return this.#assert(schema, value, path, scope, name);
+    // Examples of objects, arrays and references: the example for the examples' seed.
+    if (canonical !== undefined && (!scalar || canonical === null)) {
+      const constant = this.#fromJson(canonical, schema);
+      let make = this.#sampleNode(schema, path, scope, leaf);
+      if (make !== undefined && schema.assertions !== undefined)
+        make = this.#assert(schema, make, path, scope, leaf);
+      return make === undefined || !varies(make)
+        ? constant
+        : { kind: 'example', value: constant, make };
+    }
+    const value = this.#sampleNode(schema, path, scope, leaf, canonical);
+    if (value === undefined) return undefined;
+    const asserted =
+      schema.assertions === undefined ? value : this.#assert(schema, value, path, scope, leaf);
+    // Nullable values are `null` for some seeds.
+    const nullable =
+      schema.nullable === true &&
+      schema.kind !== 'union' &&
+      schema.kind !== 'null' &&
+      !(asserted.kind === 'json' && asserted.value === null);
+    return nullable ? { kind: 'nullable', key: leaf.key, value: asserted } : asserted;
   }
 
-  /** A value for the node itself: no example, default or assertions. */
-  #sampleNode(schema: SchemaIR, path: string, scope: Scope, name?: string): MockValue | undefined {
+  /** A recipe for the node itself: no example, default or assertions. */
+  #sampleNode(
+    schema: SchemaIR,
+    path: string,
+    scope: Scope,
+    leaf: Leaf,
+    canonical?: JsonValue,
+  ): MockValue | undefined {
     switch (schema.kind) {
       case 'ref': {
         if (scope.cycle.has(schema.target))
           return schema.nullable === true ? json(null) : undefined;
         const model = this.#ctx.project.modelById.get(schema.target);
-        return model?.fixtureName === undefined ? json(null) : { kind: 'fixture', model: model.id };
+        return model?.fixtureName === undefined
+          ? json(null)
+          : { kind: 'fixture', model: model.id, key: leaf.key };
       }
       case 'string':
-        return this.#string(schema, path, scope, name);
+        return this.#string(schema, path, scope, leaf, canonical);
       case 'number':
       case 'integer':
-        return json(this.#number(schema, path, scope));
-      case 'boolean':
-        return json(new Random(path).next() < 0.5);
+        return this.#number(schema, path, scope, leaf, canonical);
+      case 'boolean': {
+        const rate = booleanRate(leaf.name);
+        const value =
+          typeof canonical === 'boolean'
+            ? canonical
+            : rate === 0.5
+              ? Random.of(path).next() < 0.5
+              : rate > 0.5;
+        return { kind: 'bool', key: leaf.key, value, rate };
+      }
       case 'null':
         return json(null);
-      case 'enum': {
-        const value = schema.values.find((v) => v !== null) ?? schema.values[0];
-        if (value !== undefined) return json(value);
-        this.#report(scope, 'mock/unsatisfiable', `${this.#at(scope, path)} has an empty enum.`);
-        return { kind: 'never' };
-      }
+      case 'enum':
+        return this.#enum(schema, path, scope, leaf, canonical);
       case 'binary':
-        return { kind: 'blob', text: words(new Random(path)) };
+        return { kind: 'file', key: leaf.key, mediaType: leaf.mediaType ?? '' };
       case 'unknown':
         return json({});
       case 'never':
         this.#report(scope, 'mock/unsatisfiable', `${this.#at(scope, path)} accepts no value.`);
         return { kind: 'never' };
       case 'array':
-        return this.#array(schema, path, scope);
+        return this.#array(schema, path, scope, leaf);
       case 'object':
-        return this.#object(schema, path, scope);
+        return this.#object(schema, path, scope, leaf);
       case 'union':
-        return this.#union(schema, path, scope);
+        return this.#union(schema, path, scope, leaf);
       case 'intersection':
-        return this.#intersection(schema, path, scope);
+        return this.#intersection(schema, path, scope, leaf);
     }
   }
 
@@ -282,20 +574,49 @@ export class MockSampler {
     schema: Extract<SchemaIR, { kind: 'string' }>,
     path: string,
     scope: Scope,
-    name: string | undefined,
+    leaf: Leaf,
+    canonical: JsonValue | undefined,
   ): MockValue {
-    const random = new Random(path);
-    const format = dateFormat(schema);
+    const random = Random.of(path);
+    const example = typeof canonical === 'string' ? canonical : undefined;
+    const format = dateFormat(schema) ?? (schema.format === 'time' ? 'time' : undefined);
     if (format !== undefined) {
-      const value = formatted(format, random) ?? '';
-      return this.#ctx.config.types.dates === 'Date' ? { kind: 'date', value } : json(value);
+      const when = dateWhen(leaf.name);
+      return {
+        kind: 'when',
+        key: leaf.key,
+        value: example ?? dateNear(undefined, format, when, random),
+        format,
+        when,
+        asDate: format !== 'time' && this.#ctx.config.types.dates === 'Date',
+      };
     }
-    const minLength = schema.constraints?.minLength ?? 0;
-    const maxLength = schema.constraints?.maxLength ?? Infinity;
-    const pattern = schema.constraints?.pattern;
+    const c = schema.constraints ?? {};
+    const min = c.minLength ?? 0;
+    const max = c.maxLength ?? Infinity;
+    let kind = textKind(leaf.name, leaf.owner, schema.format, example);
+    if (c.contentEncoding === 'base64' || c.contentEncoding === 'base64url') kind = 'base64';
+    else if (c.contentMediaType !== undefined && /json/i.test(c.contentMediaType)) kind = 'json';
+    const pattern = c.pattern;
     if (pattern !== undefined) {
-      const sampled = samplePattern(pattern, random, minLength, maxLength);
-      if (sampled !== undefined) return json(sampled);
+      let value = example;
+      // Realistic text of the property's kind when it matches, otherwise any matching string.
+      if (kind !== undefined)
+        for (let attempt = 0; value === undefined && attempt < 5; attempt++) {
+          const candidate = generateText(kind, random, '', min, max);
+          if (matchesPattern(pattern, candidate) === true) value = candidate;
+        }
+      value ??= samplePattern(pattern, random, min, max);
+      if (value !== undefined)
+        return {
+          kind: 'pattern',
+          key: leaf.key,
+          value,
+          pattern,
+          min,
+          max,
+          ...(kind === undefined ? {} : { text: kind }),
+        };
       this.#report(
         scope,
         'mock/unsupported-pattern',
@@ -304,20 +625,27 @@ export class MockSampler {
         'info',
       );
     }
-    const text =
-      (schema.format === undefined ? undefined : formatted(schema.format, random)) ??
-      (name === undefined ? undefined : byName(name, random)) ??
-      words(random);
-    return json(fit(text, random, minLength, maxLength));
+    const text = kind ?? (example === undefined ? 'words' : 'like');
+    return {
+      kind: 'text',
+      key: leaf.key,
+      value: example ?? generateText(text, random, '', min, max),
+      text,
+      min,
+      max,
+    };
   }
 
   #number(
     schema: Extract<SchemaIR, { kind: 'number' | 'integer' }>,
     path: string,
     scope: Scope,
-  ): number {
-    const random = new Random(path);
+    leaf: Leaf,
+    canonical: JsonValue | undefined,
+  ): MockValue {
+    const random = Random.of(path);
     const integer = schema.kind === 'integer';
+    const example = typeof canonical === 'number' ? canonical : undefined;
     const c = schema.constraints ?? {};
     let low = c.minimum ?? -Infinity;
     let high = c.maximum ?? Infinity;
@@ -331,11 +659,24 @@ export class MockSampler {
       high = c.exclusiveMaximum;
       highOpen = true;
     }
-    // Without bounds, values between 1 and 1000; next to one bound, within 1000 of it (and not
-    // negative below a positive maximum).
-    if (low === -Infinity && high === Infinity) [low, high] = [1, 1000];
+    const range = numberRange(leaf.name, integer);
+    if (range !== undefined && Math.max(low, range.min) <= Math.min(high, range.max)) {
+      // The name's range, where the schema allows it.
+      if (range.min > low) [low, lowOpen] = [range.min, false];
+      if (range.max < high) [high, highOpen] = [range.max, false];
+    } else if (low === -Infinity && high === Infinity && example !== undefined) {
+      // Around the example.
+      const size = Math.max(Math.abs(example), 10);
+      [low, high] =
+        example >= 0
+          ? [Math.max(0, example - size), example + size]
+          : [example - size, example + size];
+    }
+    // Without bounds, values between 1 and 100 (1000 for numbers); next to one bound, within 1000
+    // of it (and not negative below a positive maximum).
+    if (low === -Infinity && high === Infinity) [low, high] = [1, integer ? 100 : 1000];
     else if (low === -Infinity) low = high > 0 ? 0 : high - 1000;
-    else if (high === Infinity) high = low + 1000;
+    else if (high === Infinity) high = low + (integer ? 100 : 1000);
     const fits = (value: number): boolean =>
       (lowOpen ? value > low : value >= low) &&
       (highOpen ? value < high : value <= high) &&
@@ -355,97 +696,206 @@ export class MockSampler {
       let last = Math.floor(high / step);
       if (!fits(round(first * step, digits))) first++;
       if (!fits(round(last * step, digits))) last--;
-      if (first <= last) return round(random.int(first, last) * step, digits);
+      if (first <= last) {
+        const value = example ?? round(random.int(first, last) * step, digits);
+        return step === 1 && c.multipleOf === undefined
+          ? { kind: 'int', key: leaf.key, value, min: first, max: last }
+          : { kind: 'multiple', key: leaf.key, value, first, last, step, digits };
+      }
     } else {
-      const value = round(low + random.next() * (high - low), 2);
-      if (fits(value)) return value;
-      if (fits((low + high) / 2)) return (low + high) / 2;
+      const digits = range?.digits ?? 2;
+      const exclusive = lowOpen ? (highOpen ? 'both' : 'min') : highOpen ? 'max' : 'none';
+      let value = example ?? round(low + random.next() * (high - low), digits);
+      if (!fits(value)) value = (low + high) / 2;
+      if (fits(value))
+        return { kind: 'number', key: leaf.key, value, min: low, max: high, digits, exclusive };
     }
     this.#report(
       scope,
       'mock/unsatisfiable',
       `No number satisfies the bounds of ${this.#at(scope, path)}.`,
     );
-    return Number.isFinite(low) ? low : 0;
+    return json(example ?? (Number.isFinite(low) ? low : 0));
+  }
+
+  #enum(
+    schema: Extract<SchemaIR, { kind: 'enum' }>,
+    path: string,
+    scope: Scope,
+    leaf: Leaf,
+    canonical: JsonValue | undefined,
+  ): MockValue {
+    const values = [
+      ...schema.values.filter((v) => v !== null),
+      ...schema.values.filter((v) => v === null),
+    ];
+    // The example comes first: it is the examples' value.
+    if (canonical !== undefined) {
+      const key = stableStringify(canonical);
+      const index = values.findIndex((v) => stableStringify(v) === key);
+      if (index > 0) values.unshift(...values.splice(index, 1));
+    }
+    const [first, ...rest] = values;
+    if (first === undefined) {
+      this.#report(scope, 'mock/unsatisfiable', `${this.#at(scope, path)} has an empty enum.`);
+      return { kind: 'never' };
+    }
+    // Objects and arrays among the values stay constant: their literal types would widen.
+    if (rest.length === 0 || values.some((v) => typeof v === 'object' && v !== null))
+      return literal(first);
+    return { kind: 'pick', key: leaf.key, values: [first, ...rest] };
   }
 
   #array(
     schema: Extract<SchemaIR, { kind: 'array' }>,
     path: string,
     scope: Scope,
+    leaf: Leaf,
   ): MockValue | undefined {
     const prefix = schema.prefixItems ?? [];
     const minItems = schema.constraints?.minItems ?? 0;
     const maxItems = schema.constraints?.maxItems ?? Infinity;
-    // Tuples need every prefix item (their type does); other arrays get one item, or `minItems`.
-    const rest =
-      schema.items.kind === 'never'
-        ? 0
-        : Math.max(minItems - prefix.length, prefix.length === 0 ? 1 : 0);
-    const count = Math.min(prefix.length + rest, Math.max(maxItems, prefix.length), MAX_ITEMS);
     if (minItems > MAX_ITEMS)
       this.#report(
         scope,
         'mock/unsatisfiable',
         `${this.#at(scope, path)} requires more than ${MAX_ITEMS} items.`,
       );
-    const items: MockValue[] = [];
-    for (let index = 0; index < count; index++) {
-      const item = this.#sample(prefix[index] ?? schema.items, `${path}/${index}`, scope);
-      if (item === undefined) {
-        if (index < Math.max(minItems, prefix.length)) return undefined;
-        break;
+    const itemName = leaf.name === undefined ? undefined : singular(leaf.name);
+    const itemLeaf = (key: string): Leaf => ({ key, name: itemName, owner: leaf.owner });
+    // Tuples need every prefix item (their type does), and the items `minItems` adds.
+    if (prefix.length > 0) {
+      const count = Math.min(
+        Math.max(prefix.length, minItems),
+        Math.max(maxItems, prefix.length),
+        MAX_ITEMS,
+      );
+      const items: MockValue[] = [];
+      for (let index = 0; index < count; index++) {
+        const item = this.#sample(
+          prefix[index] ?? schema.items,
+          `${path}/${index}`,
+          scope,
+          itemLeaf(`${leaf.key}[${index}]`),
+        );
+        if (item === undefined) {
+          if (index < Math.max(minItems, prefix.length)) return undefined;
+          break;
+        }
+        if (item.kind === 'never' && index >= Math.max(minItems, prefix.length)) break;
+        items.push(item);
       }
-      // Items that cannot have a value are left out where the array may be shorter.
-      if (item.kind === 'never' && index >= Math.max(minItems, prefix.length)) break;
-      items.push(item);
+      return { kind: 'array', items };
     }
-    return { kind: 'array', items };
+    if (schema.items.kind === 'never') return json([]);
+    const item = this.#sample(schema.items, `${path}/items`, scope, itemLeaf(''));
+    // Items that lead back to the root, or cannot have a value, are left out where they may be.
+    if (item === undefined) return minItems > 0 ? undefined : json([]);
+    if (item.kind === 'never' && minItems === 0) return json([]);
+    const collection = leaf.collection === true || isCollection(leaf.name);
+    const objects = this.#objectLike(schema.items, 0);
+    const [usual, most] = collection ? [6, 12] : objects ? [2, 4] : [1, 3];
+    const unique = schema.constraints?.uniqueItems === true;
+    // Unique items of an enum or a boolean: there are only so many.
+    const distinct = unique ? this.#distinct(schema.items) : Infinity;
+    const min = Math.min(minItems, MAX_ITEMS);
+    const max = Math.max(min, Math.min(maxItems, Math.max(most, min), distinct, MAX_ITEMS));
+    const count = Math.min(Math.max(usual, min), max);
+    return { kind: 'list', key: leaf.key, count, min, max, item, unique };
   }
 
-  #object(schema: ObjectSchema, path: string, scope: Scope): MockValue | undefined {
+  /** How many different values a schema has, when that is a small number. */
+  #distinct(schema: SchemaIR, hops = 0): number {
+    if (hops > MAX_HOPS) return Infinity;
+    if (schema.kind === 'enum') return schema.values.length;
+    if (schema.kind === 'boolean') return schema.nullable === true ? 3 : 2;
+    if (schema.kind === 'ref') {
+      const target = this.#definitions.get(schema.target)?.schema;
+      return target === undefined ? Infinity : this.#distinct(target, hops + 1);
+    }
+    return Infinity;
+  }
+
+  #object(schema: ObjectSchema, path: string, scope: Scope, leaf: Leaf): MockValue | undefined {
     const maxProperties = schema.constraints?.maxProperties ?? Infinity;
+    const minProperties = schema.constraints?.minProperties ?? 0;
+    // Leaving properties out could break `minProperties` or `maxProperties`.
+    const droppable = minProperties === 0 && maxProperties === Infinity;
     let budget = maxProperties - schema.properties.filter((p) => p.required).length;
+    // A page: its array holds the listed items (`{ users: [...], total, nextCursor }`).
+    const page = schema.properties.some((p) => isPageProperty(p.name));
     const entries: (readonly [string, MockValue])[] = [];
+    const optional: string[] = [];
     for (const property of schema.properties) {
       if (!property.required && (budget <= 0 || property.schema.kind === 'never')) continue;
-      const value = this.#sample(property.schema, `${path}/${property.name}`, scope, property.name);
+      const value = this.#sample(
+        property.schema,
+        `${path}/${property.name}`,
+        scope,
+        page ? { ...child(leaf, property.name), collection: true } : child(leaf, property.name),
+      );
       if (value === undefined) {
         if (property.required) return undefined;
         continue;
       }
       // An optional property that cannot have a value is left out.
       if (value.kind === 'never' && !property.required) continue;
-      if (!property.required) budget--;
+      if (!property.required) {
+        budget--;
+        if (droppable) optional.push(property.name);
+      }
       entries.push([property.name, value]);
     }
-    const minProperties = schema.constraints?.minProperties ?? 0;
+    const spreads: MockValue[] = [];
     const additional = schema.additionalProperties;
     // Only types with an index signature accept other properties in an object literal.
     if (additional !== undefined && additional !== false) {
-      for (let index = 1; entries.length < minProperties && index <= MAX_ITEMS; index++) {
-        const key = `property${index}`;
-        if (schema.properties.some((p) => p.name === key)) continue;
-        const value = this.#sample(additional, `${path}/${key}`, scope);
-        if (value === undefined) break;
-        entries.push([key, value]);
+      const missing = Math.max(0, minProperties - entries.length);
+      const value = this.#sample(additional, `${path}/*`, scope, {
+        key: '',
+        owner: leaf.name ?? leaf.owner,
+      });
+      if (schema.properties.length === 0 && value !== undefined && value.kind !== 'never') {
+        // A map: a few generated keys.
+        const max = Math.max(missing, Math.min(maxProperties, 3));
+        spreads.push({
+          kind: 'record',
+          key: leaf.key,
+          count: Math.min(Math.max(missing, 2), max),
+          min: missing,
+          max,
+          value,
+        });
+      } else {
+        for (let index = 1; entries.length < minProperties && index <= MAX_ITEMS; index++) {
+          const key = `property${index}`;
+          if (schema.properties.some((p) => p.name === key)) continue;
+          const extra = this.#sample(additional, `${path}/${key}`, scope, child(leaf, key));
+          if (extra === undefined) break;
+          entries.push([key, extra]);
+        }
       }
     }
-    return { kind: 'object', spreads: [], entries };
+    const id = leaf.root === true ? entries.find(([name]) => IDS.has(name))?.[0] : undefined;
+    return {
+      kind: 'object',
+      spreads,
+      entries,
+      ...(optional.length === 0 ? {} : { optional, path: leaf.key }),
+      ...(id === undefined ? {} : { id }),
+    };
   }
 
   #union(
     schema: Extract<SchemaIR, { kind: 'union' }>,
     path: string,
     scope: Scope,
+    leaf: Leaf,
   ): MockValue | undefined {
-    const variants = [
-      ...schema.variants.filter((v) => v.kind !== 'null'),
-      ...schema.variants.filter((v) => v.kind === 'null'),
-    ];
     const discriminator = schema.discriminator;
     let impossible = false;
-    for (const variant of variants) {
+    const options: MockValue[] = [];
+    for (const variant of schema.variants.filter((v) => v.kind !== 'null')) {
       const tag =
         discriminator === undefined || variant.kind !== 'ref'
           ? undefined
@@ -459,31 +909,41 @@ export class MockSampler {
           continue;
         }
       }
-      const value = this.#sample(variant, path, scope);
+      const value = this.#sample(variant, path, scope, leaf);
       if (value === undefined) continue;
-      if (tag === undefined || discriminator === undefined) return value;
-      // A value that cannot be spread (a fixture of a nullable model) is returned untagged.
-      if (!this.#isObjectValue(value)) {
+      if (tag === undefined || discriminator === undefined) {
+        options.push(value);
+      } else if (!this.#isObjectValue(value)) {
+        // A value that cannot be spread (a fixture of a nullable model) is used untagged.
         scope.flags.risky = true;
-        return value;
+        options.push(value);
+      } else {
+        options.push(withEntry(value, discriminator.propertyName, literal(tag)));
       }
-      return withEntry(value, discriminator.propertyName, json(tag));
     }
-    if (schema.nullable === true) return json(null);
-    if (!impossible) return undefined;
-    this.#report(
-      scope,
-      'mock/unsatisfiable',
-      `No variant of ${this.#at(scope, path)} can have its discriminator value: each one's \`${discriminator?.propertyName ?? ''}\` excludes the value the mapping gives it.`,
-      'Correct the discriminator mapping, or the values the variants allow.',
-    );
-    return { kind: 'never' };
+    const nullable = schema.nullable === true || schema.variants.some((v) => v.kind === 'null');
+    const [first] = options;
+    if (first === undefined) {
+      if (nullable) return json(null);
+      if (!impossible) return undefined;
+      this.#report(
+        scope,
+        'mock/unsatisfiable',
+        `No variant of ${this.#at(scope, path)} can have its discriminator value: each one's \`${discriminator?.propertyName ?? ''}\` excludes the value the mapping gives it.`,
+        'Correct the discriminator mapping, or the values the variants allow.',
+      );
+      return { kind: 'never' };
+    }
+    const value: MockValue =
+      options.length === 1 ? first : { kind: 'oneOf', key: leaf.key, options };
+    return nullable ? { kind: 'nullable', key: leaf.key, value } : value;
   }
 
   #intersection(
     schema: Extract<SchemaIR, { kind: 'intersection' }>,
     path: string,
     scope: Scope,
+    leaf: Leaf,
   ): MockValue | undefined {
     // Object types become one object type: spreading the members' fixtures would type their
     // properties as each member declares them (optional in one, required in another).
@@ -511,6 +971,7 @@ export class MockSampler {
           },
           path,
           scope,
+          leaf,
         );
       } finally {
         scope.inline.depth--;
@@ -518,7 +979,7 @@ export class MockSampler {
     }
     const sampled: MockValue[] = [];
     for (const member of schema.members) {
-      const value = this.#sample(member, path, scope);
+      const value = this.#sample(member, path, scope, leaf);
       if (value === undefined) return undefined;
       sampled.push(value);
     }
@@ -539,14 +1000,14 @@ export class MockSampler {
     }
     // Scalars (`type: string` next to a `oneOf` of constants): a value every member accepts.
     const fitting = parts.find((part) => {
-      const data = this.#materialize(part, true);
+      const data = this.#evaluate(part, CANONICAL, true);
       return data !== undefined && this.#conforms(data, schema);
     });
     // Values of one kind type as the members do (`string & 'START'`); a `Date` next to a string
     // (`Date & string`) does not.
-    if (fitting === undefined || parts.some((part) => part.kind !== fitting.kind))
+    if (fitting === undefined || parts.some((part) => scalarKind(part) !== scalarKind(fitting)))
       scope.flags.risky = true;
-    return fitting ?? first;
+    return this.#freeze(fitting ?? first ?? { kind: 'never' }, CANONICAL);
   }
 
   /**
@@ -638,6 +1099,8 @@ export class MockSampler {
         return true;
       case 'json':
         return isRecord(value.value);
+      case 'example':
+        return this.#isObjectValue(value.value) && this.#isObjectValue(value.make);
       case 'fixture': {
         // A nullable model's fixture is typed `T | null`, which a spread turns into `{}`.
         const schema = this.#definitions.get(value.model)?.schema;
@@ -668,21 +1131,16 @@ export class MockSampler {
 
   /**
    * Applies `if`/`then`/`else`, `dependentSchemas` and `dependentRequired` by sampling again with
-   * the schemas they select merged in, and `not` by trying other values.
+   * the schemas they select merged in, and `not` by trying other values. The result is constant:
+   * other values could select other branches.
    */
-  #assert(
-    schema: SchemaIR,
-    value: MockValue,
-    path: string,
-    scope: Scope,
-    name?: string,
-  ): MockValue {
+  #assert(schema: SchemaIR, value: MockValue, path: string, scope: Scope, leaf: Leaf): MockValue {
     const assertions = schema.assertions;
     if (assertions === undefined) return value;
     const base = withoutAssertions(schema);
     let refined = base;
     let current = value;
-    const data = this.#materialize(current, true);
+    const data = this.#evaluate(current, CANONICAL, true);
     if (data !== undefined) {
       const conditional = assertions.conditional;
       if (conditional !== undefined) {
@@ -698,17 +1156,17 @@ export class MockSampler {
           if (Object.hasOwn(data, property))
             refined = this.#merge(refined, requiredProperties(required), 0);
       }
-      if (refined !== base) current = this.#sampleNode(refined, path, scope, name) ?? current;
+      if (refined !== base) current = this.#sampleNode(refined, path, scope, leaf) ?? current;
     }
     const not = assertions.not;
     if (not !== undefined) {
       for (let attempt = 1; attempt <= 5; attempt++) {
-        const sampled = this.#materialize(current, true);
+        const sampled = this.#evaluate(current, CANONICAL, true);
         if (sampled === undefined || !this.#conforms(sampled, not)) break;
-        current = this.#sampleNode(refined, `${path}#${attempt}`, scope, name) ?? current;
+        current = this.#sampleNode(refined, `${path}#${attempt}`, scope, leaf) ?? current;
       }
     }
-    return current;
+    return this.#freeze(current, CANONICAL);
   }
 
   // Schemas ---------------------------------------------------------------------------------------
@@ -806,12 +1264,14 @@ export class MockSampler {
       const b = extra.constraints ?? {};
       const minItems = Math.max(a.minItems ?? 0, b.minItems ?? 0);
       const maxItems = Math.min(a.maxItems ?? Infinity, b.maxItems ?? Infinity);
+      const uniqueItems = a.uniqueItems === true || b.uniqueItems === true;
       return {
         ...base,
         items: this.#merge(base.items, extra.items, hops + 1),
         constraints: {
           ...(minItems > 0 ? { minItems } : {}),
           ...(maxItems < Infinity ? { maxItems } : {}),
+          ...(uniqueItems ? { uniqueItems } : {}),
         },
       };
     }
@@ -823,9 +1283,9 @@ export class MockSampler {
   // Examples --------------------------------------------------------------------------------------
 
   /**
-   * Whether a (materialized) value matches a schema: the checks the generated validators make,
-   * and the shape the generated types require. Patterns and formats other than dates are not
-   * checked: validators do not enforce them, and patterns would have to be executed.
+   * Whether an (evaluated) value matches a schema: the checks the generated validators make, the
+   * shape the generated types require, and `uniqueItems`. Patterns and formats other than dates
+   * are not checked: validators do not enforce them, and patterns would have to be executed.
    */
   #conforms(value: unknown, schema: SchemaIR, hops = 0, open = false): boolean {
     if (value === ANY) return true;
@@ -906,6 +1366,10 @@ export class MockSampler {
         const prefix = schema.prefixItems ?? [];
         if (items.length < Math.max(c.minItems ?? 0, prefix.length)) return false;
         if (items.length > (c.maxItems ?? Infinity)) return false;
+        if (c.uniqueItems === true && !items.includes(ANY)) {
+          const keys = items.map((item) => stableStringify(item as JsonValue));
+          if (new Set(keys).size !== keys.length) return false;
+        }
         return items.every((item, index) =>
           this.#conforms(item, prefix[index] ?? schema.items, hops),
         );
@@ -919,6 +1383,9 @@ export class MockSampler {
           }
           if (!this.#conforms(value[property.name], property.schema, hops)) return false;
         }
+        const c = schema.constraints ?? {};
+        const count = Object.keys(value).length;
+        if (count < (c.minProperties ?? 0) || count > (c.maxProperties ?? Infinity)) return false;
         const additional = schema.additionalProperties;
         if (additional === undefined || (additional === false && open)) return true;
         for (const key of Object.keys(value)) {
@@ -949,8 +1416,9 @@ export class MockSampler {
   }
 
   /**
-   * A JSON example as a value of `schema`'s type: properties the type does not declare are left
-   * out (object literals cannot have them), dates become `Date` values with `types.dates: 'Date'`.
+   * A JSON example as a constant of `schema`'s type: properties the type does not declare are
+   * left out (object literals cannot have them), dates become `Date` values with
+   * `types.dates: 'Date'`.
    */
   #fromJson(value: JsonValue, schema: SchemaIR, hops = 0): MockValue {
     if (value === null || hops > MAX_HOPS) return json(value);
@@ -993,6 +1461,8 @@ export class MockSampler {
       }
       case 'object':
         return isRecord(value) ? this.#fromJsonObject(value, schema, hops) : json(value);
+      case 'enum':
+        return literal(value);
       default:
         return json(value);
     }
@@ -1067,16 +1537,19 @@ export class MockSampler {
   }
 
   /**
-   * The JSON a value stands for (`Blob`s as a marker). Fixture calls are followed when `deep`,
-   * and otherwise assumed to match (each fixture is checked on its own). `undefined` when the
-   * value cannot be computed (`never`, or a fixture that is being generated).
+   * The value a recipe makes with `fake`, as the printed code would (`Blob`s as a marker).
+   * Fixture calls are followed when `deep`, and otherwise assumed to match (each fixture is
+   * checked on its own). `undefined` when the value cannot be computed (`never`, or a fixture
+   * that is being generated).
    */
-  #materialize(value: MockValue, deep: boolean): unknown {
+  #evaluate(value: MockValue, fake: Fake, deep: boolean): unknown {
+    const items = (list: readonly unknown[]): unknown =>
+      list.includes(undefined) ? undefined : list;
     switch (value.kind) {
       case 'json':
       case 'date':
         return value.value;
-      case 'blob':
+      case 'file':
         return BLOB;
       case 'never':
         return undefined;
@@ -1084,29 +1557,182 @@ export class MockSampler {
         if (!deep) return ANY;
         const model = this.#ctx.project.modelById.get(value.model);
         if (model === undefined || this.#inProgress.has(model.id)) return undefined;
-        return this.#materialize(this.fixture(model), deep);
+        return this.#evaluate(this.fixture(model), new Fake(fake.at(value.key)), deep);
       }
-      case 'array': {
-        const items = value.items.map((item) => this.#materialize(item, deep));
-        return items.includes(undefined) ? undefined : items;
-      }
+      case 'array':
+        return items(value.items.map((item) => this.#evaluate(item, fake, deep)));
       case 'object': {
         const result: Record<string, unknown> = {};
         // Spreads are followed even in shallow mode: the entries next to them are checked against
         // a schema that also requires the spread's properties.
         for (const spread of value.spreads) {
-          const data = this.#materialize(spread, true);
+          const data = this.#evaluate(spread, fake, true);
           if (data === undefined) return deep ? undefined : ANY;
           if (isRecord(data))
             for (const [key, item] of Object.entries(data)) setOwn(result, key, item);
         }
         for (const [key, item] of value.entries) {
-          const data = this.#materialize(item, deep);
+          const data = this.#evaluate(item, fake, deep);
           if (data === undefined) return undefined;
           setOwn(result, key, data);
         }
-        return result;
+        return value.optional === undefined
+          ? result
+          : fake.optional(value.path ?? '', result, value.optional);
       }
+      case 'text':
+        return fake.text(value.key, value.value, value.text, value.min, value.max);
+      case 'pattern':
+        return fake.pattern(
+          value.key,
+          value.value,
+          value.pattern,
+          value.min,
+          value.max,
+          value.text,
+        );
+      case 'int':
+        return fake.int(value.key, value.value, value.min, value.max);
+      case 'number':
+        return fake.number(
+          value.key,
+          value.value,
+          value.min,
+          value.max,
+          value.digits,
+          value.exclusive,
+        );
+      case 'multiple':
+        return fake.multiple(
+          value.key,
+          value.value,
+          value.first,
+          value.last,
+          value.step,
+          value.digits,
+        );
+      case 'bool':
+        return fake.bool(value.key, value.value, value.rate);
+      case 'when':
+        return fake.date(value.key, value.value, value.format, value.when);
+      case 'pick':
+        return fake.pick(value.key, value.values);
+      case 'oneOf':
+        return fake.oneOf(value.key, value.options.length, (index) => {
+          const option = value.options[index];
+          return option === undefined ? undefined : this.#evaluate(option, fake, deep);
+        });
+      case 'nullable':
+        return fake.nullable(value.key, () => this.#evaluate(value.value, fake, deep));
+      case 'list':
+        return items(
+          fake.array(
+            value.key,
+            value.count,
+            value.min,
+            value.max,
+            (item) => this.#evaluate(value.item, item, deep),
+            value.unique,
+          ),
+        );
+      case 'record': {
+        const record = fake.record(value.key, value.count, value.min, value.max, (item) =>
+          this.#evaluate(value.value, item, deep),
+        );
+        return Object.values(record).includes(undefined) ? undefined : record;
+      }
+      case 'example':
+        return fake.example((examples) =>
+          this.#evaluate(examples ? value.value : value.make, fake, deep),
+        );
+      // Text, whose value was checked before it was encoded.
+      case 'encoded':
+        return '';
+    }
+  }
+
+  /**
+   * The constant a recipe makes with `fake`: the same value for every seed. Lists keep the items
+   * the fake makes (different ones), fixture calls and files stay, keyed by where they are.
+   */
+  #freeze(value: MockValue, fake: Fake, prefix = ''): MockValue {
+    const at = (key: string): string => `${prefix}${key}`;
+    switch (value.kind) {
+      case 'json':
+      case 'date':
+      case 'never':
+        return value;
+      case 'fixture':
+        return { ...value, key: at(value.key) };
+      case 'file':
+        return { ...value, key: at(value.key) };
+      case 'text':
+      case 'pattern':
+      case 'int':
+      case 'number':
+      case 'multiple':
+      case 'bool':
+        return json(this.#evaluate(value, fake, false) as JsonValue);
+      case 'pick':
+        return literal(fake.pick(value.key, value.values));
+      case 'when': {
+        const made = fake.date(value.key, value.value, value.format, value.when);
+        return value.asDate ? { kind: 'date', value: made } : json(made);
+      }
+      case 'oneOf':
+        return fake.oneOf(value.key, value.options.length, (index) =>
+          this.#freeze(value.options[index] ?? { kind: 'never' }, fake, prefix),
+        );
+      case 'nullable':
+        return (
+          fake.nullable(value.key, () => this.#freeze(value.value, fake, prefix)) ?? json(null)
+        );
+      case 'list':
+        return {
+          kind: 'array',
+          items: fake.array(value.key, value.count, value.min, value.max, (item, index) =>
+            this.#freeze(value.item, item, `${prefix}${value.key}[${index}].`),
+          ),
+        };
+      case 'record':
+        return {
+          kind: 'object',
+          spreads: [],
+          entries: Object.entries(
+            fake.record(value.key, value.count, value.min, value.max, (item, name) =>
+              this.#freeze(value.value, item, `${prefix}${value.key}{${name}}.`),
+            ),
+          ),
+        };
+      case 'object': {
+        const entries = value.entries.map(
+          ([key, item]) => [key, this.#freeze(item, fake, prefix)] as const,
+        );
+        const kept = new Set(
+          Object.keys(
+            value.optional === undefined
+              ? Object.fromEntries(entries)
+              : fake.optional(value.path ?? '', Object.fromEntries(entries), value.optional),
+          ),
+        );
+        return {
+          kind: 'object',
+          spreads: value.spreads.map((spread) => this.#freeze(spread, fake, prefix)),
+          entries: entries.filter(([key]) => kept.has(key)),
+          ...(value.id === undefined ? {} : { id: value.id }),
+        };
+      }
+      case 'array':
+        return {
+          kind: 'array',
+          items: value.items.map((item) => this.#freeze(item, fake, prefix)),
+        };
+      case 'example':
+        return fake.example((examples) =>
+          examples ? value.value : this.#freeze(value.make, fake, prefix),
+        );
+      case 'encoded':
+        return { ...value, value: this.#freeze(value.value, fake, prefix) };
     }
   }
 
@@ -1122,7 +1748,7 @@ export class MockSampler {
 
   /** Reports a fixture that does not match its schema (its fixture calls are checked separately). */
   #check(value: MockValue, schema: SchemaIR, scope: Scope): void {
-    const data = this.#materialize(value, false);
+    const data = this.#evaluate(value, CANONICAL, false);
     if (data === undefined || this.#conforms(data, schema)) return;
     this.#unfit.add(value);
     this.#report(
@@ -1148,7 +1774,9 @@ export class MockSampler {
     const segments = suffix
       .split('/')
       .filter((segment) => segment !== '')
-      .map((segment) => (/^\d+$/.test(segment) ? `[${segment}]` : `.${segment}`));
+      .map((segment) =>
+        /^\d+$/.test(segment) ? `[${segment}]` : segment === 'items' ? '[0]' : `.${segment}`,
+      );
     return `\`${scope.label}${segments.join('')}\``;
   }
 
@@ -1169,10 +1797,93 @@ export class MockSampler {
   }
 }
 
+/** The leaf of a property of an object value. */
+function child(leaf: Leaf, name: string): Leaf {
+  return {
+    key: leaf.key === '' ? name : `${leaf.key}.${name}`,
+    name,
+    // The properties of a fixture belong to its model; those of an inline object to its property.
+    owner: leaf.root === true ? leaf.owner : (leaf.name ?? leaf.owner),
+  };
+}
+
+/** Whether a recipe is an object literal, or an example of one: such fixtures take overrides. */
+export function isObjectRecipe(value: MockValue): boolean {
+  return (
+    value.kind === 'object' ||
+    (value.kind === 'example' && value.value.kind === 'object' && value.make.kind === 'object')
+  );
+}
+
+/** Whether a recipe makes different values for different seeds. */
+export function varies(value: MockValue): boolean {
+  switch (value.kind) {
+    case 'json':
+    case 'date':
+    case 'never':
+    case 'fixture':
+    case 'file':
+      return false;
+    case 'object':
+      return (
+        value.optional !== undefined ||
+        [...value.spreads, ...value.entries.map(([, v]) => v)].some(varies)
+      );
+    case 'array':
+      return value.items.some(varies);
+    case 'encoded':
+      return varies(value.value);
+    default:
+      return true;
+  }
+}
+
+/** Whether a recipe uses the `Fake` (`f`) of its fixture. */
+export function usesFake(value: MockValue): boolean {
+  switch (value.kind) {
+    case 'json':
+    case 'date':
+    case 'never':
+      return false;
+    case 'object':
+      return (
+        value.optional !== undefined ||
+        value.id !== undefined ||
+        [...value.spreads, ...value.entries.map(([, v]) => v)].some(usesFake)
+      );
+    case 'array':
+      return value.items.some(usesFake);
+    case 'example':
+      return true;
+    default:
+      return true;
+  }
+}
+
+/** What kind of scalar a constant is, to tell a `Date` from a string. */
+function scalarKind(value: MockValue): string {
+  return value.kind === 'date' || (value.kind === 'when' && value.asDate) ? 'date' : 'other';
+}
+
 /** A value with one more (or replaced) property; values that are not object literals are spread. */
 function withEntry(value: MockValue, key: string, entry: MockValue): MockValue {
-  if (value.kind === 'object')
-    return { ...value, entries: [...value.entries.filter(([k]) => k !== key), [key, entry]] };
+  if (value.kind === 'object') {
+    const optional = value.optional?.filter((name) => name !== key);
+    const { optional: _optional, path: _path, ...rest } = value;
+    return {
+      ...rest,
+      entries: [...value.entries.filter(([k]) => k !== key), [key, entry]],
+      ...(optional === undefined || optional.length === 0
+        ? {}
+        : { optional, path: value.path ?? '' }),
+    };
+  }
+  if (value.kind === 'example')
+    return {
+      kind: 'example',
+      value: withEntry(value.value, key, entry),
+      make: withEntry(value.make, key, entry),
+    };
   return { kind: 'object', spreads: [value], entries: [[key, entry]] };
 }
 

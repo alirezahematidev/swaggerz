@@ -124,6 +124,25 @@ components:
     }
   });
 
+  it.each(['ts', 'js'] as const)(
+    'start in the browser from a module that imports nothing until it is called (%s)',
+    async (extension) => {
+      const { directory } = await generateCase(`mocks-start-${extension}`, {
+        ...configFor(MOCKS),
+        output: extension === 'js' ? { language: 'javascript' } : {},
+      });
+      const source = await readFile(path.join(directory, 'mocks', `start.${extension}`), 'utf8');
+      // Only type imports (none at all in JavaScript): MSW and the handlers load when it is called.
+      expect(source.match(/^import (?!type\b).*$/gm) ?? []).toEqual([]);
+      expect(source).toContain("import('msw/browser')");
+      const { startMocks } = (await import(
+        pathToFileURL(path.join(directory, 'mocks', `start.${extension}`)).href
+      )) as { startMocks: () => Promise<unknown> };
+      // Service workers need a browser: elsewhere it says what to use instead.
+      await expect(startMocks()).rejects.toThrow('startMocks() needs service workers');
+    },
+  );
+
   it('keep msw out of the client and its barrel', async () => {
     const { result } = await generateCase('mocks-isolation', configFor(MOCKS));
     const importers = result.files
@@ -185,6 +204,71 @@ const LIBRARIES = [
   },
 ] as const;
 
+/** The fixture options every fixture is validated with, beyond the examples. */
+const SEEDS = [
+  ...Array.from({ length: 24 }, (_, index) => ({ seed: index + 1 })),
+  { seed: 4_000_000_000 },
+  { empty: true },
+  { seed: 11, empty: true },
+];
+
+describe('fixture variants', () => {
+  let mocks: Mocks;
+
+  beforeAll(async () => {
+    const { directory } = await generateCase('mocks-variants', configFor(MOCKS));
+    mocks = (await import(pathToFileURL(path.join(directory, 'mocks', 'index.ts')).href)) as Mocks;
+  });
+
+  const seeds = Array.from({ length: 80 }, (_, index) => ({ seed: index + 1 }));
+
+  it('cover every enum value, absent property and null in turn', () => {
+    const pets = seeds.map(
+      (options) => mocks.makePet!(undefined, options) as Record<string, unknown>,
+    );
+    expect(new Set(pets.map((pet) => pet['kind']))).toEqual(new Set(['dog', 'cat', 'bird']));
+    expect(pets.some((pet) => !('chip' in pet))).toBe(true);
+    expect(pets.some((pet) => 'chip' in pet)).toBe(true);
+    expect(new Set(pets.map((pet) => pet['id'])).size).toBeGreaterThan(70);
+    const visits = seeds.map(
+      (options) => mocks.makeVisit!(undefined, options) as Record<string, unknown>,
+    );
+    expect(new Set(visits.map((visit) => visit['status']))).toEqual(
+      new Set(['scheduled', 'completed', 'cancelled']),
+    );
+    expect(visits.some((visit) => visit['notes'] === null)).toBe(true);
+    // Identifiers keep the example's shape.
+    for (const visit of visits) expect(visit['id']).toMatch(/^vis_[0-9a-z]{10}$/);
+  });
+
+  it('make realistic values that keep their constraints', () => {
+    for (const options of seeds) {
+      const pet = mocks.makePet!(undefined, options) as Record<string, unknown>;
+      expect(pet['name']).toMatch(/^.{1,20}$/);
+      expect(pet['chip'] ?? 'ABC-1234').toMatch(/^[A-Z]{3}-\d{4}$/);
+      expect(pet['contact'] ?? 'a@b').toMatch(/^[a-z.]+@[a-z.]+$/);
+      expect((((pet['weight'] as number | undefined) ?? 1) * 2) % 1).toBe(0);
+      const person = mocks.makePerson!(undefined, options) as Record<string, unknown>;
+      expect(person['name']).toMatch(/^\S+ \S+$/);
+      // An example's domain is kept.
+      expect(person['email']).toMatch(/@vets\.example\.com$/);
+    }
+    // Seed 0 is the specification's examples.
+    expect(mocks.makePerson!()).toMatchObject({
+      name: 'Ada Lovelace',
+      email: 'ada@vets.example.com',
+    });
+    expect(mocks.makePet!(undefined, { seed: 0 })).toEqual(mocks.makePet!());
+  });
+
+  it('make arrays as short as allowed in empty states', () => {
+    expect(mocks.makeVisitPage!(undefined, { empty: true })).toMatchObject({ items: [] });
+    const page = mocks.makeVisitPage!() as { items: unknown[] };
+    expect(page.items.length).toBeGreaterThan(1);
+    expect(page.items[0]).toEqual(mocks.makeVisit!());
+  });
+});
+
 describe.each(LIBRARIES)('fixtures validate with $library', ({ library, problem }) => {
   it.each(SPECS)('%s', async (file, version) => {
     const spec: Spec = [file, version];
@@ -202,20 +286,31 @@ describe.each(LIBRARIES)('fixtures validate with $library', ({ library, problem 
     const failures: string[] = [];
     const models = result.project?.models ?? [];
     expect(models.length).toBeGreaterThan(0);
+    const { encodeDates } = (await load('runtime/dates').catch(() => ({}))) as {
+      encodeDates?: (value: unknown, shape: unknown) => unknown;
+    };
     for (const model of models) {
-      const make = mocks[model.fixtureName ?? ''] as () => unknown;
-      let value = make();
-      // Schemas validate the wire format: with `types.dates: 'Date'`, dates are strings there.
-      if (model.datesModule !== undefined && model.datesName !== undefined) {
-        const { encodeDates } = (await load('runtime/dates')) as {
-          encodeDates: (value: unknown, shape: unknown) => unknown;
-        };
-        value = encodeDates(value, (await load(model.datesModule))[model.datesName]);
+      const factory = mocks[model.fixtureName ?? ''] as (...args: unknown[]) => unknown;
+      // Fixtures of object types take overrides first.
+      const make = (options?: object): unknown =>
+        factory.length >= 2 ? factory(undefined, options) : factory(options);
+      const shape =
+        model.datesModule !== undefined && model.datesName !== undefined
+          ? (await load(model.datesModule))[model.datesName]
+          : undefined;
+      // The examples, other seeds, and empty states all match the schema.
+      for (const options of [undefined, ...SEEDS]) {
+        let value = make(options);
+        // Schemas validate the wire format: with `types.dates: 'Date'`, dates are strings there.
+        if (shape !== undefined && encodeDates !== undefined) value = encodeDates(value, shape);
+        const found = problem(schemas[model.schemaName ?? ''], value);
+        if (found !== undefined)
+          failures.push(`${model.name} ${JSON.stringify(options)}: ${found}`);
       }
-      const found = problem(schemas[model.schemaName ?? ''], value);
-      if (found !== undefined) failures.push(`${model.name}: ${found}`);
-      // Every call returns an equal value, and a new one for objects.
+      // Every call returns an equal value for a seed, and a new one for objects.
       expect(make()).toEqual(make());
+      expect(make({ seed: 3 })).toEqual(make({ seed: 3 }));
+      const value = make();
       const fresh = typeof value !== 'object' || value === null || make() !== make();
       expect(fresh).toBe(true);
     }
@@ -272,30 +367,97 @@ describe.each([
     server.close();
   });
 
-  it(`respond with the fixtures by default (${label})`, async () => {
+  it(`respond with the examples, or with values generated for the request (${label})`, async () => {
     server.use(...(mocks.mockHandlers!() as never[]));
-    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!());
+    // Without parameters: the examples, and more items generated after them.
+    const pets = (await call(api, 'listPets')) as { id: number }[];
+    expect(pets).toHaveLength(6);
+    expect(pets[0]).toEqual(mocks.makePet!());
+    expect(new Set(pets.map((pet) => pet.id)).size).toBe(6);
     // A media type example; and `/pets/mine` is matched before `/pets/{petId}`.
     await expect(call(api, 'listMyPets')).resolves.toEqual([
       { id: 1, name: 'Rex', kind: 'dog', tags: [] },
       { id: 2, name: 'Tom', kind: 'cat', tags: ['indoor'] },
     ]);
+    // With parameters: values of their own, the same for the same request, with the parameters
+    // where the body repeats them.
+    const one = await call(api, 'getPet', { petId: 3 });
+    expect(one).toMatchObject({ id: 3 });
+    await expect(call(api, 'getPet', { petId: 3 })).resolves.toEqual(one);
+    await expect(call(api, 'getPet', { petId: 4 })).resolves.not.toEqual({
+      ...(one as object),
+      id: 4,
+    });
+    // An `id` a list returned gets the same pet again.
+    const listed = pets[2]!;
+    await expect(call(api, 'getPet', { petId: listed.id })).resolves.toEqual(listed);
     await expect(call(api, 'getPetNote', { petId: 1 })).resolves.toBe('A very good pet.');
+    // Binary responses are real files of their media type.
     const photo = (await call(api, 'getPetPhoto', { petId: 1 })) as Blob;
     expect(photo).toBeInstanceOf(Blob);
     expect(photo.type).toBe('image/png');
+    expect([...new Uint8Array(await photo.slice(0, 4).arrayBuffer())]).toEqual([
+      0x89, 0x50, 0x4e, 0x47,
+    ]);
     await expect(call(api, 'deletePet', { petId: 1 })).resolves.toBeUndefined();
-    await expect(call(api, 'listPets')).resolves.toEqual([mocks.makePet!()]);
+  });
+
+  it('page through lists until the cursor ends, and bind path parameters into items', async () => {
+    server.use(...(mocks.mockHandlers!() as never[]));
+    const ids = new Set<string>();
+    let cursor: string | null | undefined;
+    let pages = 0;
+    do {
+      const page = (await call(api, 'listVisits', {
+        petId: 5,
+        ...(cursor == null ? {} : { cursor }),
+      })) as { items: { id: string; petId: number }[]; nextCursor: string | null };
+      for (const visit of page.items) {
+        expect(visit.petId).toBe(5);
+        ids.add(visit.id);
+      }
+      cursor = page.nextCursor;
+      pages++;
+    } while (cursor !== null && pages < 100);
+    expect(pages).toBeLessThan(100);
+    expect(ids.size).toBeGreaterThan(0);
+    // A visit a page listed is the same visit when requested.
+    const [first] = ids;
+    const visit = (await call(api, 'getVisit', { visitId: first })) as { id: string };
+    expect(visit.id).toBe(first);
+  });
+
+  it('respond with fixed seeds, empty arrays or the documented error when asked', async () => {
+    server.use(...(mocks.mockHandlers!({ seed: 0 }) as never[]));
+    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!({ id: 1 }));
+    server.resetHandlers(...(mocks.mockHandlers!({ seed: 7 }) as never[]));
+    const seven = await call(api, 'getPet', { petId: 1 });
+    await expect(call(api, 'getPet', { petId: 2 })).resolves.toEqual({
+      ...(seven as object),
+      id: 2,
+    });
+    server.resetHandlers(...(mocks.mockHandlers!({ empty: true }) as never[]));
+    await expect(call(api, 'listPets')).resolves.toEqual([]);
+    await expect(call(api, 'listVisits', { petId: 1 })).resolves.toMatchObject({ items: [] });
+    server.resetHandlers(...(mocks.mockHandlers!({ error: true }) as never[]));
+    expect(await failure(call(api, 'getVisit', { visitId: 'x' }))).toMatchObject({ status: 404 });
+    expect(
+      await failure(call(api, 'createPet', { body: { name: 'Bo', kind: 'bird' } })),
+    ).toMatchObject({
+      status: 422,
+    });
+    // Without a documented error, `500`.
+    expect(await failure(call(api, 'listPets'))).toMatchObject({ status: 500 });
   });
 
   it('respond with a documented status and its fixture', async () => {
-    server.use(mocks.mockGetPet!({ status: 404 }) as never);
+    server.use(mocks.mockGetPet!({ status: 404, seed: 0 }) as never);
     const notFound = await failure(call(api, 'getPet', { petId: 1 }));
     expect((api['isGetPetApiError'] as (e: unknown) => boolean)(notFound)).toBe(true);
     expect(notFound['status']).toBe(404);
     expect(notFound['body']).toEqual(mocks.makeProblem!());
     // A range (`4XX`) and `default` serve every status they cover.
-    server.use(mocks.mockGetPet!({ status: 409 }) as never);
+    server.use(mocks.mockGetPet!({ status: 409, seed: 0 }) as never);
     expect(await failure(call(api, 'getPet', { petId: 1 }))).toMatchObject({
       status: 409,
       body: mocks.makeProblem!(),
@@ -303,7 +465,7 @@ describe.each([
     server.use(mocks.mockDeletePet!({ status: 503 }) as never);
     expect(await failure(call(api, 'deletePet', { petId: 1 }))).toMatchObject({
       status: 503,
-      body: mocks.makeProblem!(),
+      body: { title: expect.any(String) },
     });
     server.use(mocks.mockCreatePet!({ status: 422, body: { title: 'Invalid' } }) as never);
     expect(
@@ -334,6 +496,14 @@ describe.each([
       }) as never,
     );
     await expect(call(api, 'getPet', { petId: 7 })).resolves.toMatchObject({ id: 7 });
+    // A function can change the body generated for the request.
+    server.use(
+      mocks.mockGetPet!({
+        body: ({ generated }: { generated: () => object }) => ({ ...generated(), name: 'Rex' }),
+      }) as never,
+    );
+    const generated = (await call(api, 'getPet', { petId: 8 })) as Record<string, unknown>;
+    expect(generated).toMatchObject({ id: 8, name: 'Rex', kind: expect.any(String) });
     await expect(
       call(api, 'createPet', { body: { name: 'Bo', kind: 'bird' } }),
     ).resolves.toMatchObject({ id: 99, name: 'Bo', kind: 'bird' });
@@ -364,6 +534,17 @@ describe.each([
     expect(await failure(call(api, 'deletePet', { petId: 2 }))).toMatchObject({ status: 410 });
   });
 
+  it("write XML documents as the schema's XML Objects describe", async () => {
+    server.use(...(mocks.mockHandlers!() as never[]));
+    const card = (await call(api, 'getPetCard', { petId: 2 })) as string;
+    expect(card).toMatch(/^<\?xml version="1\.0" encoding="UTF-8"\?>\n/);
+    // The component's XML Object names the root, with its namespace; `id` is an attribute (with
+    // the path parameter's value), `tags` a wrapped list of `tag` elements.
+    expect(card).toMatch(/<p:card xmlns:p="https:\/\/example\.com\/pets" id="2">/);
+    expect(card).toMatch(/<name>[^<]+<\/name>/);
+    expect(card).toMatch(/<tags>(<tag>[^<]+<\/tag>)*<\/tags><\/p:card>/);
+  });
+
   it('decode path parameters, including label and matrix styles', async () => {
     server.use(
       mocks.mockGetBook!({ body: ({ params }: { params: unknown }) => params }) as never,
@@ -381,7 +562,7 @@ describe.each([
   it("follow the client's base URL and the operations' servers", async () => {
     server.use(...(mocks.mockHandlers!() as never[]));
     api.client.setConfig({ baseUrl: 'http://localhost:4000/api/' });
-    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!());
+    await expect(call(api, 'getPet', { petId: 1 })).resolves.toMatchObject({ id: 1 });
     // `upload` declares its own server, which the client and the handler both use.
     await expect(call(api, 'upload', { body: { label: 'x' } })).resolves.toEqual(
       expect.objectContaining({ size: expect.any(Number) }),
@@ -391,7 +572,7 @@ describe.each([
       name: 'RequestError',
     });
     api.client.setConfig({ baseUrl: 'https://elsewhere.example.com' });
-    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!());
+    await expect(call(api, 'getPet', { petId: 1 })).resolves.toMatchObject({ id: 1 });
   });
 
   it('answer HEAD without a body, and read bodiless requests as undefined', async () => {
@@ -428,9 +609,9 @@ describe.each([
       baseUrl: 'http://other.test/v2',
     });
     server.resetHandlers(mocks.mockGetPet!({ client: other }) as never);
-    await expect(call(api, 'getPet', { petId: 1 }, { client: other })).resolves.toEqual(
-      mocks.makePet!(),
-    );
+    await expect(call(api, 'getPet', { petId: 1 }, { client: other })).resolves.toMatchObject({
+      id: 1,
+    });
     expect(await failure(call(api, 'getPet', { petId: 1 }))).toMatchObject({ kind: 'network' });
   });
 
@@ -465,7 +646,7 @@ describe('mock handlers with dates', () => {
 
   it('send dates in their wire format and revive request bodies', async () => {
     let received: unknown;
-    server.use(...(mocks.mockHandlers!() as never[]));
+    server.use(...(mocks.mockHandlers!({ seed: 0 }) as never[]));
     // Handlers added later take precedence.
     server.use(
       mocks.mockCreateAccount!({
@@ -478,10 +659,82 @@ describe('mock handlers with dates', () => {
     const account = mocks.makeAccount!() as Record<string, unknown>;
     expect(account['birthday']).toBeInstanceOf(Date);
     // The client revives what the handler encoded: the same `Date` values come back.
-    await expect(call(api, 'getAccount', { accountId: 'a' })).resolves.toEqual(account);
+    await expect(call(api, 'getAccount', { accountId: 'a' })).resolves.toEqual({
+      ...account,
+      id: 'a',
+    });
     await call(api, 'createAccount', { body: mocks.makeAccountInput!() });
     expect((received as Record<string, unknown>)['birthday']).toBeInstanceOf(Date);
     expect(received).toEqual(mocks.makeAccountInput!());
+  });
+});
+
+describe('webhook and callback mocks', () => {
+  it('make requests the API could send, and send them to a route', async () => {
+    const { directory } = await generateCase('mocks-webhooks', configFor(ADVANCED));
+    const mocks = (await import(
+      pathToFileURL(path.join(directory, 'mocks', 'index.ts')).href
+    )) as Mocks;
+    const request = mocks.makeAccountClosedWebhookRequest!() as {
+      body: Record<string, unknown>;
+      headers: Record<string, string>;
+    };
+    expect(request.body).toEqual(mocks.makeAccount!());
+    expect(request.headers['x-signature']).toEqual(expect.any(String));
+    expect(mocks.makeAccountClosedWebhookRequest!(undefined, { seed: 2 })).not.toEqual(request);
+    expect(mocks.makeCreateAccountAccountEventCallbackRequest).toBeTypeOf('function');
+    // Sent like the API sends it: method, headers and the JSON body, dates as strings.
+    let received: Request | undefined;
+    const capture = async (
+      input: Parameters<typeof fetch>[0],
+      init?: RequestInit,
+    ): Promise<Response> => {
+      received = new Request(input, init);
+      return Response.json({ received: true });
+    };
+    const response = (await mocks.sendAccountClosedWebhook!(
+      'https://hooks.example.com/closed',
+      undefined,
+      {
+        fetch: capture,
+        headers: { 'x-delivery': '1' },
+      },
+    )) as Response;
+    await expect(response.json()).resolves.toEqual({ received: true });
+    expect(received?.method).toBe('POST');
+    expect(received?.url).toBe('https://hooks.example.com/closed');
+    expect(received?.headers.get('content-type')).toBe('application/json');
+    expect(received?.headers.get('x-signature')).toBe(request.headers['x-signature']);
+    expect(received?.headers.get('x-delivery')).toBe('1');
+    const sent = (await received?.json()) as Record<string, unknown>;
+    expect(sent['birthday']).toEqual(expect.any(String));
+  });
+});
+
+describe('sequential media types', () => {
+  it('write items as JSON Lines and server-sent events', async () => {
+    const { directory } = await generateCase(
+      'mocks-sequences',
+      configFor(['features-3.2.yaml', '3.2'], { features: { validation: 'zod' } }),
+    );
+    const api = (await import(pathToFileURL(path.join(directory, 'index.ts')).href)) as Api;
+    const mocks = (await import(
+      pathToFileURL(path.join(directory, 'mocks', 'index.ts')).href
+    )) as Mocks;
+    const transport = (api['createFetchTransport'] as (config: object) => unknown)({
+      fetch: mocks.mockFetch!(mocks.mockHandlers!()),
+    });
+    api.client.setConfig({ transport });
+    // JSON Lines: one audit entry per line.
+    const audit = (await call(api, 'exportAudit')) as string;
+    const lines = audit.trimEnd().split('\n');
+    expect(lines.length).toBeGreaterThan(1);
+    for (const line of lines) expect(JSON.parse(line)).toEqual(expect.any(Object));
+    // Server-sent events: `data` lines, separated by blank lines.
+    const events = (await call(api, 'streamEvents')) as string;
+    const blocks = events.trimEnd().split('\n\n');
+    expect(blocks.length).toBeGreaterThan(1);
+    for (const block of blocks) expect(block).toMatch(/^(?:(?:event|id|retry): .*\n)*data: /);
   });
 });
 
@@ -511,7 +764,7 @@ describe('mockFetch', () => {
 
   it('answers the client from handlers without intercepting requests', async () => {
     answeredBy(mocks.mockHandlers!() as unknown[]);
-    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!());
+    await expect(call(api, 'getPet', { petId: 1 })).resolves.toMatchObject({ id: 1 });
     await expect(call(api, 'getPetNote', { petId: 1 })).resolves.toBe('A very good pet.');
     // A relative base URL works outside browsers too.
     api.client.setConfig({ baseUrl: '/v1' });
@@ -573,7 +826,7 @@ describe('mock handlers with the axios adapter', () => {
 
   it('answer requests axios sends', async () => {
     server.use(...(mocks.mockHandlers!() as never[]));
-    await expect(call(api, 'getPet', { petId: 1 })).resolves.toEqual(mocks.makePet!());
+    await expect(call(api, 'getPet', { petId: 1 })).resolves.toMatchObject({ id: 1 });
     await expect(call(api, 'getPetNote', { petId: 1 })).resolves.toBe('A very good pet.');
     server.use(
       mocks.mockCreatePet!({
@@ -584,7 +837,7 @@ describe('mock handlers with the axios adapter', () => {
     await expect(
       call(api, 'createPet', { body: { name: 'Bo', kind: 'bird' } }),
     ).resolves.toMatchObject({ id: 3, name: 'Bo' });
-    server.use(mocks.mockGetPet!({ status: 404 }) as never);
+    server.use(mocks.mockGetPet!({ status: 404, seed: 0 }) as never);
     expect(await failure(call(api, 'getPet', { petId: 1 }))).toMatchObject({
       status: 404,
       body: mocks.makeProblem!(),

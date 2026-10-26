@@ -80,7 +80,7 @@ Generators receive an `EmitContext` (project, config, plugin hooks) and render e
 
 The runtime (`src/templates/runtime`) is ordinary TypeScript that is type-checked with the strictest consumer settings against an ES2020 + DOM environment. At build time it is published as `.ts`, `.js` and `.d.ts` variants in `assets/runtime`, and copied into each generated client. The mocks support module (`src/templates/mocks`, the only template that imports a package: `msw`) is built the same way into `assets/mocks` and copied with `features.mocks`.
 
-Mock fixtures are computed by the generator, not at runtime (`src/codegen/mocks`): one `MockSampler` per generation turns schemas into language-independent values (examples that match their schema, otherwise deterministic values seeded by the schema's location), which each output language then prints. Problems it finds are reported through `EmitContext.report`.
+Mock fixtures are recipes (`src/codegen/mocks`): one `MockSampler` per generation turns schemas into language-independent recipes over the fake data module `src/templates/mocks/fake.ts` (each value with the example it makes for seed `0` and how to vary it for other seeds), which each output language then prints. `semantics.ts` chooses realistic values from property names, formats and owning models. The sampler imports the same `fake.ts` the generated code runs, evaluates each recipe for trial seeds and checks the values against the schema; recipes that fail keep their examples. Problems it finds are reported through `EmitContext.report`.
 
 ## Writing
 

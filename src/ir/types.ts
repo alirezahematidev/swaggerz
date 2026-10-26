@@ -9,7 +9,7 @@
  * before 1.0. Changes are recorded in the changelog and `IR_VERSION` is incremented.
  */
 
-export const IR_VERSION = 3;
+export const IR_VERSION = 4;
 
 export type SpecVersion = '2.0' | '3.0' | '3.1' | '3.2';
 
@@ -342,10 +342,26 @@ export interface SchemaMeta {
   readonly default?: JsonValue;
   readonly examples?: readonly JsonValue[];
   readonly format?: string;
+  /** The `xml` keyword: how the value is written in XML. */
+  readonly xml?: XmlIR;
   /** Constraints TypeScript types cannot express; generated Zod schemas enforce them. */
   readonly assertions?: SchemaAssertions;
   readonly extensions?: Extensions;
   readonly source?: SourceRef;
+}
+
+/** The `xml` keyword of a schema (the XML Object). */
+export interface XmlIR {
+  /** The element or attribute name, instead of the property's or the component's name. */
+  readonly name?: string;
+  readonly namespace?: string;
+  readonly prefix?: string;
+  /** Written as an attribute of the parent element (OpenAPI 3.2: `nodeType: attribute`). */
+  readonly attribute?: boolean;
+  /** An array whose items are wrapped in an element of the array's name. */
+  readonly wrapped?: boolean;
+  /** OpenAPI 3.2 `nodeType`: `text` and `cdata` are the parent's content, `none` has no element. */
+  readonly nodeType?: 'element' | 'attribute' | 'text' | 'cdata' | 'none';
 }
 
 /**

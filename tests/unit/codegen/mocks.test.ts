@@ -1,55 +1,22 @@
-import { writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { samplePattern } from '../../../src/codegen/mocks/pattern.ts';
-import { formatted, Random } from '../../../src/codegen/mocks/random.ts';
-import type { UserConfig } from '../../../src/config/types.ts';
-import type { Diagnostic } from '../../../src/diagnostics/types.ts';
-import { compile } from '../../../src/pipeline/compile.ts';
-import { makeConfig, withTempDir } from '../../helpers.ts';
-
-/** Compiles an OpenAPI 3.1 document (paths and components as YAML) with mocks enabled. */
-async function generate(
-  body: string,
-  extra: Partial<UserConfig> = {},
-): Promise<{ file: (name: string) => string; diagnostics: readonly Diagnostic[] }> {
-  return withTempDir(async (directory) => {
-    const input = path.join(directory, 'openapi.yaml');
-    await writeFile(
-      input,
-      `openapi: 3.1.0\ninfo:\n  title: Mocks\n  version: '1'\nservers:\n  - url: https://api.example.com\n${body}`,
-    );
-    const result = await compile({
-      config: makeConfig(
-        {
-          ...extra,
-          spec: { version: '3.1', input },
-          features: { mocks: 'msw', ...extra.features },
-        },
-        directory,
-      ),
-    });
-    return {
-      file: (name) => {
-        const found = result.files.find((f) => f.path === name);
-        if (found === undefined)
-          throw new Error(`${name} is not among ${result.files.map((f) => f.path).join(', ')}`);
-        return found.content;
-      },
-      diagnostics: result.diagnostics,
-    };
-  });
-}
-
-/** What a fixture factory returns on one line, without the `...overrides` entry. */
-function returned(content: string): string {
-  const match = /return ([\s\S]*?);\n\}/.exec(content);
-  return (match?.[1] ?? '')
-    .replace(/,?\s*\.\.\.overrides/, '')
-    .replace(/\s+/g, ' ')
-    .replace(/,\s*([}\]])/g, ' $1')
-    .replace(/\{ \}/g, '{}');
-}
+import {
+  booleanRate,
+  dateWhen,
+  numberRange,
+  singular,
+  textKind,
+  words,
+} from '../../../src/codegen/mocks/semantics.ts';
+import {
+  dateNear,
+  Fake,
+  fileContent,
+  generateText,
+  matchesPattern,
+  Random,
+  samplePattern,
+  seedOfEntity,
+} from '../../../src/templates/mocks/fake.ts';
 
 describe('pattern sampling', () => {
   it.each([
@@ -61,476 +28,201 @@ describe('pattern sampling', () => {
     '[\\s\\S]{3}',
     '^\\u0041\\x42\\u{43}[\\-_.]$',
     '^(?<year>\\d{4})-(?<month>0[1-9]|1[0-2])$',
+    // Lookarounds, backreferences, Unicode properties, anchors, boundaries and control escapes.
+    '^(?=.*[A-Z])(?=.*[a-z])(?=.*\\d)(?=.*[!@#$%^&*]).{8,}$',
+    '^(?!admin)[a-z]{5}$',
+    '(?<=\\$)\\d+',
+    '^(?<!x)y$',
+    '^(\\w+)-\\1$',
+    '^(?<word>[a-z]{3})_\\k<word>$',
+    '^\\p{Lu}\\p{Ll}+$',
+    '^[\\p{L}\\d]{4}$',
+    '^\\p{Script=Greek}{3}$',
+    '^\\P{L}+$',
+    '\\bcat\\b',
+    '^\\cJ$',
+    '^(?i:abc)$',
   ])('generates a string matching %s', (pattern) => {
-    const text = samplePattern(pattern, new Random(pattern));
-    expect(text).toBeDefined();
-    expect(new RegExp(pattern, 'u').test(text ?? '')).toBe(true);
+    const random = Random.of(pattern);
+    for (let index = 0; index < 5; index++) {
+      const text = samplePattern(pattern, random);
+      expect(text).toBeDefined();
+      expect(new RegExp(pattern, 'u').test(text ?? '')).toBe(true);
+      expect(matchesPattern(pattern, text ?? '')).toBe(true);
+    }
   });
 
   it('reaches a minimum length through unbounded quantifiers and respects the maximum', () => {
-    const text = samplePattern('^\\d+$', new Random('x'), 8);
+    const text = samplePattern('^\\d+$', Random.of('x'), 8);
     expect(text).toMatch(/^\d{8,}$/);
-    expect(samplePattern('^\\d{5}$', new Random('x'), 0, 3)).toBeUndefined();
+    expect(samplePattern('^\\d{5}$', Random.of('x'), 0, 3)).toBeUndefined();
   });
 
-  it('gives up on syntax it does not support instead of running the pattern', () => {
-    for (const pattern of ['^(?=a)a$', '^(a)\\1$', '^\\p{L}+$', '^(a', '[z-a]'])
-      expect(samplePattern(pattern, new Random(pattern))).toBeUndefined();
+  it('gives up on invalid patterns and on patterns no string matches', () => {
+    for (const pattern of ['^(a', '[z-a]', '^\\p{NotAProperty}$', '^(?=x)y$', '^\\k<nope>$'])
+      expect(samplePattern(pattern, Random.of(pattern))).toBeUndefined();
+    expect(matchesPattern('^(a', 'a')).toBeUndefined();
+  });
+
+  it('matches like RegExp without running the pattern, and stops on a step budget', () => {
+    for (const [pattern, text, expected] of [
+      ['^a+$', 'aaa', true],
+      ['^(a|ab)c$', 'abc', true],
+      ['(?<!\\$)\\b\\d+\\b', '$12', false],
+      ['^(?:a+)+b$', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaac', false],
+    ] as const)
+      expect(matchesPattern(pattern, text)).toBe(expected);
   });
 
   it('is deterministic for a seed', () => {
-    expect(samplePattern('^[a-z]{12}$', new Random('seed'))).toBe(
-      samplePattern('^[a-z]{12}$', new Random('seed')),
+    expect(samplePattern('^[a-z]{12}$', Random.of('seed'))).toBe(
+      samplePattern('^[a-z]{12}$', Random.of('seed')),
     );
-    expect(formatted('uuid', new Random('a'))).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
-    );
-    expect(formatted('date-time', new Random('a'))).toBe(formatted('date-time', new Random('a')));
   });
 });
 
-describe('fixture generation', () => {
-  it('prefers examples and defaults that match, and reports those that do not', async () => {
-    const { file, diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Pet:
-      type: object
-      required: [name, size]
-      properties:
-        name:
-          type: string
-          example: Rex
-        size:
-          type: integer
-          maximum: 10
-          example: 99
-        status:
-          type: string
-          enum: [available, sold]
-          default: sold
-    Owner:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-      example:
-        name: Ada
-        unknown: dropped
-`);
-    expect(returned(file('mocks/models/pet.ts'))).toMatch(
-      /^\{ name: 'Rex', size: \d+, status: 'sold' \}$/,
+describe('fake data', () => {
+  const random = (): Random => Random.of('fake');
+  const luhn = (digits: string): boolean =>
+    Array.from(digits)
+      .reverse()
+      .reduce((sum, char, index) => {
+        let digit = Number(char);
+        if (index % 2 === 1) digit = digit * 2 > 9 ? digit * 2 - 9 : digit * 2;
+        return sum + digit;
+      }, 0) %
+      10 ===
+    0;
+
+  it('makes realistic text of every kind', () => {
+    const r = random();
+    expect(generateText('email', r, 'ada@taskflow.dev')).toMatch(/^[a-z]+\.[a-z]+@taskflow\.dev$/);
+    expect(generateText('fullName', r)).toMatch(/^\S+ \S+$/);
+    expect(generateText('uuid', r)).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
-    expect(returned(file('mocks/models/owner.ts'))).toBe("{ name: 'Ada' }");
-    const invalid = diagnostics.filter((d) => d.code === 'mock/invalid-example');
-    expect(invalid.map((d) => d.message)).toEqual([
-      'The example of `Pet.size` does not match its schema; the fixture uses a generated value instead.',
+    expect(generateText('color', r)).toMatch(/^#[0-9a-f]{6}$/);
+    expect(generateText('ipv4', r)).toMatch(/^(192\.0\.2|198\.51\.100|203\.0\.113)\.\d+$/);
+    expect(generateText('imageUrl', r)).toMatch(/^data:image\/svg\+xml,/);
+    expect(generateText('url', r, 'https://api.taskflow.dev/x')).toMatch(
+      /^https:\/\/api\.taskflow\.dev\//,
+    );
+    expect(luhn(generateText('creditCard', r))).toBe(true);
+    const isbn = generateText('isbn', r);
+    const weighted = Array.from(isbn).reduce(
+      (sum, d, i) => sum + Number(d) * (i % 2 === 0 ? 1 : 3),
+      0,
+    );
+    expect(weighted % 10).toBe(0);
+    const iban = generateText('iban', r);
+    const numeric = `${iban.slice(4)}${iban.slice(0, 4)}`.replace(/[A-Z]/g, (c) =>
+      String(c.charCodeAt(0) - 55),
+    );
+    expect(Array.from(numeric).reduce((rest, d) => (rest * 10 + Number(d)) % 97, 0)).toBe(1);
+    expect(generateText('like', r, 'usr_3k9f2a7d1b')).toMatch(/^usr_[0-9a-z]{10}$/);
+    expect(generateText('like', r, 'WEB-12')).toMatch(/^[A-Z]{3}-\d{2}$/);
+    expect(generateText('words', r, '', 30, 30)).toHaveLength(30);
+  });
+
+  it('places dates by what they are', () => {
+    const r = random();
+    const example = '2026-10-20T09:30:00.000Z';
+    for (let index = 0; index < 20; index++) {
+      expect(Date.parse(dateNear(example, 'date-time', 'past', r))).toBeLessThan(
+        Date.parse(example),
+      );
+      expect(Date.parse(dateNear(example, 'date-time', 'future', r))).toBeGreaterThan(
+        Date.parse(example),
+      );
+      expect(dateNear('2026-11-02', 'date', 'soon', r)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(dateNear('09:30:00Z', 'time', 'any', r)).toMatch(/^\d{2}:\d{2}:\d{2}Z$/);
+    }
+    expect(dateNear('2026-10-20T09:30:00Z', 'date-time', 'any', r)).toMatch(/:\d{2}Z$/);
+  });
+
+  it('makes real files of their media type', async () => {
+    const magic = async (blob: Blob, bytes: number): Promise<number[]> => [
+      ...new Uint8Array(await blob.slice(0, bytes).arrayBuffer()),
+    ];
+    expect(await magic(fileContent('image/png', random()), 4)).toEqual([0x89, 0x50, 0x4e, 0x47]);
+    expect(await magic(fileContent('image/jpeg', random()), 2)).toEqual([0xff, 0xd8]);
+    expect(await fileContent('application/pdf', random()).text()).toMatch(
+      /^%PDF-1\.4[\s\S]*%%EOF\n$/,
+    );
+    expect(await magic(fileContent('audio/wav', random()), 4)).toEqual([0x52, 0x49, 0x46, 0x46]);
+    expect(await fileContent('text/csv', random()).text()).toMatch(/^id,name,email\n/);
+    // Wildcards and unknown types follow the property's name.
+    expect(fileContent('image/*', random(), 'avatar').type).toBe('image/png');
+    expect(fileContent('', random(), 'invoice').type).toBe('application/pdf');
+  });
+
+  it('makes the examples for seed 0 and other values, the same each time, for other seeds', () => {
+    const canonical = new Fake();
+    const seeded = new Fake({ seed: 9 });
+    expect(canonical.text('name', 'Ada', 'fullName')).toBe('Ada');
+    expect(seeded.text('name', 'Ada', 'fullName')).toBe(
+      new Fake({ seed: 9 }).text('name', 'Ada', 'fullName'),
+    );
+    expect(seeded.pick('kind', ['a', 'b', 'c'])).toBe(
+      new Fake({ seed: 9 }).pick('kind', ['a', 'b', 'c']),
+    );
+    expect(canonical.nullable('x', () => 1)).toBe(1);
+    expect(canonical.array('xs', 3, 0, 5, (f, i) => f.text('t', `x${i}`, 'tag'))).toEqual([
+      'x0',
+      expect.any(String),
+      expect.any(String),
     ]);
-    expect(invalid[0]?.severity).toBe('warning');
-    expect(invalid[0]?.location?.pointer).toBe('/components/schemas/Pet');
+    expect(new Fake({ empty: true }).array('xs', 3, 1, 5, () => 0)).toEqual([0]);
+    const kept = new Fake({ seed: 1 });
+    for (let seed = 1; seed < 40; seed++) {
+      const value = new Fake({ seed }).optional('', { a: 1, b: 2 }, ['a', 'b'], { b: 3 });
+      expect(value).toHaveProperty('b');
+    }
+    expect(kept.example((examples) => (examples ? { a: 1 } : { a: 2 }))).toEqual({ a: 2 });
+    expect(canonical.example((examples) => (examples ? { a: 1 } : { a: 2 }))).toEqual({ a: 1 });
+    // Ids are remembered with the seed that made them.
+    new Fake({ seed: 42 }).id('pet-42');
+    expect(seedOfEntity('pet-42')).toBe(42);
+  });
+});
+
+describe('semantics', () => {
+  it('reads names', () => {
+    expect(words('avatarColor')).toEqual(['avatar', 'color']);
+    expect(words('created_at')).toEqual(['created', 'at']);
+    expect(words('HTTPStatus')).toEqual(['http', 'status']);
+    expect(singular('categories')).toBe('category');
+    expect(singular('photoUrls')).toBe('photoUrl');
+    expect(singular('status')).toBe('status');
   });
 
-  it('satisfies constraints, formats, conditionals and dependent schemas', async () => {
-    const { file, diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Item:
-      type: object
-      required: [code, price, count, tags, kind, value]
-      properties:
-        code:
-          type: string
-          minLength: 6
-          maxLength: 6
-        price:
-          type: number
-          exclusiveMinimum: 0
-          maximum: 1
-          multipleOf: 0.25
-        count:
-          type: integer
-          minimum: 3
-          maximum: 3
-        tags:
-          type: array
-          minItems: 3
-          items:
-            type: string
-            format: uuid
-        kind:
-          type: string
-          enum: [percent, amount]
-        value:
-          type: number
-        currency:
-          type: string
-      if:
-        properties:
-          kind:
-            const: percent
-      then:
-        properties:
-          value:
-            minimum: 5
-            maximum: 6
-      dependentSchemas:
-        currency:
-          properties:
-            currency:
-              maxLength: 3
-              minLength: 3
-`);
-    const item = returned(file('mocks/models/item.ts'));
-    expect(item).toMatch(/code: '.{6}'/);
-    expect(item).toMatch(/price: (0\.25|0\.5|0\.75|1),/);
-    expect(item).toContain('count: 3,');
-    expect(item.match(/'[0-9a-f]{8}-[0-9a-f]{4}-4/g)).toHaveLength(3);
-    expect(item).toContain("kind: 'percent'");
-    expect(item).toMatch(/value: [56](\.\d+)?,/);
-    expect(item).toMatch(/currency: '.{3}'/);
-    expect(diagnostics.filter((d) => d.code.startsWith('mock/'))).toEqual([]);
+  it('infers text from the format, the name and the owner', () => {
+    expect(textKind('contact', undefined, 'email')).toBe('email');
+    expect(textKind('avatarUrl', undefined, 'uri')).toBe('avatarUrl');
+    expect(textKind('name', 'User', undefined)).toBe('fullName');
+    expect(textKind('name', 'Project', undefined)).toBe('project');
+    expect(textKind('name', 'Label', undefined)).toBe('tag');
+    expect(textKind('title', 'Task', undefined)).toBe('task');
+    expect(textKind('title', 'Member', undefined)).toBe('jobTitle');
+    expect(textKind('description', undefined, undefined)).toBe('paragraph');
+    expect(textKind('postalCode', undefined, undefined)).toBe('postalCode');
+    expect(textKind('accessToken', undefined, undefined)).toBe('jwt');
+    // Identifiers with an example keep its shape.
+    expect(textKind('id', 'Task', undefined)).toBe('uuid');
+    expect(textKind('id', 'Task', undefined, 'tsk_3k9f2a7d1b')).toBeUndefined();
+    expect(textKind('flavor', undefined, undefined)).toBeUndefined();
   });
 
-  it('never recurses forever, and reports schemas that require themselves', async () => {
-    const { file, diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Node:
-      type: object
-      required: [name, children]
-      properties:
-        name:
-          type: string
-        children:
-          type: array
-          items:
-            $ref: '#/components/schemas/Node'
-        parent:
-          $ref: '#/components/schemas/Node'
-        sibling:
-          oneOf:
-            - $ref: '#/components/schemas/Node'
-            - type: 'null'
-    Loop:
-      type: object
-      required: [next]
-      properties:
-        next:
-          $ref: '#/components/schemas/Loop'
-`);
-    expect(returned(file('mocks/models/node.ts'))).toMatch(
-      /^\{ name: '[a-z ]+', children: \[\], sibling: null \}$/,
-    );
-    expect(
-      diagnostics.filter((d) => d.code === 'mock/unsatisfiable').map((d) => d.message),
-    ).toEqual([
-      '`Loop` has no finite value: it requires itself, so its fixture cannot be generated.',
-    ]);
-    expect(file('mocks/models/loop.ts')).toContain('return (undefined as never);');
-  });
-
-  it('tags discriminated union members and subtypes', async () => {
-    const { file } = await generate(`paths: {}
-components:
-  schemas:
-    Pet:
-      type: object
-      required: [petType]
-      properties:
-        petType:
-          type: string
-      discriminator:
-        propertyName: petType
-        mapping:
-          cat: '#/components/schemas/Cat'
-    Cat:
-      allOf:
-        - $ref: '#/components/schemas/Pet'
-        - type: object
-          properties:
-            lives:
-              type: integer
-    Shape:
-      oneOf:
-        - $ref: '#/components/schemas/Circle'
-      discriminator:
-        propertyName: kind
-        mapping:
-          round: '#/components/schemas/Circle'
-    Circle:
-      type: object
-      required: [kind]
-      properties:
-        kind:
-          type: string
-`);
-    // `allOf` members become one object; the subtype carries its discriminator value.
-    expect(returned(file('mocks/models/cat.ts'))).toMatch(/^\{ lives: \d+, petType: 'cat' \}$/);
-    expect(file('mocks/models/cat.ts')).toContain('overrides?: Partial<Cat>');
-    // Unions take no overrides: the `Partial` of a union would lose the discriminator's type.
-    expect(file('mocks/models/shape.ts')).toContain(
-      "export function makeShape(): Shape {\n  return { ...makeCircle(), kind: 'round' };",
-    );
-  });
-
-  it('reports patterns it cannot generate a string for', async () => {
-    const { diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Code:
-      type: string
-      pattern: '^(?!x)[a-z]+$'
-`);
-    expect(diagnostics.filter((d) => d.code === 'mock/unsupported-pattern')).toMatchObject([
-      { severity: 'info', hint: 'Add an `example` that matches the pattern.' },
-    ]);
-  });
-
-  it('keeps example data when allOf members declare the same property', async () => {
-    const { file } = await generate(`paths: {}
-components:
-  schemas:
-    Collection:
-      type: object
-      properties:
-        data:
-          type: array
-          items:
-            type: object
-    Item:
-      type: object
-      required: [id]
-      properties:
-        id:
-          type: string
-    Items:
-      allOf:
-        - $ref: '#/components/schemas/Collection'
-        - type: object
-          properties:
-            data:
-              type: array
-              items:
-                $ref: '#/components/schemas/Item'
-      example:
-        data:
-          - id: a
-            note: kept by the open member
-`);
-    expect(returned(file('mocks/models/items.ts'))).toBe(
-      "{ data: [{ id: 'a', note: 'kept by the open member' }] }",
-    );
-  });
-
-  it('leaves out values that cannot exist, and casts values that cannot match', async () => {
-    const { file, diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Track:
-      type: object
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum: [track]
-    Player:
-      type: object
-      properties:
-        item:
-          oneOf:
-            - $ref: '#/components/schemas/Track'
-          discriminator:
-            propertyName: type
-    Code:
-      type: string
-      minLength: 5
-      maxLength: 2
-`);
-    // The implicit mapping gives `Track` the value 'Track', which its own `type` excludes.
-    expect(returned(file('mocks/models/player.ts'))).toBe('{}');
-    expect(file('mocks/models/code.ts')).toMatch(/return '.*' as unknown as Code;/);
-    expect(
-      diagnostics.filter((d) => d.code === 'mock/unsatisfiable').map((d) => d.message),
-    ).toEqual([
-      'The generated fixture of `Code` does not match its schema: its constraints contradict each other or cannot be combined.',
-      "No variant of `Player.item` can have its discriminator value: each one's `type` excludes the value the mapping gives it.",
-    ]);
-  });
-
-  it('merges allOf members as their types do', async () => {
-    const { file, diagnostics } = await generate(`paths: {}
-components:
-  schemas:
-    Window:
-      type: object
-      properties:
-        day:
-          type: string
-        hour:
-          type: string
-    RequiredWindow:
-      allOf:
-        - $ref: '#/components/schemas/Window'
-        - required: [day, hour]
-    Message:
-      type: object
-      required: [type]
-      properties:
-        type:
-          type: string
-          enum: [message]
-    MessageResource:
-      allOf:
-        - $ref: '#/components/schemas/Message'
-        - type: object
-          required: [id, type]
-          properties:
-            id:
-              type: string
-            type: {}
-    Action:
-      type: string
-      oneOf:
-        - const: START
-        - const: STOP
-    Tags:
-      type: object
-      additionalProperties:
-        type: string
-`);
-    // A member requiring what another declares: the merged object has the property.
-    expect(returned(file('mocks/models/required-window.ts'))).toMatch(
-      /^\{ day: '[^']+', hour: '[^']+' \}$/,
-    );
-    // `unknown` in one member does not replace the other member's type.
-    expect(returned(file('mocks/models/message-resource.ts'))).toMatch(
-      /^\{ type: 'message', id: '[^']+' \}$/,
-    );
-    // `type: string` next to constants: a value both accept.
-    expect(returned(file('mocks/models/action.ts'))).toBe("'START'");
-    // A `Record` takes no overrides: their `Partial` would add `undefined` to its values.
-    expect(file('mocks/models/tags.ts')).toContain('export function makeTags(): Tags {');
-    expect(diagnostics.filter((d) => d.code.startsWith('mock/'))).toEqual([]);
-  });
-
-  it('merges arrays and leaves out keys only an unconstrained member allows', async () => {
-    const { file } = await generate(
-      `paths: {}
-components:
-  schemas:
-    Account:
-      type: object
-      required: [id]
-      properties:
-        id:
-          type: string
-    Owner:
-      type: object
-      required: [owner]
-      properties:
-        owner:
-          type: string
-    Item:
-      type: object
-      required: [accounts]
-      properties:
-        accounts:
-          type: array
-          items:
-            $ref: '#/components/schemas/Account'
-    EnrichedItem:
-      allOf:
-        - $ref: '#/components/schemas/Item'
-        - type: object
-          required: [accounts]
-          properties:
-            accounts:
-              type: array
-              items:
-                $ref: '#/components/schemas/Owner'
-    Policy:
-      type: object
-      properties:
-        plan:
-          type: string
-    Change:
-      allOf:
-        - required: [policy]
-        - type: object
-          properties:
-            policy:
-              $ref: '#/components/schemas/Policy'
-      example:
-        policy:
-          plan: weekly
-          day: SUN
-    Stamped:
-      allOf:
-        - type: object
-          required: [at]
-          properties:
-            at:
-              type: string
-              format: date-time
-        - type: object
-          properties:
-            at:
-              type: string
-`,
-      { types: { dates: 'Date' } },
-    );
-    // Both members' items: an account that is also an owner.
-    expect(returned(file('mocks/models/enriched-item.ts'))).toMatch(
-      /^\{ accounts: \[\{ id: '[^']+', owner: '[^']+' \}\] \}$/,
-    );
-    // `{ required: [policy] }` types `policy` as `unknown`, which `Policy` narrows: no `day`.
-    expect(returned(file('mocks/models/change.ts'))).toBe("{ policy: { plan: 'weekly' } }");
-    // `Date & string` has no value: the fixture is cast.
-    expect(file('mocks/models/stamped.ts')).toMatch(/as unknown as Stamped;/);
-  });
-
-  it('converts dates with types.dates: Date', async () => {
-    const { file } = await generate(
-      `paths: {}
-components:
-  schemas:
-    Event:
-      type: object
-      required: [at, on]
-      properties:
-        at:
-          type: string
-          format: date-time
-          example: '2026-01-02T03:04:05Z'
-        on:
-          type: string
-          format: date
-`,
-      { types: { dates: 'Date' } },
-    );
-    expect(returned(file('mocks/models/event.ts'))).toMatch(
-      /^\{ at: new Date\('2026-01-02T03:04:05Z'\), on: new Date\('\d{4}-\d{2}-\d{2}'\) \}$/,
-    );
-  });
-
-  it('claims its names after the client, without renaming it', async () => {
-    const { file } = await generate(`paths:
-  /handlers:
-    get:
-      operationId: handlers
-      responses:
-        '204':
-          description: No content.
-components:
-  schemas:
-    Pet:
-      type: string
-`);
-    expect(file('mocks/handlers.ts')).toContain('export function mockHandlers(');
-    expect(file('mocks/handlers.ts')).toContain('mockHandlers2(options)');
-    expect(file('mocks/default/handlers.ts')).toContain('export function mockHandlers2(');
-    expect(file('default/handlers.ts')).toContain('export function handlers(');
-    expect(file('mocks/models/pet.ts')).toContain('export function makePet(): Pet {');
+  it('infers ranges, rates and dates from names', () => {
+    expect(numberRange('age', true)).toEqual({ min: 18, max: 80 });
+    expect(numberRange('price', false)).toEqual({ min: 1, max: 999, digits: 2 });
+    expect(numberRange('commentCount', true)).toEqual({ min: 0, max: 50 });
+    expect(numberRange('flavor', true)).toBeUndefined();
+    expect(booleanRate('archived')).toBeLessThan(0.5);
+    expect(booleanRate('isActive')).toBeGreaterThan(0.5);
+    expect(dateWhen('createdAt')).toBe('past');
+    expect(dateWhen('dueDate')).toBe('soon');
+    expect(dateWhen('expiresAt')).toBe('future');
+    expect(dateWhen('birthDate')).toBe('birth');
   });
 });

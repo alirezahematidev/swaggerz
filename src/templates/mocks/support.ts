@@ -5,6 +5,7 @@
  * Works with MSW 2.11 and later 2.x releases, and with MSW 3.
  */
 import { delay, getResponse, http, HttpResponse, type HttpHandler } from 'msw';
+import { seedOf, seedOfEntity, type FixtureOptions } from './fake.js';
 
 /** A client whose configuration decides the base URL requests are matched against. */
 export interface MockClient {
@@ -32,10 +33,21 @@ export interface MockSettings {
   readonly networkError?: boolean;
   /** Respond to the first matching request only. */
   readonly once?: boolean;
+  /**
+   * Which values default bodies have: `'request'` (the default) generates them for each request,
+   * the same for the same request (the examples for a request without parameters, the entity a
+   * list returned for a request for its `id`); a number makes every body with that seed (`0` for
+   * the examples).
+   */
+  readonly seed?: number | 'request';
+  /** Make the arrays of default bodies as short as their schema allows, to see empty states. */
+  readonly empty?: boolean;
+  /** Respond with the operation's first documented error status (or `500`) instead. */
+  readonly error?: boolean;
 }
 
 /** What a response function receives. */
-export interface MockRequest<TParams, TBody> {
+export interface MockRequest<TParams, TBody, TResponse = unknown> {
   /** The intercepted request. */
   readonly request: Request;
   /** Path parameters by name, percent-decoded. */
@@ -49,6 +61,12 @@ export interface MockRequest<TParams, TBody> {
    * `URLSearchParams`, text or a `Blob`; `undefined` without a body. Can be called more than once.
    */
   body(): Promise<TBody>;
+  /**
+   * The body the handler would respond with by default: generated for this request (with the
+   * handler's `seed` and `empty` settings), for a function that only changes or completes it.
+   * Typed as the default status's body: with another `status`, it is that status's body.
+   */
+  generated(): TResponse;
 }
 
 /**
@@ -66,12 +84,14 @@ export type MockRequestBody = 'json' | 'multipart' | 'urlencoded' | 'text' | 'bi
 export interface MockResponse {
   /** Media type of the body; absent for responses without one. */
   readonly mediaType?: string;
-  /** Creates the default body (a fixture), once per request. */
-  readonly body?: () => unknown;
+  /** Creates the default body (a fixture) for the request's seed, once per request. */
+  readonly body?: (options: FixtureOptions) => unknown;
   /** The headers the response documents as required, with example values. */
   readonly headers?: Readonly<Record<string, string>>;
   /** Converts a body to its wire form, e.g. `Date` values to strings. */
   readonly encode?: (body: unknown) => unknown;
+  /** Writes a value (not already text) in the media type: an XML document, JSON Lines… */
+  readonly write?: (body: unknown) => string;
 }
 
 /** An operation as its generated mock handler describes it. */
@@ -96,6 +116,15 @@ export interface MockOperation {
   readonly responses: Readonly<Record<string, MockResponse>>;
   /** `false` when the path has an `OPTIONS` operation, which answers plain `OPTIONS` requests. */
   readonly preflight?: boolean;
+  /** The status `error: true` responds with (`500` when absent). */
+  readonly error?: number;
+  /** The path parameter that holds the `id` of the response's entity. */
+  readonly entity?: string;
+  /**
+   * Path parameters that reappear in default bodies, as `[path, parameter, numeric]`: `'id'`,
+   * `'[].projectId'` (in every item) or `'items.[].projectId'`.
+   */
+  readonly fill?: readonly (readonly [string, string, boolean])[];
 }
 
 /** The options of a generated handler, without their per-status types. */
@@ -137,12 +166,22 @@ export function mockHandler(operation: MockOperation, options: MockOptions = {})
       if (options.once === true) used = true;
       if (options.delay !== undefined) await delay(options.delay);
       if (options.networkError === true) return HttpResponse.error();
-      const status = options.status ?? operation.status;
+      const status =
+        options.status ?? (options.error === true ? (operation.error ?? 500) : operation.status);
       const response =
         own(operation.responses, String(status)) ??
         own(operation.responses, `${String(status).charAt(0)}XX`) ??
         own(operation.responses, 'default');
       let body: unknown;
+      const generated = (): unknown => {
+        if (response?.body === undefined) return undefined;
+        const seed = seedFor(request, params, operation, options);
+        return fill(
+          response.body(options.empty === true ? { seed, empty: true } : { seed }),
+          params,
+          operation.fill,
+        );
+      };
       if (typeof options.body === 'function') {
         const info: MockRequest<Readonly<Record<string, string>>, unknown> = {
           request,
@@ -150,15 +189,65 @@ export function mockHandler(operation: MockOperation, options: MockOptions = {})
           query: new URL(request.url).searchParams,
           cookies,
           body: () => readBody(request, operation),
+          generated,
         };
         body = await (options.body as (request: typeof info) => unknown)(info);
         if (isResponse(body)) return body;
       } else {
-        body = options.body === undefined ? response?.body?.() : options.body;
+        body = options.body === undefined ? generated() : options.body;
       }
       return respond(request, status, body, response, options.headers);
     },
   );
+}
+
+/**
+ * The seed of a request's default body: the one in the settings; the seed of the entity a list
+ * returned, for a request for its `id`; the examples' (`0`) for a request without parameters;
+ * otherwise one derived from the request, so that pages and items differ.
+ */
+function seedFor(
+  request: Request,
+  params: Readonly<Record<string, string>>,
+  operation: MockOperation,
+  options: MockOptions,
+): number {
+  if (typeof options.seed === 'number') return options.seed;
+  const entity = operation.entity === undefined ? undefined : params[operation.entity];
+  const known = entity === undefined ? undefined : seedOfEntity(entity);
+  if (known !== undefined) return known;
+  const { search } = new URL(request.url);
+  if (Object.keys(params).length === 0 && search === '') return 0;
+  return seedOf(`${operation.method} ${operation.path} ${JSON.stringify(params)} ${search}`);
+}
+
+/** Path parameters copied into the default body where it repeats them (`projectId`, `id`). */
+function fill(
+  body: unknown,
+  params: Readonly<Record<string, string>>,
+  entries: MockOperation['fill'],
+): unknown {
+  for (const [path, param, numeric] of entries ?? []) {
+    const raw = params[param];
+    const value = numeric ? Number(raw) : raw;
+    if (raw !== undefined && !(typeof value === 'number' && !Number.isFinite(value)))
+      assign(body, path.split('.'), value);
+  }
+  return body;
+}
+
+function assign(target: unknown, segments: readonly string[], value: unknown): void {
+  const [head, ...rest] = segments;
+  if (head === undefined) return;
+  if (head === '[]') {
+    if (Array.isArray(target)) for (const item of target as unknown[]) assign(item, rest, value);
+    return;
+  }
+  if (typeof target !== 'object' || target === null || Array.isArray(target)) return;
+  const record = target as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(record, head)) return;
+  if (rest.length === 0) record[head] = value;
+  else assign(record[head], rest, value);
 }
 
 /**
@@ -196,6 +285,108 @@ function allowOrigin(request: Request, headers: Headers): void {
   headers.set('access-control-allow-origin', origin);
   headers.set('access-control-allow-credentials', 'true');
   if (exposed.length > 0) headers.set('access-control-expose-headers', exposed.join(', '));
+}
+
+/** Options of the generated `send…Webhook()` functions. */
+export interface SendWebhookOptions {
+  /** The `fetch` that sends the request (by default the global one). */
+  readonly fetch?: typeof fetch;
+  /** Headers added to the request, e.g. a signature your route checks. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** A webhook or callback request as its generated types describe it. */
+export interface WebhookRequestLike {
+  readonly body?: unknown;
+  readonly headers?: Readonly<Record<string, unknown>>;
+  readonly query?: Readonly<Record<string, unknown>>;
+  readonly cookies?: Readonly<Record<string, unknown>>;
+  readonly querystring?: unknown;
+}
+
+/** How the API sends a webhook or callback request. */
+export interface WebhookOperation {
+  readonly method: string;
+  /** Media type of the body. */
+  readonly mediaType?: string;
+  /** Converts a JSON body to its wire form, e.g. `Date` values to strings. */
+  readonly encode?: (body: unknown) => unknown;
+}
+
+const asText = (value: unknown): string =>
+  typeof value === 'string'
+    ? value
+    : value instanceof Date
+      ? value.toISOString()
+      : JSON.stringify(value);
+
+function appendAll(target: URLSearchParams | FormData, name: string, value: unknown): void {
+  if (value === undefined) return;
+  if (Array.isArray(value)) {
+    for (const item of value as unknown[]) appendAll(target, name, item);
+  } else if (target instanceof FormData && isBlob(value)) {
+    target.append(name, value);
+  } else {
+    target.append(name, asText(value));
+  }
+}
+
+/**
+ * Sends a webhook or callback request to `url` as the API would: the method, query, headers,
+ * cookies and the body in its media type. Resolves with your route's response.
+ */
+export async function sendWebhook(
+  url: string | URL,
+  operation: WebhookOperation,
+  request: WebhookRequestLike,
+  options: SendWebhookOptions = {},
+): Promise<Response> {
+  const target = new URL(url, pageUrl() ?? 'http://localhost');
+  const querystring = request.querystring;
+  if (typeof querystring === 'string') target.search = querystring;
+  else if (typeof querystring === 'object' && querystring !== null)
+    for (const [name, value] of Object.entries(querystring))
+      appendAll(target.searchParams, name, value);
+  for (const [name, value] of Object.entries(request.query ?? {}))
+    appendAll(target.searchParams, name, value);
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(request.headers ?? {}))
+    if (value !== undefined) headers.set(name, asText(value));
+  const cookies = Object.entries(request.cookies ?? {})
+    .filter(([, value]) => value !== undefined)
+    .map(([name, value]) => `${name}=${encodeURIComponent(asText(value))}`);
+  if (cookies.length > 0) headers.set('cookie', cookies.join('; '));
+  for (const [name, value] of Object.entries(options.headers ?? {})) headers.set(name, value);
+  const type = operation.mediaType;
+  let body: RequestInit['body'];
+  const value = request.body;
+  if (value !== undefined && type !== undefined) {
+    if (type === 'multipart/form-data') {
+      const form = new FormData();
+      for (const [name, item] of Object.entries(value as Record<string, unknown>))
+        appendAll(form, name, item);
+      body = form;
+    } else {
+      if (!headers.has('content-type')) headers.set('content-type', type);
+      if (type === 'application/x-www-form-urlencoded') {
+        const form = new URLSearchParams();
+        for (const [name, item] of Object.entries(value as Record<string, unknown>))
+          appendAll(form, name, item);
+        body = form;
+      } else if (isJson(type)) {
+        body = JSON.stringify(operation.encode === undefined ? value : operation.encode(value));
+      } else if (isBlob(value) || typeof value === 'string') {
+        body = value;
+      } else {
+        body = asText(value);
+      }
+    }
+  }
+  return (options.fetch ?? fetch)(target, {
+    method: operation.method,
+    headers,
+    ...(body === undefined ? {} : { body }),
+  });
 }
 
 /**
@@ -433,6 +624,8 @@ async function respond(
   const init = { status, headers };
   if (body === undefined || NULL_BODY.has(status) || request.method.toUpperCase() === 'HEAD')
     return created(null, init);
+  if (response?.write !== undefined && typeof body !== 'string' && !isBlob(body) && !isNative(body))
+    body = response.write(body);
   const mediaType = response?.mediaType;
   const declared = mediaType !== undefined && !mediaType.includes('*') ? mediaType : undefined;
   if (isBlob(body)) {

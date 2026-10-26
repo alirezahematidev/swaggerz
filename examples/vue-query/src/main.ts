@@ -1,16 +1,13 @@
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query';
 import { createApp } from 'vue';
 import App from './App.vue';
+import { startMocks } from './generated/api/mocks/start.ts';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 10_000 } } });
 
-/** During development, the generated mocks serve the API (src/mocks.ts) before the first request. */
-async function startMocks(): Promise<void> {
-  if (!import.meta.env.DEV) return;
-  const { worker } = await import('./mocks.ts');
-  await worker.start({ onUnhandledFrame: 'bypass', quiet: true });
-}
+// During development, the generated mocks answer the API (with the handlers of src/mocks.ts
+// first); render once they are ready. Production builds contain neither MSW nor the mocks.
+if (import.meta.env.DEV)
+  await startMocks({ handlers: () => import('./mocks.ts').then((mocks) => mocks.handlers) });
 
-void startMocks().then(() => {
-  createApp(App).use(VueQueryPlugin, { queryClient }).mount('#root');
-});
+createApp(App).use(VueQueryPlugin, { queryClient }).mount('#root');

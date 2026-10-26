@@ -25,6 +25,8 @@ export interface ProjectModel {
   readonly mockHandlers?: string;
   /** `features.mocks`: the export name of `mockFetch` in the mocks barrel. */
   readonly mockFetch?: string;
+  /** `features.mocks`: `startMocks()`, which starts the mocks in the browser, and its options type. */
+  readonly mockStart?: { readonly name: string; readonly options: string };
 }
 
 /** One request the API sends: an operation of a webhook or of an operation's callback. */
@@ -46,6 +48,12 @@ export interface WebhookSymbol {
     /** The response body the API expects back. */
     readonly response: string;
     readonly handler: string;
+  };
+  /** With `features.mocks`: the request fixture and the function that sends the request. */
+  readonly mock?: {
+    readonly module: string;
+    readonly make: string;
+    readonly send: string;
   };
 }
 

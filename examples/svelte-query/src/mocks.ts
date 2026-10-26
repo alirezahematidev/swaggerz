@@ -1,11 +1,10 @@
 /**
  * The Tasks API in the browser, made of the generated Mock Service Worker handlers: fixtures seed
- * an in-memory list that the handlers read and change. `main.ts` starts it during development.
- * The handlers and fixtures are typed with the generated models, so this file stops compiling
- * when the specification changes.
+ * an in-memory list that the handlers read and change. `main.ts` passes them to the generated
+ * `startMocks()` during development. The handlers and fixtures are typed with the generated
+ * models, so this file stops compiling when the specification changes.
  */
 import { HttpResponse } from 'msw';
-import { setupWorker } from 'msw/browser';
 import type { Problem, Task } from './generated/api';
 import {
   makeTask,
@@ -52,7 +51,7 @@ function problem(status: 404 | 422, title: string, detail?: string): Response {
 
 const indexOf = (id: string): number => tasks.findIndex((task) => task.id === id);
 
-export const worker = setupWorker(
+export const handlers = [
   mockListTasks({
     ...latency,
     body: ({ query }) => {
@@ -108,4 +107,4 @@ export const worker = setupWorker(
       return undefined;
     },
   }),
-);
+];

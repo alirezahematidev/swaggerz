@@ -1,10 +1,11 @@
-import { HTTP_METHODS, wireMethod } from '../../ir/types.ts';
+import { HTTP_METHODS, wireMethod, type SchemaIR } from '../../ir/types.ts';
 import { compareStrings } from '../../utils/strings.ts';
 import { combinedDateShape, dateShape } from '../dates.ts';
 import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager, Lang } from '../imports.ts';
 import {
   bodyKind,
+  isStringSchema,
   responseKind,
   type OperationPlan,
   type PlannedResponse,
@@ -14,8 +15,10 @@ import { responseBodyType, StatusTypes } from '../operations.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
 import type { TypeContext } from '../type-printer.ts';
 import type { GeneratedExport, JsDocBlock, JsDocTag } from '../types.ts';
-import { printValue } from './fixtures.ts';
-import type { MockSampler, MockValue } from './sampler.ts';
+import { FAKE, printValue, type PrintContext } from './fixtures.ts';
+import { usesFake, type MockSampler, type MockValue } from './sampler.ts';
+import { isXml } from './encodings.ts';
+import { isCollection } from './semantics.ts';
 
 const SUPPORT = 'mocks/support';
 
@@ -39,6 +42,86 @@ function defaultStatus(plan: OperationPlan): number {
   if (/^\d{3}$/.test(status)) return Number(status);
   const range = /^([1-5])XX$/i.exec(status)?.[1];
   return range === undefined ? 200 : Number(`${range}00`);
+}
+
+/** The status `error: true` responds with: the first documented error, or `500`. */
+function errorStatus(plan: OperationPlan): number {
+  for (const { response } of plan.errors) {
+    if (/^\d{3}$/.test(response.status)) return Number(response.status);
+    const range = /^([45])XX$/i.exec(response.status)?.[1];
+    if (range !== undefined) return Number(`${range}00`);
+  }
+  return 500;
+}
+
+/** Where path parameters reappear in the default body, and which one names its entity. */
+interface Bindings {
+  /** `[path, parameter, numeric]`: `'id'`, `'[].projectId'`, `'items.[].projectId'`. */
+  readonly fill: readonly (readonly [string, string, boolean])[];
+  /** The parameter whose value is the `id` of the response's entity (`taskId` for a `Task`). */
+  readonly entity?: string;
+}
+
+const normalize = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Binds path parameters to the default body: `GET /projects/{projectId}/tasks` lists tasks of
+ * that project, and `GET /tasks/{taskId}` returns a task with that `id`, the same task a list
+ * returned when one did.
+ */
+function bindings(plan: OperationPlan, sampler: MockSampler, ctx: EmitContext): Bindings {
+  const params = plan.parameters
+    .filter((p) => p.parameter.in === 'path')
+    .map((p) => p.parameter.name);
+  const media = plan.success[0]?.media;
+  if (params.length === 0 || media === undefined) return { fill: [] };
+  // The value of JSON bodies, of XML documents, and of the items of sequential media types.
+  const kind = responseKind(media, plan.parseAs);
+  const written =
+    kind === 'json'
+      ? media.schema
+      : kind !== 'text'
+        ? undefined
+        : media.itemSchema !== undefined
+          ? ({ kind: 'array', items: media.itemSchema } satisfies SchemaIR)
+          : isXml(media.mediaType) && !isStringSchema(media.schema)
+            ? media.schema
+            : undefined;
+  if (written === undefined) return { fill: [] };
+  const fill: (readonly [string, string, boolean])[] = [];
+  /** Properties named like a parameter, with a string or number value. */
+  const named = (properties: ReadonlyMap<string, SchemaIR>, prefix: string): void => {
+    for (const param of params) {
+      const scalar = properties.get(param);
+      const type = scalar === undefined ? undefined : sampler.scalarType(scalar);
+      if (type !== undefined) fill.push([`${prefix}${param}`, param, type === 'number']);
+    }
+  };
+  const schema = written;
+  const items = sampler.arrayItemsOf(schema);
+  if (items !== undefined) {
+    named(sampler.objectProperties(items), '[].');
+    return { fill };
+  }
+  const properties = sampler.objectProperties(schema);
+  named(properties, '');
+  for (const [name, property] of properties) {
+    const listed = isCollection(name) ? sampler.arrayItemsOf(property) : undefined;
+    if (listed !== undefined) named(sampler.objectProperties(listed), `${name}.[].`);
+  }
+  // `{taskId}` names the `Task` the operation returns.
+  const last = params.at(-1);
+  const model = schema.kind === 'ref' ? ctx.project.modelById.get(schema.target) : undefined;
+  const id = properties.get('id');
+  const type = id === undefined ? undefined : sampler.scalarType(id);
+  if (last !== undefined && model !== undefined && type !== undefined) {
+    const base = normalize(last.replace(/[-_]?id$/i, ''));
+    if (last === 'id' || (base !== '' && normalize(model.name).startsWith(base))) {
+      if (last !== 'id') fill.push(['id', last, type === 'number']);
+      return { fill, entity: last };
+    }
+  }
+  return { fill };
 }
 
 /** The body type `MockRequest.body()` resolves with. */
@@ -88,7 +171,12 @@ export function generateHandlerModule(
     const headers = planned.response.headers.flatMap((header): (readonly [string, string])[] => {
       if (!header.required || !HEADER_NAME.test(header.name)) return [];
       if (header.name.toLowerCase() === 'content-type') return [];
-      const value = sampler.headerValue(header.schema, `${label} ${header.name}`, source);
+      const value = sampler.headerValue(
+        header.schema,
+        `${label} ${header.name}`,
+        source,
+        header.name,
+      );
       // `Headers` rejects values that are not byte strings, or that span lines.
       return value === undefined || !HEADER_VALUE.test(value) ? [] : [[header.name, value]];
     });
@@ -132,9 +220,19 @@ export function generateHandlerModule(
       pathParams.length === 0
         ? `${imports.global('Record')}<string, never>`
         : `{ ${pathParams.map((p) => `${propertyKey(p.parameter.name)}: string`).join('; ')} }`;
-    const requestType = `${support('MockRequest', true)}<${params}, ${requestBodyType(plan, imports)}>`;
+    // `generated()` is typed as the default status's body. One request type for every status keeps
+    // the parameters of a response function typed without a `status`.
+    const defaultBody = (() => {
+      const first = responses[0];
+      if (first === undefined || !first.success) return 'unknown';
+      const media = first.planned.media;
+      return media === undefined
+        ? 'undefined'
+        : responseBodyType(media, plan.parseAs, typeCtx, '  ');
+    })();
+    const requestType = `${support('MockRequest', true)}<${params}, ${requestBodyType(plan, imports)}, ${defaultBody}>`;
     const requestDoc: JsDocBlock = {
-      summary: `What a response function of {@link ${mock.name}} receives: the request, its path parameters and its body.`,
+      summary: `What a response function of {@link ${mock.name}} receives: the request, its path parameters, its body and the body generated for it.`,
       tags: [],
     };
     const mockBody = (type: string): string =>
@@ -170,7 +268,7 @@ export function generateHandlerModule(
       members.push(`{ status: ${rest}; body?: ${mockBody('unknown')} }`);
     const settings = support('MockSettings', true);
     const optionsDoc: JsDocBlock = {
-      summary: `Options of {@link ${mock.name}}: \`status\` selects a documented response (default \`${status}\`) and types \`body\`, which replaces its example body or computes one from the request.`,
+      summary: `Options of {@link ${mock.name}}: \`status\` selects a documented response (default \`${status}\`) and types \`body\`, which replaces the generated body or computes one from the request.`,
       tags: [],
     };
     if (lang === 'js') {
@@ -199,7 +297,7 @@ export function generateHandlerModule(
     const tags: JsDocTag[] = [
       {
         tag: 'param',
-        text: `${lang === 'js' ? `{${mock.options}} [options]` : 'options'} - The status and body to respond with, and \`baseUrl\`, \`delay\`, \`headers\` and \`once\`.`,
+        text: `${lang === 'js' ? `{${mock.options}} [options]` : 'options'} - The status and body to respond with, and settings such as \`delay\`, \`seed\`, \`empty\` and \`error\`.`,
       },
       ...(lang === 'js' ? [{ tag: 'returns', text: `{${handlerType}}` }] : []),
       ...(ctx.config.features.jsdoc
@@ -214,7 +312,7 @@ export function generateHandlerModule(
     const doc: JsDocBlock = {
       ...(ctx.config.features.jsdoc
         ? {
-            summary: `Mocks \`${route}\` (\`${symbol.name}\`) with Mock Service Worker. Without options it responds with \`${status}\` ${responses[0]?.body === undefined ? 'without a body' : 'and an example body'}.`,
+            summary: `Mocks \`${route}\` (\`${symbol.name}\`) with Mock Service Worker. Without options it responds with \`${status}\` ${responses[0]?.body === undefined ? 'without a body' : 'and a body generated for the request'}.`,
           }
         : {}),
       tags,
@@ -240,6 +338,12 @@ export function generateHandlerModule(
     );
     if (Object.keys(styles).length > 0) fields.push(`styles: ${literal(styles)}`);
     fields.push(`status: ${status}`);
+    const error = errorStatus(plan);
+    if (error !== 500) fields.push(`error: ${error}`);
+    const bound = bindings(plan, sampler, ctx);
+    if (bound.entity !== undefined) fields.push(`entity: ${quote(bound.entity)}`);
+    if (bound.fill.length > 0)
+      fields.push(`fill: ${literal(bound.fill.map((entry) => [...entry]))}`);
     // A path with an `OPTIONS` operation answers plain `OPTIONS` requests itself.
     const options = ctx.project.operations.some(
       (other) => other.operation.path === op.path && other.operation.method === 'options',
@@ -265,13 +369,47 @@ export function generateHandlerModule(
       const items: string[] = [];
       if (media !== undefined) items.push(`mediaType: ${quote(media.mediaType)}`);
       if (response.body !== undefined) {
-        const type = bodyTypes.get(response);
+        // An XML document or a sequence: the body is the value (where path parameters are
+        // copied), which `write` turns into text.
+        const encoded = response.body.kind === 'encoded' ? response.body : undefined;
+        const type = encoded === undefined ? bodyTypes.get(response) : undefined;
         const annotation = lang === 'ts' && type !== undefined ? `: ${type}` : '';
-        let value = printValue(response.body, imports, ctx, '      ');
+        const made = encoded?.value ?? response.body;
+        if (encoded !== undefined) {
+          const write = imports.add(FAKE, encoded.encoding, { typeOnly: false });
+          items.push(
+            encoded.encoding === 'xml'
+              ? `write: (body) => ${write}(body, ${literal(encoded.shape ?? {})})`
+              : `write: (body) => ${write}(body, ${quote(encoded.mediaType)})`,
+          );
+        }
+        const p: PrintContext = { imports, ctx, sampler };
         // A body that cannot match its schema (reported) is cast, so the module still compiles.
-        if (lang === 'ts' && type !== undefined && !sampler.fits(response.body))
-          value = `${value} as unknown as ${type}`;
-        items.push(`body: ()${annotation} => ${value.startsWith('{') ? `(${value})` : value}`);
+        const cast = (value: string): string =>
+          lang === 'ts' && type !== undefined && !sampler.fits(made)
+            ? `${value} as unknown as ${type}`
+            : value;
+        const model = made.kind === 'fixture' ? ctx.project.modelById.get(made.model) : undefined;
+        if (
+          made.kind === 'fixture' &&
+          made.key === '' &&
+          model?.fixtureName !== undefined &&
+          model.fixtureModule !== undefined
+        ) {
+          // The fixture itself, with the request's seed: the same value a list returned for its id.
+          const make = imports.add(model.fixtureModule, model.fixtureName, { typeOnly: false });
+          items.push(
+            `body: (options)${annotation} => ${cast(`${make}(${sampler.takesOverrides(model) ? 'undefined, ' : ''}options)`)}`,
+          );
+        } else if (usesFake(made)) {
+          const fake = imports.add(FAKE, 'fake', { typeOnly: false });
+          items.push(
+            `body: (options)${annotation} => {\n        const f = ${fake}(options);\n        return ${cast(printValue(made, p, '        '))};\n      }`,
+          );
+        } else {
+          const value = cast(printValue(made, p, '      '));
+          items.push(`body: ()${annotation} => ${value.startsWith('{') ? `(${value})` : value}`);
+        }
       }
       if (response.headers.length > 0)
         items.push(`headers: ${literal(Object.fromEntries(response.headers))}`);
@@ -350,13 +488,13 @@ export function generateHandlersModule(
       ...(ctx.config.features.jsdoc
         ? {
             summary:
-              'A mock handler for every operation, responding with its default status and example body: pass them to `setupWorker()` or `setupServer()`. More specific paths come first (`/pets/mine` before `/pets/{id}`).',
+              'A mock handler for every operation, responding with its default status and a body generated for the request: pass them to `setupWorker()` or `setupServer()`. More specific paths come first (`/pets/mine` before `/pets/{id}`).',
           }
         : {}),
       tags: [
         {
           tag: 'param',
-          text: `${lang === 'js' ? `{${settings}} [${param}]` : param} - Settings applied to every handler: \`baseUrl\`, \`delay\`, \`headers\`, \`once\`.`,
+          text: `${lang === 'js' ? `{${settings}} [${param}]` : param} - Settings applied to every handler, such as \`delay\`, \`seed\`, \`empty\` and \`error\`.`,
         },
         ...(lang === 'js' ? [{ tag: 'returns', text: `{${handlerType}[]}` }] : []),
       ],
@@ -402,7 +540,10 @@ export function generateMocksBarrel(
       ...modules.map((m) => `export * from '${imports.specifier(m.module)}';`),
     ];
     if (lang !== 'js')
-      lines.unshift(`export type { ${SUPPORT_TYPES.join(', ')} } from '${support}';`);
+      lines.unshift(
+        `export type { ${SUPPORT_TYPES.join(', ')} } from '${support}';`,
+        `export type { FixtureOptions } from '${imports.specifier(FAKE)}';`,
+      );
     return `${lines.join('\n')}\n`;
   });
   return {
@@ -410,7 +551,11 @@ export function generateMocksBarrel(
     origin: 'core:mocks-barrel',
     ...outputs,
     exports: [
-      ...SUPPORT_TYPES.map((name) => ({ name, kind: 'type' as const, typeOnly: true })),
+      ...[...SUPPORT_TYPES, 'FixtureOptions'].map((name) => ({
+        name,
+        kind: 'type' as const,
+        typeOnly: true,
+      })),
       { name: fetchName, kind: 'mock', typeOnly: false },
       ...modules.flatMap((m) => m.exports),
     ],

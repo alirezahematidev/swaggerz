@@ -180,6 +180,60 @@ paths:
               schema:
                 type: string
               example: A very good pet.
+  /pets/{petId}/visits:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: listVisits
+      tags: [Pets]
+      parameters:
+        - name: cursor
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The pet's visits, newest first.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VisitPage'
+  /visits/{visitId}:
+    get:
+      operationId: getVisit
+      tags: [Pets]
+      parameters:
+        - name: visitId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: A visit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '404':
+          description: No such visit.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /pets/{petId}/card:
+    parameters:
+      - $ref: '#/components/parameters/PetId'
+    get:
+      operationId: getPetCard
+      tags: [Pets]
+      responses:
+        '200':
+          description: The pet's card, in XML.
+          content:
+            application/xml:
+              schema:
+                $ref: '#/components/schemas/PetCard'
   /files/{name}:download:
     get:
       operationId: downloadFile
@@ -309,6 +363,81 @@ components:
     Kind:
       type: string
       enum: [dog, cat, bird]
+    PetCard:
+      type: object
+      xml:
+        name: card
+        namespace: https://example.com/pets
+        prefix: p
+      required: [id, name, tags]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+          xml:
+            attribute: true
+        name:
+          type: string
+          example: Rex
+        tags:
+          type: array
+          xml:
+            wrapped: true
+          items:
+            type: string
+            xml:
+              name: tag
+    VisitPage:
+      type: object
+      required: [items, nextCursor, total]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Visit'
+        nextCursor:
+          type: [string, 'null']
+        total:
+          type: integer
+          minimum: 0
+    Visit:
+      type: object
+      required: [id, petId, status, vet, at, notes]
+      properties:
+        id:
+          type: string
+          example: vis_3k9f2a7d1b
+        petId:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum: [scheduled, completed, cancelled]
+        vet:
+          $ref: '#/components/schemas/Person'
+        at:
+          type: string
+          format: date-time
+          example: '2026-10-20T09:30:00.000Z'
+        notes:
+          type: [string, 'null']
+          example: Healthy and happy.
+    Person:
+      type: object
+      required: [name, email]
+      properties:
+        name:
+          type: string
+          example: Ada Lovelace
+        email:
+          type: string
+          format: email
+          example: ada@vets.example.com
+        phone:
+          type: string
+        avatarUrl:
+          type: string
+          format: uri
     NewPet:
       type: object
       required: [name, kind]
