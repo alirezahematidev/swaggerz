@@ -56,7 +56,12 @@ type Engines = Record<
 async function playwright(): Promise<Engines> {
   await mkdir(TOOLS, { recursive: true });
   const manifest = path.join(TOOLS, 'package.json');
-  if (!existsSync(manifest)) await writeFile(manifest, JSON.stringify({ name: 'runtimes' }));
+  // `wx` creates the manifest only if it is missing, without a separate existence check.
+  await writeFile(manifest, JSON.stringify({ name: 'runtimes', private: true }), {
+    flag: 'wx',
+  }).catch((error: unknown) => {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+  });
   if (!existsSync(path.join(TOOLS, 'node_modules', 'playwright', 'package.json'))) {
     console.log('Installing Playwright into .runtimes/ …');
     execFileSync('npm', ['install', '--no-audit', '--no-fund', `playwright@${PLAYWRIGHT}`], {
