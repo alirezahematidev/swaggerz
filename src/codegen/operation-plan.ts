@@ -161,9 +161,11 @@ export function planOperation(symbol: OperationSymbol, ir: ApiDocument): Operati
   const hasSuccess = operation.responses.some((r) => /^2(\d\d|XX)$/i.test(r.status));
   const isSuccess = (r: ResponseIR): boolean =>
     hasSuccess ? isSuccessStatus(r.status) : r.status === 'default';
+  // Responses to `HEAD` never have a body, whatever content the specification documents.
+  const bodiless = operation.method === 'head';
   const planned = (r: ResponseIR): PlannedResponse => ({
     response: r,
-    media: preferredMedia(r.contents, 'response'),
+    media: bodiless ? undefined : preferredMedia(r.contents, 'response'),
   });
   const success = operation.responses.filter(isSuccess).map(planned);
   const errors = operation.responses.filter((r) => !isSuccess(r)).map(planned);
