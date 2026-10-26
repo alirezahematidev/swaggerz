@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0](https://github.com/alirezahematidev/swaggerz/compare/v0.1.2...v0.2.0) (2026-10-26)
+
+* check out corpus documents with git instead of fetch ([349d22a](https://github.com/alirezahematidev/swaggerz/commit/349d22ac85f7c3fdd1a5146e8f79ab5ce0780802))
+* swaggers website ([3629ec5](https://github.com/alirezahematidev/swaggerz/commit/3629ec5a5d0615738f55c84166efa2c6d42e1f87))
+
+### Features
+
+* Mock Service Worker handlers with realistic, seeded fixtures (features.mocks) ([6be5977](https://github.com/alirezahematidev/swaggerz/commit/6be5977289be6e5fe1f2106b7f5ab1faba774cbc))
+
+### Bug fixes
+
+* scorecard release files provided ([df15dae](https://github.com/alirezahematidev/swaggerz/commit/df15dae058dc2435c1648cf0a56738c9dc4a37ce))
+* treat HEAD responses as bodiless ([543a2c8](https://github.com/alirezahematidev/swaggerz/commit/543a2c8dffdb4672a7ecdbdb656e75cf86072e27))
+* validate text and binary responses as their types say ([57b7d43](https://github.com/alirezahematidev/swaggerz/commit/57b7d4344e1a540719b0c38387fa33c639477ce3))
+
 ## [0.1.2](https://github.com/alirezahematidev/swaggerz/compare/v0.1.1...v0.1.2) (2026-10-24)
 
 ### Features
