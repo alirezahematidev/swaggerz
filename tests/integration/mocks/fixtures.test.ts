@@ -5,7 +5,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { UserConfig } from '../../../src/config/types.ts';
 import type { Diagnostic } from '../../../src/diagnostics/types.ts';
 import { generateCase, OUTPUT_ROOT } from '../../support/generate.ts';
@@ -600,5 +600,250 @@ components:
     expect(file('mocks/models/pet.ts')).toContain(
       'export function makePet(options?: FixtureOptions): Pet {',
     );
+  });
+});
+
+describe('realistic values', () => {
+  const REALISTIC = `paths: {}
+components:
+  schemas:
+    Member:
+      type: object
+      required: [name, email, username]
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+          example: ada@acme.dev
+        username:
+          type: string
+        manager:
+          type: object
+          required: [name, email]
+          properties:
+            name:
+              type: string
+            email:
+              type: string
+              format: email
+    MemberPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+        nextCursor:
+          type: [string, 'null']
+    Task:
+      type: object
+      required: [title, description]
+      properties:
+        title:
+          type: string
+          example: Fix the login redirect on Safari
+        description:
+          type: string
+          example: Users on Safari see a blank page after they sign in. It started with the last deploy.
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+          format: uri-reference
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: array
+              minItems: 1
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                  message:
+                    type: string
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+    ValidationError:
+      type: object
+      required: [title, status]
+      properties:
+        title:
+          type: string
+          example: Validation failed
+        status:
+          type: integer
+          example: 422
+    PetGoneError:
+      type: object
+      required: [title, status]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+      example:
+        title: The pet was adopted
+        status: 410
+`;
+  let make: Generated['make'];
+
+  beforeAll(async () => {
+    ({ make } = await generate('fixtures-realistic', REALISTIC));
+  });
+
+  const seeds = Array.from({ length: 60 }, (_, index) => ({ seed: index + 1 }));
+  const LOREM = /\b(lorem|ipsum|dolor|amet|incididunt|ullamco|veniam|tempor|labore)\b/;
+  const ascii = (text: string): string =>
+    text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '');
+
+  it('give lists items outside empty states', () => {
+    for (const options of [...seeds, ...SEEDS.map(({ seed }) => ({ seed: seed + 1000 }))]) {
+      const page = make('makeMemberPage', options) as { items: unknown[] };
+      expect(page.items.length).toBeGreaterThan(0);
+    }
+    expect(make('makeMemberPage', { seed: 3, empty: true })).toMatchObject({ items: [] });
+  });
+
+  it('name one person per object: name, email and username agree', () => {
+    interface Person {
+      readonly name: string;
+      readonly email: string;
+    }
+    const local = (person: Person): string => {
+      const [first = '', last = ''] = person.name.split(' ');
+      return `${ascii(first)}.${ascii(last)}`;
+    };
+    const members = seeds.map(
+      (options) => make('makeMember', options) as Person & { username: string; manager?: Person },
+    );
+    for (const member of members) {
+      expect(member.email).toBe(`${local(member)}@acme.dev`);
+      expect(member.username.replace(/\d+$/, '')).toBe(local(member));
+    }
+    // An inline object names a person of its own.
+    const managers = members.flatMap((member) =>
+      member.manager === undefined ? [] : [[member, member.manager] as const],
+    );
+    expect(managers.length).toBeGreaterThan(10);
+    for (const [, manager] of managers) expect(manager.email.split('@')[0]).toBe(local(manager));
+    expect(managers.some(([member, manager]) => manager.name !== member.name)).toBe(true);
+  });
+
+  it('vary text instead of repeating the example word for word', () => {
+    const tasks = seeds.map((options) => make('makeTask', options) as Record<string, string>);
+    expect(tasks.filter((task) => task['title'] === 'Fix the login redirect on Safari')).toEqual(
+      [],
+    );
+    expect(tasks.filter((task) => task['description']?.startsWith('Users on Safari'))).toEqual([]);
+    expect(new Set(tasks.map((task) => task['title'])).size).toBeGreaterThan(30);
+  });
+
+  it('describe one error status per error body', () => {
+    const REASONS: Record<number, string> = {
+      400: 'Bad Request',
+      401: 'Unauthorized',
+      403: 'Forbidden',
+      404: 'Not Found',
+      409: 'Conflict',
+      422: 'Unprocessable Content',
+      429: 'Too Many Requests',
+      500: 'Internal Server Error',
+      503: 'Service Unavailable',
+    };
+    const kebab = (text: string): string => text.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const problems = [
+      make('makeProblem'),
+      ...seeds.map((options) => make('makeProblem', options)),
+    ] as Record<string, string | number>[];
+    for (const problem of problems) {
+      const status = problem['status'] as number;
+      expect(problem['title']).toBe(REASONS[status]);
+      expect(problem['type']).toMatch(new RegExp(`/problems/${kebab(REASONS[status] ?? '')}$`));
+      expect(problem['detail']).toMatch(/^[A-Z].*\.$/);
+      expect(problem['detail']).not.toMatch(LOREM);
+      expect(problem['instance'] ?? 'urn:uuid:x').toMatch(/^urn:uuid:/);
+    }
+    expect(new Set(problems.map((problem) => problem['status'])).size).toBeGreaterThan(4);
+    // The examples describe 404; a body sent with a status describes it, for every seed.
+    expect(problems[0]).toMatchObject({ status: 404, title: 'Not Found' });
+    for (const options of [{}, ...seeds.slice(0, 10)])
+      expect(make('makeProblem', { ...options, status: 500 })).toMatchObject({
+        status: 500,
+        title: 'Internal Server Error',
+      });
+    // Statuses that are not errors are no status to describe.
+    expect(make('makeProblem', { status: 200 })).toEqual(make('makeProblem'));
+    // The errors of single fields name a field and what is wrong with it.
+    for (const options of seeds.slice(0, 10)) {
+      const problem = make('makeValidationProblem', { ...options, status: 422 }) as {
+        title: string;
+        errors: { field: string; message: string }[];
+      };
+      expect(problem.title).toBe('Unprocessable Content');
+      for (const error of problem.errors) {
+        expect(error.field).toMatch(/^[a-zA-Z]+$/);
+        expect(error.message).toMatch(/^[A-Z].*\.$/);
+        expect(error.message).not.toMatch(LOREM);
+      }
+    }
+    // Codes are written the way the example writes them.
+    expect(make('makeErrorResponse', { status: 500 })).toMatchObject({
+      code: 'INTERNAL_SERVER_ERROR',
+    });
+    expect(make('makeErrorResponse', { seed: 4, status: 429 })).toMatchObject({
+      code: 'TOO_MANY_REQUESTS',
+      message: expect.stringMatching(/^[A-Z].*\.$/),
+    });
+  });
+
+  it('keep the examples of an error model for the status they describe', () => {
+    expect(make('makeValidationError', { status: 422 })).toEqual({
+      title: 'Validation failed',
+      status: 422,
+    });
+    expect(make('makeValidationError', { status: 500 })).toEqual({
+      title: 'Internal Server Error',
+      status: 500,
+    });
+    expect(make('makePetGoneError')).toEqual({ title: 'The pet was adopted', status: 410 });
+    expect(make('makePetGoneError', { status: 410 })).toEqual({
+      title: 'The pet was adopted',
+      status: 410,
+    });
+    expect(make('makePetGoneError', { status: 503 })).toEqual({
+      title: 'Service Unavailable',
+      status: 503,
+    });
   });
 });

@@ -456,16 +456,18 @@ describe.each([
     expect((api['isGetPetApiError'] as (e: unknown) => boolean)(notFound)).toBe(true);
     expect(notFound['status']).toBe(404);
     expect(notFound['body']).toEqual(mocks.makeProblem!());
-    // A range (`4XX`) and `default` serve every status they cover.
+    expect(notFound['body']).toMatchObject({ title: 'Not Found', status: 404 });
+    // A range (`4XX`) and `default` serve every status they cover, and error bodies describe the
+    // status they are sent with.
     server.use(mocks.mockGetPet!({ status: 409, seed: 0 }) as never);
     expect(await failure(call(api, 'getPet', { petId: 1 }))).toMatchObject({
       status: 409,
-      body: mocks.makeProblem!(),
+      body: { ...(mocks.makeProblem!(undefined, { status: 409 }) as object), status: 409 },
     });
     server.use(mocks.mockDeletePet!({ status: 503 }) as never);
     expect(await failure(call(api, 'deletePet', { petId: 1 }))).toMatchObject({
       status: 503,
-      body: { title: expect.any(String) },
+      body: { title: 'Service Unavailable', status: 503 },
     });
     server.use(mocks.mockCreatePet!({ status: 422, body: { title: 'Invalid' } }) as never);
     expect(
