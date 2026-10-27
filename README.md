@@ -10,6 +10,7 @@
   <a href="https://github.com/alirezahematidev/swaggerz/actions/workflows/ci.yml"><img src="https://github.com/alirezahematidev/swaggerz/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/alirezahematidev/swaggerz"><img src="https://api.scorecard.dev/projects/github.com/alirezahematidev/swaggerz/badge" alt="OpenSSF Scorecard"></a>
   <a href="LICENSE"><img src="https://img.shields.io/npm/l/swaggerz" alt="MIT license"></a>
+  <a href="https://www.producthunt.com/products/swaggerz?embed=true&amp;utm_source=embed&amp;utm_medium=post_embed"><img src="https://img.shields.io/badge/Product_Hunt-swaggerz-FF6154?logo=producthunt&amp;logoColor=white" alt="swaggerz on Product Hunt"></a>
 </p>
 
 Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0**, **OpenAPI 3.0**, **3.1** and **3.2** specifications.

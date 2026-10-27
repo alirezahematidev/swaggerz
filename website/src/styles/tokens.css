@@ -1,6 +1,6 @@
 /*
  * Tokens the website adds to the shared palette (src/dashboard/client/tokens.css): text tones
- * between ink and muted, and the margin-note and stamp colors. Same structure as the shared file:
+ * between ink and muted, the margin-note and stamp colors, and Product Hunt's orange. Same structure as the shared file:
  * light under `:root`, dark under the media query and `[data-theme='dark']`.
  */
 :root {
@@ -14,6 +14,9 @@
   --stamp-ink: #fdfbf7;
   /* Focus outlines: the brand's deep gold, which keeps 3:1 against every light paper. */
   --focus: #b07a12;
+  /* Product Hunt's orange, with dark ink on it (white on it is under 4.5:1). */
+  --producthunt: #ff6154;
+  --producthunt-ink: #141311;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -27,6 +30,8 @@
     --paper-edge: #1f1d1a;
     --stamp-ink: #141311;
     --focus: #f2b33d;
+    --producthunt: #ff6154;
+    --producthunt-ink: #141311;
   }
 }
 
@@ -40,4 +45,6 @@
   --paper-edge: #1f1d1a;
   --stamp-ink: #141311;
   --focus: #f2b33d;
+  --producthunt: #ff6154;
+  --producthunt-ink: #141311;
 }

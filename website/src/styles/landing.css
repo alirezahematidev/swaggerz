@@ -814,6 +814,88 @@
   margin-top: 2rem;
 }
 
+/* The product on Product Hunt, as Product Hunt's embed shows it, in the site's palette. */
+.producthunt {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem 0.9rem;
+  max-width: 31rem;
+  margin: 2.5rem auto 0;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 2px 8px rgb(var(--shadow-color) / 0.08);
+  text-align: left;
+  text-decoration: none;
+  transition:
+    transform 200ms var(--ease-out),
+    border-color 200ms var(--ease-out);
+}
+
+.producthunt-mark {
+  display: grid;
+  place-items: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--surface-sunken);
+}
+
+.producthunt-text {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.producthunt-name {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.producthunt-tagline {
+  font-size: 0.9rem;
+  color: var(--muted-foreground);
+}
+
+.producthunt-cta {
+  grid-column: 1 / -1;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  border-radius: 999px;
+  background: var(--producthunt);
+  color: var(--producthunt-ink);
+  font-weight: 600;
+}
+
+.producthunt-cta svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (hover: hover) {
+  .producthunt:hover {
+    transform: translateY(-1px);
+    border-color: var(--border-strong);
+  }
+}
+
+.producthunt:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
 /* ----- Narrow screens ----- */
 
 @media (max-width: 64rem) {

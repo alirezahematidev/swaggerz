@@ -2,7 +2,7 @@
 /**
  * The landing page: the claim and the two calls to action, a panel of generated output over an
  * animated wave field, what the client gives you, three measured numbers and a closing call to
- * action. Every number comes from src/generated (measurements, the corpus baseline, the files the
+ * action with the Product Hunt card. Every number comes from src/generated (measurements, the corpus baseline, the files the
  * quick start generates); the measurements are dated beside them.
  */
 import CopyCommand from '../components/CopyCommand.astro';
@@ -12,7 +12,7 @@ import measurements from '../generated/measurements.json';
 import quickStart from '../generated/quick-start.json';
 import Editorial from '../layouts/Editorial.astro';
 import '../styles/landing.css';
-import { PACKAGE } from '../site.ts';
+import { PACKAGE, PRODUCT_HUNT } from '../site.ts';
 
 const base = import.meta.env.BASE_URL.endsWith('/') ? import.meta.env.BASE_URL : `${import.meta.env.BASE_URL}/`;
 const docs = (path: string): string => `${base}docs/${path}/`;
@@ -210,6 +210,20 @@ console.<span class="tk-f">log</span>(pet.name);</code></pre>
         </a>
         <CopyCommand command="npx swaggerz init" />
       </div>
+      <a class="producthunt" href={PRODUCT_HUNT} target="_blank" rel="noopener">
+        <span class="producthunt-mark" aria-hidden="true">
+          <img src={`${base}favicon.svg`} alt="" width="40" height="40" />
+        </span>
+        <span class="producthunt-text">
+          <span class="producthunt-name">swaggerz</span>
+          <span class="producthunt-tagline">typed API clients compiled from OpenAPI</span>
+        </span>
+        <span class="producthunt-cta">
+          Check it out on Product Hunt
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9.5M8.5 4l4 4-4 4"></path></svg>
+        </span>
+        <span class="sr-only">(opens in a new tab)</span>
+      </a>
     </section>
   </div>
 </Editorial>
