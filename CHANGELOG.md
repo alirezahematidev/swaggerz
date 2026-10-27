@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.1](https://github.com/alirezahematidev/swaggerz/compare/v0.2.0...v0.2.1) (2026-10-27)
+
+* **deps-dev:** bump the development group across 1 directory with 7 updates ([46183a6](https://github.com/alirezahematidev/swaggerz/commit/46183a6ee1d8b83eaab061bd13f03b6af7ddff0d))
+* **deps:** bump @tanstack/react-query from 5.104.3 to 5.104.5 ([961bd4c](https://github.com/alirezahematidev/swaggerz/commit/961bd4c97dc3ba81ad5eacf1d59b2e059e746546))
+* **deps:** bump oxc-parser from 0.154.0 to 0.155.0 ([755ae02](https://github.com/alirezahematidev/swaggerz/commit/755ae02d187e5b129fc397581dcb960a452f6685))
+* link the Product Hunt launch from the website and the README ([264a1bc](https://github.com/alirezahematidev/swaggerz/commit/264a1bc7b0a3b644a7ecf477ba20fa93a1168bdd))
+
+### Bug fixes
+
+* realistic mock lists, error bodies, text and people ([58da685](https://github.com/alirezahematidev/swaggerz/commit/58da685a80175575765d45f403aacaa58666c669))
+
 ## [0.2.0](https://github.com/alirezahematidev/swaggerz/compare/v0.1.2...v0.2.0) (2026-10-26)
 
 * check out corpus documents with git instead of fetch ([349d22a](https://github.com/alirezahematidev/swaggerz/commit/349d22ac85f7c3fdd1a5146e8f79ab5ce0780802))
