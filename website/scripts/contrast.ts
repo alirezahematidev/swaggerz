@@ -94,6 +94,12 @@ export const PAIRS: readonly Pair[] = [
   },
   { foreground: 'focus', backgrounds: PAPER, minimum: 3, use: 'focus outline' },
   {
+    foreground: 'producthunt-ink',
+    backgrounds: ['producthunt'],
+    minimum: 4.5,
+    use: 'Product Hunt button',
+  },
+  {
     foreground: 'border-strong',
     backgrounds: ['background'],
     minimum: 1.3,
