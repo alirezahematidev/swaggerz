@@ -1,5 +1,6 @@
 import type { ModelSymbol } from '../../analysis/types.ts';
 import type { JsonValue } from '../../ir/types.ts';
+import { DEFAULT_ERROR_STATUS } from '../../templates/mocks/fake.ts';
 import { renderAll, type EmitContext, type ModuleOutput } from '../context.ts';
 import type { ImportManager } from '../imports.ts';
 import { literal, propertyKey, quote, renderJsDoc } from '../printer.ts';
@@ -100,6 +101,19 @@ export function printValue(value: MockValue, p: PrintContext, indent = ''): stri
         quote(value.text),
         ...bounds(value.min, value.max),
       ]);
+    case 'status':
+      return call('errorStatus', [quote(value.key), number(value.value)]);
+    case 'error': {
+      const limits = bounds(value.min, value.max);
+      return call('errorText', [
+        quote(value.key),
+        quote(value.value),
+        quote(value.part),
+        ...(value.status === DEFAULT_ERROR_STATUS && limits.length === 0
+          ? []
+          : [number(value.status), ...limits]),
+      ]);
+    }
     case 'pattern':
       return call('pattern', [
         quote(value.key),
@@ -184,7 +198,11 @@ export function printValue(value: MockValue, p: PrintContext, indent = ''): stri
         String(value.min),
         String(value.max),
         `${usesFake(value.item) ? '(f)' : '()'} => ${item}`,
-        ...(value.unique ? ['true'] : []),
+        ...(value.least === value.min
+          ? value.unique
+            ? ['true']
+            : []
+          : [String(value.unique), String(value.least)]),
       ]);
     }
     case 'record': {
@@ -207,6 +225,7 @@ export function printValue(value: MockValue, p: PrintContext, indent = ''): stri
     case 'example':
       return call('example', [
         `(examples) =>\n${inner}examples\n${inner}  ? ${printValue(value.value, p, `${inner}  `)}\n${inner}  : ${printValue(value.make, p, `${inner}  `)}`,
+        ...(value.status === undefined ? [] : [number(value.status)]),
       ]);
   }
 }
@@ -306,7 +325,8 @@ export function generateFixtureModule(
       value.value.kind === 'object' &&
       value.make.kind === 'object'
     ) {
-      body = `f.example((examples) =>\n    examples\n      ? ${printObject(value.value, p, '      ', ['...overrides'])}\n      : ${printObject(value.make, p, '      ', ['...overrides'], 'overrides')})`;
+      const status = value.status === undefined ? '' : `, ${number(value.status)}`;
+      body = `f.example((examples) =>\n    examples\n      ? ${printObject(value.value, p, '      ', ['...overrides'])}\n      : ${printObject(value.make, p, '      ', ['...overrides'], 'overrides')}${status})`;
     } else {
       body = printValue(value, p, '  ');
     }

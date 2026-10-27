@@ -176,8 +176,9 @@ export function mockHandler(operation: MockOperation, options: MockOptions = {})
       const generated = (): unknown => {
         if (response?.body === undefined) return undefined;
         const seed = seedFor(request, params, operation, options);
+        // Error bodies describe the status they are sent with.
         return fill(
-          response.body(options.empty === true ? { seed, empty: true } : { seed }),
+          response.body(options.empty === true ? { seed, status, empty: true } : { seed, status }),
           params,
           operation.fill,
         );
