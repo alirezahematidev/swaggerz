@@ -1,4 +1,4 @@
-import type { DateWhen, TextKind } from '../../templates/mocks/fake.ts';
+import type { DateWhen, ErrorPart, TextKind } from '../../templates/mocks/fake.ts';
 
 /**
  * What a value's name says about it: `email` is an email address, `avatarUrl` a picture, `price`
@@ -284,6 +284,8 @@ function nameKind(all: readonly string[], owner: string | undefined): TextKind |
     return 'hash';
   if (joined === 'uuid' || joined === 'guid' || last === 'uuid' || last === 'guid') return 'uuid';
   if (joined === 'slug' || joined === 'permalink') return 'slug';
+  // Opaque page cursors (`nextCursor`); `nextPageToken` is a token by its last word already.
+  if (last === 'cursor') return 'token';
   if (joined === 'sku') return 'sku';
   if (joined === 'isbn') return 'isbn';
   if (joined === 'iban') return 'iban';
@@ -302,6 +304,104 @@ function nameKind(all: readonly string[], owner: string | undefined): TextKind |
     return 'code';
   if (last === 'id' || joined === 'id' || (last === 'ids' && all.length > 1)) return 'uuid';
   return undefined;
+}
+
+const ERROR_WORDS: ReadonlySet<string> = new Set([
+  'problem',
+  'error',
+  'errors',
+  'fault',
+  'exception',
+  'failure',
+  'violation',
+  'violations',
+]);
+
+/**
+ * Whether an object describes an error: its model or property is named like one (`Problem`,
+ * `ErrorResponse`, the items of `errors`), or it has the members of RFC 9457 Problem Details.
+ */
+export function isErrorModel(subject: string | undefined, properties: readonly string[]): boolean {
+  if (words(subject ?? '').some((word) => ERROR_WORDS.has(word))) return true;
+  const names = new Set(properties);
+  return (
+    names.has('title') &&
+    names.has('status') &&
+    (names.has('detail') || names.has('type') || names.has('instance'))
+  );
+}
+
+const FIELD_NAMES: ReadonlySet<string> = new Set([
+  'field',
+  'fieldname',
+  'param',
+  'parameter',
+  'property',
+  'attribute',
+]);
+const FIELD_POINTERS: ReadonlySet<string> = new Set([
+  'path',
+  'pointer',
+  'jsonpointer',
+  'loc',
+  'location',
+]);
+
+/** Whether an error is about one field (`{ field, message }`, `{ pointer, detail }`). */
+export function isFieldError(properties: readonly string[]): boolean {
+  return properties.some((name) => {
+    const joined = words(name).join('');
+    return FIELD_NAMES.has(joined) || FIELD_POINTERS.has(joined);
+  });
+}
+
+/**
+ * What a string property of an error model says about the error (`title` its reason phrase,
+ * `detail` or `message` what went wrong, `code` the status as a code), or `undefined`. In the
+ * error of one field (`field`), the message says what is wrong with the field.
+ */
+export function errorPart(
+  name: string | undefined,
+  format: string | undefined,
+  field: boolean,
+  example?: string,
+): ErrorPart | undefined {
+  const joined = words(name ?? '').join('');
+  const message = [
+    'detail',
+    'details',
+    'message',
+    'msg',
+    'description',
+    'errordescription',
+    'errormessage',
+    'errordetail',
+    'errordetails',
+  ];
+  if (field) {
+    if (FIELD_NAMES.has(joined)) return 'field';
+    if (FIELD_POINTERS.has(joined)) return 'pointer';
+    if ([...message, 'error', 'reason'].includes(joined)) return 'fieldMessage';
+  }
+  if (['title', 'error', 'errortitle', 'statustext', 'reasonphrase', 'reason'].includes(joined))
+    return 'title';
+  if (message.includes(joined)) return 'detail';
+  if (joined === 'type' || joined === 'errortype') {
+    const uri =
+      (format !== undefined && /^(uri|url|iri)/i.test(format)) ||
+      /^(https?:|about:|urn:)/i.test(example ?? '');
+    return uri ? 'type' : 'code';
+  }
+  if (['code', 'errorcode', 'kind', 'errorkey'].includes(joined)) return 'code';
+  if (joined === 'instance') return 'instance';
+  return undefined;
+}
+
+/** Whether an integer property of an error model is the HTTP status it describes. */
+export function isErrorStatus(name: string | undefined): boolean {
+  return ['status', 'statuscode', 'httpstatus', 'httpstatuscode', 'httpcode', 'code'].includes(
+    words(name ?? '').join(''),
+  );
 }
 
 /** A realistic range for a number, from its name: `age` 18–80, `price` 1–999.99, `rating` 1–5. */

@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   booleanRate,
   dateWhen,
+  errorPart,
+  isErrorModel,
+  isErrorStatus,
+  isFieldError,
   numberRange,
   singular,
   textKind,
@@ -9,6 +13,7 @@ import {
 } from '../../../src/codegen/mocks/semantics.ts';
 import {
   dateNear,
+  errorText,
   Fake,
   fileContent,
   generateText,
@@ -198,6 +203,88 @@ describe('fake data', () => {
     new Fake({ seed: 42 }).id('pet-42');
     expect(seedOfEntity('pet-42')).toBe(42);
   });
+
+  it('names one person per object', () => {
+    const ascii = (text: string): string =>
+      text
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+    let others = 0;
+    for (let seed = 1; seed < 40; seed++) {
+      const f = new Fake({ seed });
+      const [first = '', last = ''] = f.text('name', 'Ada Lovelace', 'fullName').split(' ');
+      expect(f.text('firstName', 'Ada', 'firstName')).toBe(first);
+      expect(f.text('email', 'ada@acme.dev', 'email')).toBe(
+        `${ascii(first)}.${ascii(last)}@acme.dev`,
+      );
+      // An inline object (`owner.name`) names a person of its own.
+      if (f.text('owner.name', 'Ada Lovelace', 'fullName') !== `${first} ${last}`) others++;
+    }
+    expect(others).toBeGreaterThan(30);
+  });
+
+  it('gives lists items outside empty states, and other arrays any length', () => {
+    const lengths = (least?: number): number[] =>
+      Array.from(
+        { length: 300 },
+        (_, seed) =>
+          new Fake({ seed: seed + 1 }).array('xs', 6, 0, 12, () => 0, false, least).length,
+      );
+    expect(Math.min(...lengths(1))).toBe(1);
+    expect(Math.min(...lengths())).toBe(0);
+    expect(new Fake({ seed: 5, empty: true }).array('xs', 6, 0, 12, () => 0, false, 1)).toEqual([]);
+  });
+
+  it('varies long text instead of repeating its example', () => {
+    const example = 'Fix the login redirect on Safari';
+    for (let seed = 1; seed < 60; seed++)
+      expect(new Fake({ seed }).text('title', example, 'task')).not.toBe(example);
+    // Numbers and codes in an example vary, so its wording can stay.
+    const shipped = Array.from({ length: 60 }, (_, seed) =>
+      new Fake({ seed: seed + 1 }).text('summary', 'Order 1234 shipped', 'sentence'),
+    );
+    expect(shipped.some((text) => /^Order [1-9]\d{3} shipped$/.test(text))).toBe(true);
+    expect(shipped).not.toContain('Order 1234 shipped');
+  });
+
+  it('describes the status of an error body', () => {
+    const f = new Fake({ seed: 3, status: 503 });
+    expect(f.errorStatus('status', 404)).toBe(503);
+    expect(f.errorText('title', 'Not Found', 'title')).toBe('Service Unavailable');
+    expect(f.errorText('code', 'NOT_FOUND', 'code')).toBe('SERVICE_UNAVAILABLE');
+    expect(f.errorText('code', 'not-found', 'code')).toBe('service-unavailable');
+    expect(f.errorText('code', 'NotFound', 'code')).toBe('ServiceUnavailable');
+    expect(f.errorText('code', '', 'code')).toBe('service_unavailable');
+    expect(f.errorText('type', 'https://api.acme.dev/problems/x', 'type')).toBe(
+      'https://api.acme.dev/problems/service-unavailable',
+    );
+    expect(f.errorText('type', 'about:blank', 'type')).toBe('about:blank');
+    expect(f.errorText('detail', '', 'detail')).toMatch(/unavailable|maintenance/i);
+    // Seed 0: the examples, for the status they describe; another status is described.
+    expect(new Fake({ status: 404 }).errorText('title', 'Pet not found', 'title')).toBe(
+      'Pet not found',
+    );
+    expect(new Fake({ status: 500 }).errorText('title', 'Pet not found', 'title')).toBe(
+      'Internal Server Error',
+    );
+    expect(new Fake({ status: 422 }).errorText('title', 'Invalid', 'title', 422)).toBe('Invalid');
+    expect(new Fake().errorStatus('status', 404)).toBe(404);
+    // Statuses that are not errors are no status to describe.
+    expect(new Fake({ status: 200 }).errorStatus('status', 404)).toBe(404);
+    // Without a status, each object describes one of its own.
+    const statuses = new Set<number>();
+    for (let seed = 1; seed < 40; seed++) {
+      const g = new Fake({ seed });
+      const status = g.errorStatus('status', 404);
+      statuses.add(status);
+      expect(g.errorText('title', 'Not Found', 'title')).toBe(
+        errorText('title', status, Random.of('x')),
+      );
+    }
+    expect(statuses.size).toBeGreaterThan(4);
+  });
 });
 
 describe('semantics', () => {
@@ -225,6 +312,31 @@ describe('semantics', () => {
     expect(textKind('id', 'Task', undefined)).toBe('uuid');
     expect(textKind('id', 'Task', undefined, 'tsk_3k9f2a7d1b')).toBeUndefined();
     expect(textKind('flavor', undefined, undefined)).toBeUndefined();
+    expect(textKind('nextCursor', undefined, undefined)).toBe('token');
+  });
+
+  it('recognizes errors and what their properties say', () => {
+    expect(isErrorModel('Problem', [])).toBe(true);
+    expect(isErrorModel('HTTPValidationError', [])).toBe(true);
+    expect(isErrorModel('error', ['code', 'message'])).toBe(true);
+    expect(isErrorModel('Outcome', ['type', 'title', 'status', 'detail'])).toBe(true);
+    expect(isErrorModel('Mirror', ['title', 'status'])).toBe(false);
+    expect(isFieldError(['field', 'message'])).toBe(true);
+    expect(isFieldError(['title', 'status'])).toBe(false);
+    expect(errorPart('title', undefined, false)).toBe('title');
+    expect(errorPart('message', undefined, false)).toBe('detail');
+    expect(errorPart('error_description', undefined, false)).toBe('detail');
+    expect(errorPart('message', undefined, true)).toBe('fieldMessage');
+    expect(errorPart('field', undefined, true)).toBe('field');
+    expect(errorPart('pointer', undefined, true)).toBe('pointer');
+    expect(errorPart('type', 'uri', false)).toBe('type');
+    expect(errorPart('type', undefined, false, 'https://acme.dev/problems/x')).toBe('type');
+    expect(errorPart('type', undefined, false)).toBe('code');
+    expect(errorPart('code', undefined, false)).toBe('code');
+    expect(errorPart('instance', 'uri-reference', false)).toBe('instance');
+    expect(errorPart('createdAt', undefined, false)).toBeUndefined();
+    expect(isErrorStatus('statusCode')).toBe(true);
+    expect(isErrorStatus('count')).toBe(false);
   });
 
   it('infers ranges, rates and dates from names', () => {
