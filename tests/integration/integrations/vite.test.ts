@@ -215,22 +215,25 @@ describe('swaggerz/vite dev server', { timeout: 60_000 }, () => {
     expect(await readFile(index, 'utf8')).toContain('list-pets');
   });
 
-  it('keeps watching after a restart with the same plugin', async () => {
+  it('watches with one session after a restart with the same plugin', async () => {
     const directory = await project('vite-restart');
     const index = path.join(directory, 'src', 'generated', 'api', 'index.ts');
     const { server, lines } = await devServer(directory);
     // Vite starts the new server, then closes the old one: only the old server's session stops.
-    // Restarted in place: the helper's cleanup closes the new server.
     await server.restart();
     expect(lines.filter((line) => line.includes('src/generated/api is up to date'))).toHaveLength(
       1,
     );
+    // The new server's session watches.
     await edit(path.join(directory, 'openapi.yaml'), spec('listAllPets'), async () =>
       (await readFile(index, 'utf8')).includes('list-all-pets'),
     );
-    // One session watches: one regeneration is reported.
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(lines.filter((line) => line.includes('openapi.yaml changed'))).toHaveLength(1);
+    // Closing it (restarted in place) leaves no session behind: the old one stopped too. Counting
+    // reports instead would be flaky: a platform may report one save as two changes.
+    await server.close();
+    await writeFile(path.join(directory, 'openapi.yaml'), spec('listPets'));
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(await readFile(index, 'utf8')).toContain('list-all-pets');
   });
 });
 
