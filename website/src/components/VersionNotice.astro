@@ -1,0 +1,40 @@
+---
+/**
+ * On the snapshot of a release only: which version this is, with links to the latest docs and to
+ * every version. Worded so it stays true after newer releases, since a snapshot is never rebuilt.
+ */
+import { CURRENT, pageOf, ROOT, SNAPSHOT } from '../versions.ts';
+
+const page = pageOf(Astro.url.pathname);
+---
+
+{
+  SNAPSHOT && (
+    <div class="version-notice" role="note" data-pagefind-ignore>
+      <p>
+        This is the documentation of swaggerz {CURRENT.id} ({CURRENT.release}).{' '}
+        <a href={`${ROOT}${page}`}>Read the latest documentation</a> or{' '}
+        <a href={`${ROOT}versions/`}>choose another version</a>.
+      </p>
+    </div>
+  )
+}
+
+<style>
+  .version-notice {
+    padding: 0.6rem var(--gutter, 1rem);
+    border-bottom: 1px solid var(--rule);
+    background: color-mix(in srgb, var(--marigold) 14%, var(--background));
+    color: var(--text-strong);
+    font-size: 0.9rem;
+    line-height: 1.45;
+    text-align: center;
+    text-wrap: balance;
+  }
+  p {
+    margin: 0;
+  }
+  a {
+    color: var(--link);
+  }
+</style>

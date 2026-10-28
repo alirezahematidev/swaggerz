@@ -1,0 +1,64 @@
+---
+/**
+ * Every version of the docs: the latest release at the root of the site and a snapshot of every
+ * minor release below it. The root build's list is the complete one; a snapshot's is the list as
+ * it was when that release was published.
+ */
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { REPOSITORY } from '../site.ts';
+import { CURRENT, homeOf, ROOT, SNAPSHOT, VERSIONS } from '../versions.ts';
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Versions',
+    description: 'The documentation of every minor release of swaggerz.',
+    editUrl: false,
+    tableOfContents: false,
+  }}
+>
+  {
+    SNAPSHOT ? (
+      <p>
+        These are the versions that existed when swaggerz {CURRENT.release} was released.{' '}
+        <a href={`${ROOT}versions/`}>The current list</a> has every version.
+      </p>
+    ) : (
+      <p>
+        The site documents the latest release. Every minor release keeps its own documentation,
+        built from its release tag, for projects that have not upgraded yet.
+      </p>
+    )
+  }
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Version</th>
+        <th scope="col">Documentation</th>
+        <th scope="col">Release</th>
+      </tr>
+    </thead>
+    <tbody>
+      {
+        VERSIONS.map((version, index) => (
+          <tr>
+            <th scope="row">{version.id}</th>
+            <td>
+              <a href={homeOf(version)} aria-current={version.id === CURRENT.id ? 'page' : undefined}>
+                {!SNAPSHOT && index === 0 ? 'Latest' : `${version.id} documentation`}
+              </a>
+              {version.id === CURRENT.id && ' (this version)'}
+            </td>
+            <td>
+              <a href={`${REPOSITORY.url}/releases/tag/v${version.release}`}>{version.release}</a>
+            </td>
+          </tr>
+        ))
+      }
+    </tbody>
+  </table>
+  <p>
+    What changed between versions is in the <a href={`${ROOT}changelog/`}>changelog</a>; the
+    <a href={`${ROOT}docs/guides/migrating/`}>migration guide</a> covers moving from other generators.
+  </p>
+</StarlightPage>

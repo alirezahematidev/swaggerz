@@ -86,7 +86,7 @@ Pushing the `v<version>` tag starts the release workflow, which:
 4. publishes that tarball to npm with provenance, using the `next` dist-tag for pre-releases. npm authenticates with [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OpenID Connect, no long-lived token) when it is configured for the workflow, and otherwise with the `NPM_TOKEN` repository secret;
 5. creates the GitHub release with that version's section of `CHANGELOG.md`, and attaches the tarball and its provenance (`swaggerz-<version>.tgz.intoto.jsonl`, a Sigstore bundle). Check a downloaded tarball with `gh attestation verify swaggerz-<version>.tgz --repo alirezahematidev/swaggerz`.
 
-The same tag starts the website workflow (`website.yml`), which builds and tests the docs site from the tagged commit and deploys it to GitHub Pages, so the site documents the released version.
+The same tag starts the website workflow (`website.yml`), which builds and tests the docs site from the tagged commit and deploys it to GitHub Pages, so the site documents the released version. It also keeps a snapshot of the release's docs at `/v<major>.<minor>/` (on the `website-archive` branch, which only the workflow writes), so every minor release keeps its documentation after the next one ([website/README.md](website/README.md#versions)).
 
 `publishConfig.provenance` is set, so `npm publish` fails outside a supported CI environment — an additional guard against accidental local publishing.
 
@@ -94,7 +94,7 @@ The first version, `0.1.0`, already has its changelog entry, so it is tagged by 
 
 ## Repository settings
 
-The workflows in `.github/workflows` check every change: `ci.yml` (tests on Linux, macOS and Windows, generated clients in every runtime, the corpus, oldest and newest dependencies, the packed package, the examples; the `CI passed` job sums them up), `codeql.yml` (code scanning), `dependency-review.yml` (vulnerable or copyleft dependencies in pull requests), `scorecard.yml` (OpenSSF Scorecard), `zizmor.yml` (audits the workflows) and `website.yml` (builds and tests the docs site; deploys it on release tags). Actions are pinned to commit SHAs, checkouts do not keep credentials, and every job has least-privilege permissions; Dependabot updates actions and npm dependencies after a cooldown.
+The workflows in `.github/workflows` check every change: `ci.yml` (tests on Linux, macOS and Windows, generated clients in every runtime, the corpus, oldest and newest dependencies, the packed package, the examples; the `CI passed` job sums them up), `codeql.yml` (code scanning), `dependency-review.yml` (vulnerable or copyleft dependencies in pull requests), `scorecard.yml` (OpenSSF Scorecard), `zizmor.yml` (audits the workflows) and `website.yml` (builds and tests the docs site; on release tags archives the release's docs and deploys every version). Actions are pinned to commit SHAs, checkouts do not keep credentials, and every job has least-privilege permissions; Dependabot updates actions and npm dependencies after a cooldown.
 
 Settings that live outside the repository, configured once by an admin:
 

@@ -1,6 +1,7 @@
 /**
  * The site's own widgets, used the way a reader would: the search dialog, the "On this page"
- * menu, disclosures that find-in-page and links must open, and the landing page's phone menu.
+ * menu, disclosures that find-in-page and links must open, the landing page's phone menu and the
+ * version switch.
  */
 import { expect, test } from '@playwright/test';
 
@@ -84,3 +85,36 @@ test('the landing page menu opens on a phone and closes with Escape', async ({ p
   await expect(nav).toBeHidden();
   await expect(menu).toBeFocused();
 });
+
+for (const [width, path] of [
+  [390, '/docs/guides/mocks/'],
+  [1440, '/docs/guides/mocks/'],
+  [390, '/'],
+  [1440, '/playground/'],
+] as const) {
+  test(`the version switch lists this version and every version at ${width}px on ${path}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto(path);
+    const toggle = page.getByRole('button', { name: /^Documentation version \d+\.\d+$/ });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    const menu = page.getByRole('navigation', { name: 'Documentation versions' });
+    await expect(menu).toBeVisible();
+    // Opens below the header, inside the viewport: the header does not clip it.
+    const box = await menu.boundingBox();
+    expect(box?.y ?? 0).toBeGreaterThan(40);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+    const current = menu.locator('a[aria-current="page"]');
+    await expect(current).toHaveCount(1);
+    await expect(current).toHaveAttribute('href', path);
+    await expect(menu.getByRole('link', { name: 'All versions' })).toHaveAttribute(
+      'href',
+      '/versions/',
+    );
+    await page.keyboard.press('Escape');
+    await expect(menu).toBeHidden();
+    await expect(toggle).toBeFocused();
+  });
+}

@@ -1,0 +1,123 @@
+---
+/**
+ * The version switch next to the logo: this page in every version of the docs the build knows,
+ * and the list of all versions at the root of the site, which is always current (a snapshot's
+ * own list stops at the versions that existed when it was built).
+ */
+import Disclosure from './Disclosure.astro';
+import { CURRENT, pageOf, ROOT, versionLinks } from '../versions.ts';
+
+const links = versionLinks(pageOf(Astro.url.pathname));
+---
+
+<Disclosure id="version-switch-panel" class="version-switch" popover>
+  <Fragment slot="summary">
+    <span aria-hidden="true">v{CURRENT.id}</span>
+    <span class="sr-only">Documentation version {CURRENT.id}</span>
+  </Fragment>
+  <nav aria-label="Documentation versions">
+    <ul>
+      {
+        links.map((link) => (
+          <li>
+            <a href={link.href} aria-current={link.current ? 'page' : undefined}>
+              <span class="version-label">{link.label}</span>
+              {link.latest ? (
+                <span class="version-note">latest</span>
+              ) : (
+                link.current && <span class="version-note">this version</span>
+              )}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+    <a class="version-all" href={`${ROOT}versions/`}>All versions</a>
+  </nav>
+</Disclosure>
+
+<style>
+  .version-switch {
+    position: relative;
+    flex: none;
+  }
+  .version-switch :global(> .disclosure-button) {
+    gap: 0.15rem;
+    padding: 0.15rem 0.35rem 0.15rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: var(--muted-foreground);
+    transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+  }
+  .version-switch :global(> .disclosure-button:hover),
+  .version-switch[data-open] :global(> .disclosure-button) {
+    border-color: var(--border-strong);
+    color: var(--text-strong);
+  }
+  .version-switch :global(> .disclosure-button .disclosure-caret) {
+    width: 0.8rem;
+    height: 0.8rem;
+  }
+  .version-switch :global(.disclosure-panel) {
+    position: absolute;
+    left: 0;
+    top: calc(100% + 0.5rem);
+    z-index: 30;
+    min-width: 11rem;
+    padding: 0.4rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--background);
+    box-shadow: var(--sl-shadow-lg);
+  }
+  ul {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  li {
+    margin: 0;
+  }
+  a {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.45rem 0.75rem;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    text-decoration: none;
+    color: var(--text-strong);
+  }
+  a:hover {
+    background: color-mix(in srgb, var(--marigold) 12%, transparent);
+  }
+  .version-label {
+    font-family: var(--font-code);
+  }
+  .version-note {
+    font-size: 0.78rem;
+    color: var(--muted-foreground);
+  }
+  a[aria-current='page']::before {
+    content: '';
+    position: absolute;
+    left: 0.25rem;
+    top: 0.55rem;
+    bottom: 0.55rem;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--marigold);
+  }
+  .version-all {
+    margin-top: 0.3rem;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--rule);
+    border-radius: 0 0 8px 8px;
+    color: var(--muted-foreground);
+  }
+</style>

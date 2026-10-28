@@ -70,6 +70,7 @@ export default defineConfig({
       ],
       components: {
         Head: './src/overrides/Head.astro',
+        Banner: './src/overrides/Banner.astro',
         SiteTitle: './src/overrides/SiteTitle.astro',
         Search: './src/components/Search.astro',
         ThemeSelect: './src/overrides/ThemeSelect.astro',

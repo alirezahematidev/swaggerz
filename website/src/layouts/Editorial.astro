@@ -16,7 +16,10 @@ import Search from '../components/Search.astro';
 import SocialMeta from '../components/SocialMeta.astro';
 import build from '../generated/build.json';
 import ThemeSelect from '../overrides/ThemeSelect.astro';
+import VersionNotice from '../components/VersionNotice.astro';
+import VersionSwitch from '../components/VersionSwitch.astro';
 import { REPOSITORY } from '../site.ts';
+import { SNAPSHOT } from '../versions.ts';
 
 interface Props {
   title: string;
@@ -44,6 +47,7 @@ const nav = [
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
+    {SNAPSHOT && <meta name="robots" content="noindex" />}
     <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
     <link rel="preload" href={sans} as="font" type="font/woff2" crossorigin />
     <link rel="preload" href={serif} as="font" type="font/woff2" crossorigin />
@@ -65,10 +69,13 @@ const nav = [
   <body class:list={['editorial', { 'editorial-wide': wide }]}>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <a class="site-brand" href={base} aria-label="swaggerz home" aria-current={current === 'home' ? 'page' : undefined}>
-        <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
-        <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
-      </a>
+      <div class="site-identity">
+        <a class="site-brand" href={base} aria-label="swaggerz home" aria-current={current === 'home' ? 'page' : undefined}>
+          <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
+          <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
+        </a>
+        <VersionSwitch />
+      </div>
       <nav class="site-nav" aria-label="Main">
         {
           nav.map((item) => (
@@ -110,6 +117,7 @@ const nav = [
         </Disclosure>
       </div>
     </header>
+    <VersionNotice />
     <main id="main">
       <slot />
     </main>

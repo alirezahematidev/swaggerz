@@ -83,6 +83,14 @@
   padding-inline: 1.25rem;
 }
 
+/* The logo and the version switch. */
+.site-identity {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 0.6rem;
+}
+
 .site-brand {
   display: inline-flex;
   align-items: center;

@@ -2,13 +2,30 @@
  * Checks every internal link and anchor of the built site (dist/): each `href` and `src` that
  * stays on the site must reach a page or file, and a `#fragment` an element with that id. Run
  * after `astro build`; external links are not fetched.
+ *
+ * Versions (scripts/versions.ts): the root of the site (`SITE_ROOT`, or `SITE_BASE`) holds the
+ * latest docs and `v<major>.<minor>/` below it the snapshot of each release. Links into a version
+ * that is not in the checked directory (a build checked on its own) are skipped, and so are links
+ * from a snapshot to another version: a snapshot is never rebuilt, so its link to the same page of
+ * the latest docs is best effort, and that page may be gone. `SITE_DIST` checks another directory,
+ * such as the assembled site with every version.
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DIST = fileURLToPath(new URL('../dist/', import.meta.url));
+const DIST =
+  process.env.SITE_DIST === undefined
+    ? fileURLToPath(new URL('../dist/', import.meta.url))
+    : path.resolve(process.env.SITE_DIST);
 const BASE = (process.env.SITE_BASE ?? '/').replace(/\/?$/, '/');
+const ROOT = (process.env.SITE_ROOT ?? BASE).replace(/\/?$/, '/');
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const VERSION_TREE = new RegExp(`^${escapeRegExp(ROOT)}v\\d+\\.\\d+/`);
+
+/** The version a URL path belongs to: the root of the site or a release's snapshot. */
+const treeOf = (pathname: string): string => VERSION_TREE.exec(pathname)?.[0] ?? ROOT;
 
 async function htmlFiles(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true, recursive: true });
@@ -52,6 +69,7 @@ export async function checkLinks(): Promise<string[]> {
       new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => decode(m[1] ?? ''))),
     );
   }
+  const trees = new Set([...pages.keys()].map(treeOf));
   const problems: string[] = [];
   for (const [page, html] of pages) {
     // Skip what is shown as code: links inside code samples are text.
@@ -67,7 +85,9 @@ export async function checkLinks(): Promise<string[]> {
       const url = new URL(raw, `https://site.invalid${page}`);
       if (url.origin !== 'https://site.invalid') continue;
       const pathname = decodeURIComponent(url.pathname);
-      const target = pathname.endsWith('/') ? pathname : pathname;
+      const tree = treeOf(pathname);
+      if (tree !== treeOf(page) && (!trees.has(tree) || treeOf(page) !== ROOT)) continue;
+      const target = pathname;
       const targetIds =
         ids.get(target) ?? (pathname.endsWith('/') ? undefined : ids.get(`${pathname}/`));
       if (targetIds === undefined) {

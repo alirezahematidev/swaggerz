@@ -1,19 +1,28 @@
 ---
-/** The brand lockup (mark and logotype), in ink on paper or paper on night. */
+/** The brand lockup (mark and logotype), in ink on paper or paper on night, and the version switch. */
 import { Image } from 'astro:assets';
 import lockup from '../../../brand/logotype-lockup.png';
 import lockupDark from '../../../brand/logotype-lockup-dark.png';
+import VersionSwitch from '../components/VersionSwitch.astro';
 
 const { siteTitleHref } = Astro.locals.starlightRoute;
 ---
 
-<a href={siteTitleHref} class="site-title">
-  <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
-  <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
-  <span class="sr-only">swaggerz</span>
-</a>
+<div class="site-identity">
+  <a href={siteTitleHref} class="site-title">
+    <Image src={lockup} alt="" class="lockup light-only" height={26} densities={[1, 2]} loading="eager" />
+    <Image src={lockupDark} alt="" class="lockup dark-only" height={26} densities={[1, 2]} loading="eager" />
+    <span class="sr-only">swaggerz</span>
+  </a>
+  <VersionSwitch />
+</div>
 
 <style>
+  .site-identity {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
   .site-title {
     display: inline-flex;
     align-items: center;

@@ -1,13 +1,21 @@
 name: Website
 
 # Pull requests build and test the site. A release tag (the same `v*` tags release.yml publishes)
-# also deploys it, so the site documents the released version. Run it by hand on a tag to deploy
-# again (for example after setting the custom domain).
+# also deploys it: the release's docs at the root of the site, and a snapshot of them at
+# /v<major>.<minor>/ that stays when newer releases come (website/scripts/versions.ts). Snapshots
+# live on the `website-archive` branch, which only this workflow writes. Run it by hand on the
+# latest tag to deploy again (for example after setting the custom domain), with an older tag as
+# `snapshot` to add that release's docs as a version.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      snapshot:
+        description: An older release tag (v0.2.1) to add as a version of the docs; leave empty to deploy only. Run on the latest tag.
+        required: false
+        default: ''
 
 permissions: {}
 
@@ -27,9 +35,13 @@ jobs:
       options: --user 1001 --ipc=host
     timeout-minutes: 30
     permissions:
+      # Reads the repository, and the manifest of the archived versions on `website-archive`.
       contents: read
       # configure-pages reads the Pages address (github.io or the custom domain).
       pages: read
+    outputs:
+      base: ${{ steps.pages.outputs.base_path }}
+      release: ${{ steps.versions.outputs.release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -70,12 +82,37 @@ jobs:
           path: website/dist
           retention-days: 14
 
-      # GitHub Pages, from release tags only. The tested build above is served from `/`; the
-      # published one is built again for the Pages address: https://<owner>.github.io/<repo>/,
-      # or the custom domain once one is set in the repository's Pages settings (no change here).
+      # Release tags only: the tested build above is served from `/`; the published ones are built
+      # again for the Pages address, https://<owner>.github.io/<repo>/ or the custom domain once
+      # one is set in the repository's Pages settings (no change here).
       - id: pages
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      # The versions the site has (none before the first archived release), and the release the
+      # snapshot input adds. A tag older than the newest archived release is refused: it would put
+      # old docs at the root.
+      - id: versions
+        if: steps.pages.outcome == 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+          BASE: ${{ steps.pages.outputs.base_path }}
+        run: |
+          release="$(node -p 'require("./package.json").version')"
+          minor="$(node website/scripts/versions.ts minor "$release")"
+          node website/scripts/versions.ts fetch "$RUNNER_TEMP/archived.json"
+          node website/scripts/versions.ts check "$RUNNER_TEMP/archived.json" "$release"
+          if [ -n "$SNAPSHOT" ]; then
+            node website/scripts/versions.ts with "$RUNNER_TEMP/archived.json" "$SNAPSHOT" > "$RUNNER_TEMP/versions.json"
+          else
+            cp "$RUNNER_TEMP/archived.json" "$RUNNER_TEMP/versions.json"
+          fi
+          echo "release=$release" >> "$GITHUB_OUTPUT"
+          {
+            echo "SITE_VERSIONS=$RUNNER_TEMP/versions.json"
+            echo "SITE_ROOT=$BASE/"
+            echo "SNAPSHOT_BASE=$BASE/v$minor/"
+          } >> "$GITHUB_ENV"
       - if: steps.pages.outcome == 'success'
         run: pnpm --filter swaggerz-website run build:site
         env:
@@ -86,15 +123,157 @@ jobs:
         env:
           SITE_BASE: ${{ steps.pages.outputs.base_path }}/
       - if: steps.pages.outcome == 'success'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: website-root
           path: website/dist
+          retention-days: 1
+      # The same release as a snapshot below the root, to be archived.
+      - if: steps.pages.outcome == 'success'
+        run: SITE_BASE="$SNAPSHOT_BASE" pnpm --filter swaggerz-website run build:site
+        env:
+          SITE_URL: ${{ steps.pages.outputs.origin }}
+      - if: steps.pages.outcome == 'success'
+        run: SITE_BASE="$SNAPSHOT_BASE" pnpm --filter swaggerz-website run links
+      - if: steps.pages.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website-snapshot
+          path: website/dist
+          retention-days: 1
+
+  # By hand only: the snapshot of an older release, built from its own tag with its own code.
+  snapshot:
+    name: Docs of an older release
+    if: github.event_name == 'workflow_dispatch' && inputs.snapshot != '' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # the older release's tag
+      pages: read # configure-pages reads the Pages address
+    steps:
+      - name: Check the tag
+        env:
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: |
+          if ! printf '%s' "$SNAPSHOT" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::snapshot must be a release tag such as v0.2.1, not \"$SNAPSHOT\"."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.snapshot }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm --filter swaggerz-website run data
+      - id: pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      # Releases from before the versioned docs only know SITE_BASE: their pages have no version
+      # switch, but the other versions link to them.
+      - name: Build the site below the root
+        env:
+          SITE_URL: ${{ steps.pages.outputs.origin }}
+          BASE: ${{ steps.pages.outputs.base_path }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+        run: |
+          minor="$(printf '%s' "${SNAPSHOT#v}" | cut -d. -f1-2)"
+          SITE_BASE="$BASE/v$minor/" SITE_ROOT="$BASE/" pnpm --filter swaggerz-website run build:site
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website-older-snapshot
+          path: website/dist
+          retention-days: 1
+
+  # Puts the release's snapshot (and an older one, by hand) on `website-archive`, then assembles
+  # the site: the root build and every archived snapshot. Runs no dependency code: only Node.js
+  # with this repository's dependency-free scripts, since it can write to the repository.
+  archive:
+    name: Archive the release's docs
+    needs: [website, snapshot]
+    if: >-
+      always() && startsWith(github.ref, 'refs/tags/v') && needs.website.result == 'success' &&
+      (needs.snapshot.result == 'success' || needs.snapshot.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # pushes the website-archive branch
+    # One archive update at a time, never cancelled halfway.
+    concurrency:
+      group: website-archive
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: website/scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: website-root
+          path: ${{ runner.temp }}/root
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: website-snapshot
+          path: ${{ runner.temp }}/snapshot
+      - if: needs.snapshot.result == 'success'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: website-older-snapshot
+          path: ${{ runner.temp }}/older-snapshot
+      - name: Update the archive and assemble the site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE: ${{ needs.website.outputs.release }}
+          SNAPSHOT: ${{ inputs.snapshot }}
+          BASE: ${{ needs.website.outputs.base }}
+        run: |
+          set -eu
+          remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          archive="$RUNNER_TEMP/archive"
+          git init -q "$archive"
+          # Only a branch that does not exist yet (exit code 2) starts an empty archive: any other
+          # failure stops here, before a push could replace the snapshots with nothing.
+          if git ls-remote --exit-code --heads "$remote" website-archive > /dev/null; then
+            git -C "$archive" fetch -q --depth=1 "$remote" website-archive
+            git -C "$archive" checkout -q FETCH_HEAD
+          else
+            status=$?
+            if [ "$status" -ne 2 ]; then
+              echo "::error::Cannot read the website-archive branch (git ls-remote exited with $status)."
+              exit 1
+            fi
+          fi
+          node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/snapshot" "$RELEASE"
+          if [ -n "$SNAPSHOT" ]; then
+            node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/older-snapshot" "$SNAPSHOT"
+          fi
+          node website/scripts/versions.ts assemble "$archive" "$RUNNER_TEMP/root" "$RUNNER_TEMP/site"
+          SITE_DIST="$RUNNER_TEMP/site" SITE_BASE="$BASE/" node website/scripts/check-links.ts
+          # One commit with the current snapshots, so the branch does not grow with every release.
+          git -C "$archive" checkout -q --orphan next
+          git -C "$archive" add -A
+          git -C "$archive" -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -q -m "Docs snapshots, after $RELEASE"
+          git -C "$archive" push -q --force "$remote" HEAD:refs/heads/website-archive
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: ${{ runner.temp }}/site
 
   deploy:
     name: Deploy to GitHub Pages
-    needs: website
+    needs: archive
     # The github-pages environment must allow `v*` tags (Settings → Environments).
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: always() && needs.archive.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

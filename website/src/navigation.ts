@@ -259,6 +259,7 @@ export const CHAPTERS: readonly Chapter[] = [
       { id: 'examples', label: 'Examples', external: true },
       { id: 'playground', label: 'Playground', external: true },
       { id: 'changelog', label: 'Changelog', external: true },
+      { id: 'versions', label: 'Versions', external: true },
       {
         id: 'docs/project/roadmap',
         source: 'docs/roadmap.md',

@@ -18,6 +18,12 @@
   border-bottom-color: var(--rule) !important;
 }
 
+/* Starlight clips the title so a long one cannot cover the buttons; this one is a fixed-size logo
+   and the version switch, whose menu must open below the header. */
+.title-wrapper {
+  overflow: visible !important;
+}
+
 /* The phone menu button: an outlined circle like the search button, not a filled one. */
 :root {
   --sl-menu-button-size: 2.4rem;

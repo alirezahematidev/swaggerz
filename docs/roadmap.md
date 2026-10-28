@@ -41,7 +41,7 @@ Implemented after the first version, with tests and documentation:
 | `swaggerz lint`                               | [linting](lint.md), [decision 21](decisions.md#21-the-linter-reports-what-changes-the-generated-client-nothing-else)                                                                      |
 | Mock Service Worker handlers and fixtures     | [mocks](mocks.md), [decision 22](decisions.md#22-mocks-are-msw-handlers-over-seeded-fixtures-with-a-dependency-free-fake-data-module)                                                     |
 | Vite plugin, Astro and Next.js integrations   | [framework integrations](integrations.md), [decision 23](decisions.md#23-framework-integrations-run-the-clis-pipeline-in-the-dev-servers-process)                                         |
-| Docs website                                  | [website/](../website)                                                                                                                                                                    |
+| Docs website, versioned per minor release     | [website/](../website)                                                                                                                                                                    |
 | `sz` alias of the CLI                         | [README](../README.md#cli)                                                                                                                                                                |
 
 ## Candidates for later versions
