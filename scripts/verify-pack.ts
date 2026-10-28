@@ -57,6 +57,14 @@ try {
   );
   check(files.includes('dist/cli/bin.js'), 'tarball contains the CLI');
   check(
+    ['vite', 'astro', 'next'].every(
+      (name) =>
+        files.includes(`dist/integrations/${name}.js`) &&
+        files.includes(`dist/integrations/${name}.d.ts`),
+    ),
+    'tarball contains the framework integrations and their types',
+  );
+  check(
     files.some((f) => f.startsWith('assets/runtime/')) &&
       files.includes('assets/mocks/support.js') &&
       files.includes('assets/mocks/fake.js') &&
@@ -188,6 +196,25 @@ try {
       api.trim().split(',').includes(name),
     ),
     'programmatic API is exported',
+  );
+  // The integrations import their framework's types only: they load without it installed.
+  const integrations = run(
+    'node',
+    [
+      '--input-type=module',
+      '-e',
+      [
+        `const { swaggerz } = await import('${pkg.name}/vite');`,
+        `const { default: astro } = await import('${pkg.name}/astro');`,
+        `const { withSwaggerz } = await import('${pkg.name}/next');`,
+        "console.log([swaggerz().name, astro().name, typeof withSwaggerz({})].join(','));",
+      ].join(' '),
+    ],
+    project,
+  );
+  check(
+    integrations.trim() === 'swaggerz,swaggerz,function',
+    'swaggerz/vite, swaggerz/astro and swaggerz/next load without their frameworks',
   );
   console.log('\nPacked package verified.');
 } finally {

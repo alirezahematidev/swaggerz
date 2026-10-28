@@ -23,4 +23,6 @@ export const DEPENDENCIES: Record<string, string> = {
   valibot: '1.0.0',
   arktype: '2.0.0',
   msw: '2.11.0',
+  // Not a dependency of generated code: the oldest Vite that `swaggerz/vite` runs in.
+  vite: '6.0.0',
 };

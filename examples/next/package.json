@@ -1,0 +1,24 @@
+{
+  "name": "swaggerz-example-next",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "check": "next build",
+    "dashboard": "swaggerz dashboard"
+  },
+  "dependencies": {
+    "next": "^16.4.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "msw": "^3.0.3",
+    "swaggerz": "workspace:*",
+    "typescript": "~6.0.3"
+  }
+}

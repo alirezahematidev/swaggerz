@@ -11,6 +11,11 @@ coverage/
 tests/.output/
 examples/*/src/generated/
 examples/*/dist/
+examples/*/.astro/
+examples/*/.next/
+examples/*/next-env.d.ts
+# Written by `next dev` (Next.js 16.4+).
+examples/*/AGENTS.md
 .compat
 .runtimes
 .corpus

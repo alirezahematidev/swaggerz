@@ -7,6 +7,8 @@ import type { ProjectService, ReloadOutcome } from './project.ts';
 import type { ReloadTrigger } from './types.ts';
 
 export interface ProjectWatcherEvents {
+  /** A reload starts: `changed` lists the files and URLs that changed (empty on request). */
+  readonly reloading?: (trigger: ReloadTrigger, changed: readonly string[]) => void;
   /** The project was reloaded (after a change, or on request). */
   readonly reloaded?: (outcome: ReloadOutcome, trigger: ReloadTrigger) => void;
   /** Only the output directory changed (a generation): the generation status is stale. */
@@ -200,6 +202,7 @@ export class ProjectWatcher {
 
   #reload(trigger: ReloadTrigger, changed: readonly string[]): Promise<ReloadOutcome> {
     const next = this.#queue.then(async () => {
+      this.#events.reloading?.(trigger, changed);
       const outcome = await this.#service.reload(trigger, changed);
       this.#watch();
       this.#events.reloaded?.(outcome, trigger);

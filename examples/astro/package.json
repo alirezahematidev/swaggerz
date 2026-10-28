@@ -1,0 +1,21 @@
+{
+  "name": "swaggerz-example-astro",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro build && astro check",
+    "dashboard": "swaggerz dashboard"
+  },
+  "dependencies": {
+    "astro": "^7.4.2"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.12",
+    "msw": "^3.0.3",
+    "swaggerz": "workspace:*",
+    "typescript": "~6.0.3"
+  }
+}

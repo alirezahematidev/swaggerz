@@ -80,6 +80,13 @@ export const CHAPTERS: readonly Chapter[] = [
         description: 'TanStack Query hooks for React, Vue, Svelte and Solid, and SWR hooks.',
       },
       {
+        id: 'docs/guides/integrations',
+        label: 'Vite, Astro and Next.js',
+        source: 'docs/integrations.md',
+        description:
+          'Generate the client when the dev server or the build starts: swaggerz/vite, swaggerz/astro and swaggerz/next.',
+      },
+      {
         id: 'docs/guides/validation',
         source: 'docs/validation.md',
         twin: 'zod',

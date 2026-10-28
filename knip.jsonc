@@ -14,6 +14,7 @@
         // package.json points `exports` and `bin` at dist/, which knip cannot map back to src/.
         "src/index.ts",
         "src/cli/bin.ts",
+        "src/integrations/{vite,astro,next}.ts",
         // Copied into every generated client rather than imported.
         "src/templates/runtime/*.ts",
         "src/templates/mocks/*.ts",

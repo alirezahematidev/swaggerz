@@ -1,6 +1,7 @@
 /**
- * Runs an example against this checkout: builds the package, generates the example's client and
- * runs one of its scripts (by default `dev`, otherwise `start`).
+ * Runs an example against this checkout: builds the package, generates the example's client (with
+ * its `generate` script, when it has one) and runs one of its scripts (by default `dev`, otherwise
+ * `start`).
  *
  * Usage: node scripts/example.ts <example|all> [script]
  *   pnpm example:react-query          # build, generate, start the Vite dev server
@@ -82,7 +83,10 @@ for (const name of target === 'all' ? available : [target]) {
     );
     process.exit(2);
   }
-  for (const step of script === 'generate' ? ['generate'] : ['generate', script]) {
+  // Examples on the Vite plugin, Astro or Next.js integration generate when their dev server or
+  // build starts and have no `generate` script.
+  const steps = 'generate' in scripts && script !== 'generate' ? ['generate', script] : [script];
+  for (const step of steps) {
     const code = await run('pnpm', ['run', step], directory);
     if (code !== 0) process.exit(code);
   }

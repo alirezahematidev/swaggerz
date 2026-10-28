@@ -1,0 +1,29 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Page from '../../layouts/Page.astro';
+import { getTask, isGetTaskApiError, listTasks } from '../../api.ts';
+
+// One page per task, listed through the generated client at build time.
+export const getStaticPaths = (async () => {
+  const { items } = await listTasks({ limit: 50 });
+  return items.map((task) => ({ params: { id: task.id } }));
+}) satisfies GetStaticPaths;
+
+const { id } = Astro.params;
+let task;
+try {
+  task = await getTask({ taskId: id });
+} catch (error) {
+  // Typed by status: a 404 from getTask has a Problem body.
+  if (isGetTaskApiError(error) && error.status === 404) return Astro.redirect('/');
+  throw error;
+}
+---
+
+<Page title={task.title}>
+  <p><a href="/">All tasks</a></p>
+  <h1>{task.title}</h1>
+  <p class="status">{task.status}</p>
+  {task.notes !== null && task.notes !== undefined && <p>{task.notes}</p>}
+  <p>Created {new Date(task.createdAt).toLocaleDateString('en', { dateStyle: 'long' })}</p>
+</Page>

@@ -20,9 +20,10 @@ const exact = (alias: string): string => {
 
 const majorMinor = (version: string): string => version.split('.').slice(0, 2).join('.');
 
-async function installed(name: string): Promise<string> {
+/** The installed version of a package, in the repository root or in a workspace package. */
+async function installed(name: string, workspace = '.'): Promise<string> {
   const pkg = JSON.parse(
-    await readFile(path.join(ROOT, 'node_modules', name, 'package.json'), 'utf8'),
+    await readFile(path.join(ROOT, workspace, 'node_modules', name, 'package.json'), 'utf8'),
   ) as { version: string };
   return pkg.version;
 }
@@ -58,6 +59,23 @@ export async function compatibility(): Promise<void> {
     { row: 'ArkType', oldest: [exact('arktype')], newest: [] },
     { row: 'MSW', oldest: [exact('msw')], newest: [] },
     { row: 'Node.js (generator)', oldest: [pkg.engines.node.replace(/^>=/, '')], newest: [] },
+    // The integrations: the oldest Vite runs in `pnpm compat`; the newest Vite and Astro are the
+    // repository's (integration and unit tests), Next.js the example's.
+    {
+      row: 'Vite (swaggerz/vite)',
+      oldest: [exact('vite')],
+      newest: [majorMinor(await installed('vite'))],
+    },
+    {
+      row: 'Astro (swaggerz/astro)',
+      oldest: [majorMinor(await installed('astro'))],
+      newest: [majorMinor(await installed('astro'))],
+    },
+    {
+      row: 'Next.js (swaggerz/next)',
+      oldest: [majorMinor(await installed('next', 'examples/next'))],
+      newest: [majorMinor(await installed('next', 'examples/next'))],
+    },
   ];
   // Newest versions: what the repository installs for its integration tests.
   const newest: Record<string, string> = {

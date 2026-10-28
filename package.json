@@ -36,6 +36,18 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./vite": {
+      "types": "./dist/integrations/vite.d.ts",
+      "default": "./dist/integrations/vite.js"
+    },
+    "./astro": {
+      "types": "./dist/integrations/astro.d.ts",
+      "default": "./dist/integrations/astro.js"
+    },
+    "./next": {
+      "types": "./dist/integrations/next.d.ts",
+      "default": "./dist/integrations/next.js"
+    },
     "./config.schema.json": "./config.schema.json",
     "./package.json": "./package.json"
   },
@@ -82,6 +94,8 @@
     "example:svelte-query": "node scripts/example.ts svelte-query",
     "example:solid-query": "node scripts/example.ts solid-query",
     "example:swr": "node scripts/example.ts swr",
+    "example:astro": "node scripts/example.ts astro",
+    "example:next": "node scripts/example.ts next",
     "examples:check": "node scripts/example.ts all check",
     "examples:browsers": "node scripts/examples-browsers.ts",
     "website:dev": "pnpm --filter swaggerz-website run dev",
@@ -114,6 +128,7 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "arktype": "^2.2.9",
+    "astro": "^7.4.2",
     "axios": "^1.12.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

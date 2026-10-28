@@ -18,22 +18,27 @@ The runtimes come from `PATH` or are installed into `.runtimes/` on demand; the 
 
 `pnpm compat` installs the oldest supported versions side by side and type-checks generated clients (TypeScript output, JavaScript declarations, the hooks of every data-fetching library, the schemas of every validation library, the mock handlers) with TypeScript 5.0, 6 and 7; the newest versions are the repository's own dependencies, used by the integration tests. Both use the strictest settings (`strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, `noUnused*`, `verbatimModuleSyntax`, `isolatedModules`):
 
-| Dependency               | Oldest verified            | Newest verified                 |
-| ------------------------ | -------------------------- | ------------------------------- |
-| TypeScript               | 5.0.4 (5.4.5 with ArkType) | 6.0.3 and 7.0 (native compiler) |
-| `@tanstack/react-query`  | 5.0.0                      | 5.104                           |
-| `@tanstack/vue-query`    | 5.0.0 (Vue 3.3.4)          | 5.104 (Vue 3.5)                 |
-| `@tanstack/svelte-query` | 6.0.0 (Svelte 5.25)        | 6.3 (Svelte 5.57)               |
-| `@tanstack/solid-query`  | 5.0.0 (Solid 1.8)          | 5.104 (Solid 1.9)               |
-| SWR                      | 2.2.0                      | 2.5                             |
-| axios                    | 1.0.0                      | 1.20                            |
-| Zod                      | 4.0.15                     | 4.6                             |
-| Valibot                  | 1.0.0                      | 1.5                             |
-| ArkType                  | 2.0.0                      | 2.2.9                           |
-| MSW                      | 2.11.0                     | 3.0                             |
-| Node.js (generator)      | 22.18.0                    | 24                              |
+| Dependency                | Oldest verified            | Newest verified                 |
+| ------------------------- | -------------------------- | ------------------------------- |
+| TypeScript                | 5.0.4 (5.4.5 with ArkType) | 6.0.3 and 7.0 (native compiler) |
+| `@tanstack/react-query`   | 5.0.0                      | 5.104                           |
+| `@tanstack/vue-query`     | 5.0.0 (Vue 3.3.4)          | 5.104 (Vue 3.5)                 |
+| `@tanstack/svelte-query`  | 6.0.0 (Svelte 5.25)        | 6.3 (Svelte 5.57)               |
+| `@tanstack/solid-query`   | 5.0.0 (Solid 1.8)          | 5.104 (Solid 1.9)               |
+| SWR                       | 2.2.0                      | 2.5                             |
+| axios                     | 1.0.0                      | 1.20                            |
+| Zod                       | 4.0.15                     | 4.6                             |
+| Valibot                   | 1.0.0                      | 1.5                             |
+| ArkType                   | 2.0.0                      | 2.2.9                           |
+| MSW                       | 2.11.0                     | 3.0                             |
+| Node.js (generator)       | 22.18.0                    | 24                              |
+| Vite (`swaggerz/vite`)    | 6.0.0                      | 8.3                             |
+| Astro (`swaggerz/astro`)  | 7.4                        | 7.4                             |
+| Next.js (`swaggerz/next`) | 16.4                       | 16.4                            |
 
 The generator's own test suite and the packed-tarball check (`pnpm test:pack`) pass on Node.js 22.18.0 and 24, on macOS and on Linux (verified in a Debian container on arm64, including file watching, `generate --watch` and the dashboard's live reload). The CI matrix also runs the suite on Windows; the code paths that differ there (paths, case-insensitive file names, signals, `.cmd` launchers) were reviewed, and Windows is verified once that CI job has run. `erasableSyntaxOnly`, available from TypeScript 5.8, is enabled for the newer compilers to prove the output contains no enums or namespaces.
+
+The [framework integrations](integrations.md) are verified differently, since they run inside the framework rather than in generated code: `pnpm compat` runs the Vite plugin in Vite 6.0.0 (a dev server that generates before it starts, regenerates on a change and sends a failed generation over hot module replacement, then a build), the integration tests run the same and more (the overlay's location and code frame, `build: 'check'`, `vite build --watch`, Vitest's `server.watch: null`) in the repository's Vite, and CI builds the Astro and Next.js examples, which generate their client through the integrations. The Astro and Next.js hooks themselves (dev, build, sync, the build phase run once per process tree) are unit-tested with the framework's calls simulated. Older Astro and Next.js versions are not verified.
 
 ArkType's own types do not type-check with TypeScript 5.3 or older, so ArkType output is verified from TypeScript 5.4; `swaggerz doctor` requires 5.4 when ArkType is configured. SWR changed the order of its mutation types' generics in 2.2, which is therefore its minimum; Svelte Query 6 is the Svelte 5 (runes) adapter, so Svelte Query 5 (Svelte 3 and 4 stores) is not supported.
 

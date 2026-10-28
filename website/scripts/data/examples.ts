@@ -3,14 +3,17 @@
  * sources and the files swaggerz generates for it with that config. The README is rendered by the
  * content loader (src/loaders/examples.ts).
  */
+import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { loadConfig } from '../../../src/config/load.ts';
 import { compile } from '../../../src/pipeline/compile.ts';
 import { DriftError, ROOT, writeGenerated } from './output.ts';
 
-const SOURCE_EXTENSIONS = /\.(ts|tsx|js|mjs|vue|svelte)$/;
+const SOURCE_EXTENSIONS = /\.(ts|tsx|js|mjs|vue|svelte|astro)$/;
 const CONFIG_FILES = ['swaggerz.config.ts', 'swaggerz.config.mjs', 'swaggerz.config.js'];
+/** The framework's config, where the Vite plugin or the Astro or Next.js integration is added. */
+const FRAMEWORK_CONFIGS = ['vite.config.ts', 'astro.config.ts', 'next.config.ts'];
 
 const languageOf = (file: string): string => {
   const extension = path.extname(file).slice(1);
@@ -23,22 +26,33 @@ const exists = async (file: string): Promise<boolean> =>
     () => false,
   );
 
-async function sources(directory: string, relative: string) {
+interface SourceFile {
+  readonly path: string;
+  readonly language: string;
+  readonly content: string;
+}
+
+async function read(directory: string, relative: string): Promise<SourceFile> {
+  return {
+    path: relative,
+    language: languageOf(relative),
+    content: (await readFile(path.join(directory, relative), 'utf8')).trimEnd(),
+  };
+}
+
+/** The sources under `relative` (pages and components in subdirectories too), not generated code. */
+async function sources(directory: string, relative: string): Promise<SourceFile[]> {
   // The listing says which entries are files, so nothing is checked first and read later.
   const entries = await readdir(path.join(directory, relative), { withFileTypes: true }).catch(
     () => [],
   );
-  const names = entries
-    .filter((entry) => entry.isFile() && SOURCE_EXTENSIONS.test(entry.name))
-    .map((entry) => entry.name)
-    .sort();
-  const files = [];
-  for (const name of names) {
-    files.push({
-      path: path.posix.join(relative, name),
-      language: languageOf(name),
-      content: (await readFile(path.join(directory, relative, name), 'utf8')).trimEnd(),
-    });
+  const files: SourceFile[] = [];
+  for (const entry of entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+    const child = path.posix.join(relative, entry.name);
+    if (entry.isFile() && SOURCE_EXTENSIONS.test(entry.name))
+      files.push(await read(directory, child));
+    else if (entry.isDirectory() && entry.name !== 'generated')
+      files.push(...(await sources(directory, child)));
   }
   return files;
 }
@@ -74,7 +88,15 @@ export async function examples(): Promise<void> {
         language: languageOf(configName),
         content: (await readFile(path.join(directory, configName), 'utf8')).trimEnd(),
       },
-      sources: [...(await sources(directory, 'src')), ...(await sources(directory, 'plugins'))],
+      sources: [
+        ...(await Promise.all(
+          FRAMEWORK_CONFIGS.filter((file) => existsSync(path.join(directory, file))).map((file) =>
+            read(directory, file),
+          ),
+        )),
+        ...(await sources(directory, 'src')),
+        ...(await sources(directory, 'plugins')),
+      ],
       generated: result.files.map((file) => file.path),
       operations: result.project?.operations.length ?? 0,
       models: result.project?.models.length ?? 0,

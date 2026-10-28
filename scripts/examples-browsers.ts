@@ -5,8 +5,9 @@
  * service worker, and no page error may occur.
  *
  * Usage: node scripts/examples-browsers.ts [example…]
- *   Generate the clients first (`pnpm examples:check`). Playwright comes from `.runtimes/`, where
- *   `pnpm test:runtimes` installs it, or is installed there now (network).
+ *   Build swaggerz first (`pnpm examples:check` does); each dev server generates its client with
+ *   the Vite plugin. Playwright comes from `.runtimes/`, where `pnpm test:runtimes` installs it,
+ *   or is installed there now (network).
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -156,11 +157,6 @@ const engines = await playwright();
 const rows: string[] = [];
 let failed = false;
 for (const [index, example] of examples.entries()) {
-  if (!existsSync(path.join(ROOT, 'examples', example, 'src', 'generated', 'api', 'mocks'))) {
-    throw new Error(
-      `examples/${example} has no generated mocks: run \`pnpm examples:check\` first.`,
-    );
-  }
   const server = await devServer(example, 5300 + index);
   try {
     for (const engine of ENGINES) {

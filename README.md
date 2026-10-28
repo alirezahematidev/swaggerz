@@ -24,6 +24,7 @@ Generate fully typed, documented, tree-shakeable API clients from **Swagger 2.0*
 - **OpenAPI Overlays** (1.0–1.2) fix third-party specifications without forking them.
 - **Self-contained output.** The generated client has no runtime dependency on this package.
 - **Safe, deterministic regeneration.** Identical input produces identical output; unchanged files are not rewritten; files you own are never overwritten.
+- **Vite plugin, Astro and Next.js integrations.** The dev server generates the client when it starts and again whenever the specification changes, with errors in Vite's overlay; builds generate it first. No separate generate step.
 - **Local dashboard** to explore operations, models, dependency graphs, static usage in your code and generation diffs.
 - **MCP server for coding agents**: Claude Code, Cursor and others look up the exact generated function, its types and an example call instead of guessing from the spec.
 - **A linter for what matters to the client**: missing operationIds, untyped responses, inline schemas and other things that make the generated code worse.
@@ -88,6 +89,8 @@ npx swaggerz init        # creates swaggerz.config.ts (detects your spec, its ve
 npx swaggerz generate    # writes the client to src/generated/api
 ```
 
+With Vite, Astro or Next.js, let the dev server and the build generate it instead: add `swaggerz()` from `swaggerz/vite` to your Vite plugins, `swaggerz()` from `swaggerz/astro` to your Astro integrations, or wrap your Next.js config with `withSwaggerz()` from `swaggerz/next` ([framework integrations](docs/integrations.md)).
+
 `swaggerz.config.ts`:
 
 ```ts
@@ -135,7 +138,7 @@ try {
 Every guide is a file in [`docs/`](docs), readable here on GitHub. The [docs website](https://swaggerz.dev) renders them with references generated from the source, real generated code next to its specification, measured numbers and an in-browser playground.
 
 - **Start:** [configuration](docs/configuration.md) · [troubleshooting](docs/troubleshooting.md)
-- **Guides:** [fetch and axios](docs/http-client.md) · [data fetching](docs/data-fetching.md) (TanStack Query for React, Vue, Svelte and Solid; SWR) · [validation](docs/validation.md) (Zod, Valibot, ArkType) · [mocks](docs/mocks.md) (MSW handlers and fixtures) · [overlays](docs/overlays.md) · [linting](docs/lint.md) · [MCP server](docs/mcp.md) · [dates](docs/dates.md) · [read and write models](docs/read-write-models.md) · [bodies and uploads](docs/bodies-and-uploads.md) · [webhooks and callbacks](docs/webhooks-and-callbacks.md) · [servers](docs/servers.md) · [plugins](docs/plugins.md) · [dashboard](docs/dashboard.md) · [JavaScript output](docs/javascript-output.md) · [CI and monorepos](docs/ci-and-monorepos.md) · [migrating](docs/migrating.md) from openapi-typescript, orval or openapi-generator
+- **Guides:** [fetch and axios](docs/http-client.md) · [data fetching](docs/data-fetching.md) (TanStack Query for React, Vue, Svelte and Solid; SWR) · [Vite, Astro and Next.js](docs/integrations.md) · [validation](docs/validation.md) (Zod, Valibot, ArkType) · [mocks](docs/mocks.md) (MSW handlers and fixtures) · [overlays](docs/overlays.md) · [linting](docs/lint.md) · [MCP server](docs/mcp.md) · [dates](docs/dates.md) · [read and write models](docs/read-write-models.md) · [bodies and uploads](docs/bodies-and-uploads.md) · [webhooks and callbacks](docs/webhooks-and-callbacks.md) · [servers](docs/servers.md) · [plugins](docs/plugins.md) · [dashboard](docs/dashboard.md) · [JavaScript output](docs/javascript-output.md) · [CI and monorepos](docs/ci-and-monorepos.md) · [migrating](docs/migrating.md) from openapi-typescript, orval or openapi-generator
 - **Concepts:** [architecture](docs/architecture.md) · [determinism and safety](docs/determinism-and-safety.md) · [design decisions](docs/decisions.md) · [benchmarks](docs/benchmarks.md)
 - **Reference:** [generated code](docs/generated-code.md) · [diagnostics](docs/diagnostics.md) · [compatibility](docs/compatibility.md) · [roadmap](docs/roadmap.md)
 

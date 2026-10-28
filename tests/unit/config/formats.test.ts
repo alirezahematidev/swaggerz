@@ -63,6 +63,17 @@ describe('config file formats', () => {
     }),
   );
 
+  it.each(['json', 'yaml'] as const)('keeps the import extension init chose in %s', (format) =>
+    withTempDir(async (dir) => {
+      await write(
+        dir,
+        `swaggerz.config.${format}`,
+        configTemplate({ ...ANSWERS, importExtension: 'none' }, format),
+      );
+      expect((await loadConfig({ cwd: dir })).config.output.importExtension).toBe('none');
+    }),
+  );
+
   it('loads .yml files and data configs from an explicit path', () =>
     withTempDir(async (dir) => {
       await write(dir, 'conf/swaggerz.config.yml', 'spec:\n  version: "2.0"\n  input: s.json\n');

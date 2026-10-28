@@ -1,17 +1,19 @@
 /**
  * Verifies that generated code type-checks with the oldest supported versions of its peer
  * dependencies (TanStack Query for React, Vue, Svelte and Solid, SWR, axios, Zod, Valibot,
- * ArkType, MSW) under the oldest and newest supported TypeScript. The newest versions are covered by
- * the integration tests, which use the repository's own dependencies. Dependencies are installed
- * into `.compat/` (network required).
+ * ArkType, MSW) under the oldest and newest supported TypeScript, and that the Vite plugin runs in
+ * the oldest supported Vite. The newest versions are covered by the integration tests, which use
+ * the repository's own dependencies. Dependencies are installed into `.compat/` (network
+ * required).
  *
  * Usage: node scripts/compat.ts
  */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { generate } from '../src/api.ts';
 import type { UserConfig } from '../src/config/types.ts';
 import {
@@ -32,6 +34,7 @@ import {
 } from '../tests/integration/react-query/config.ts';
 import { MOCKS_CONSUMER } from '../tests/integration/mocks/consumers.ts';
 import { ARKTYPE_CONSUMER, VALIBOT_CONSUMER } from '../tests/integration/validation/consumers.ts';
+import { swaggerz } from '../src/integrations/vite.ts';
 import { DEPENDENCIES } from './compat-versions.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -259,6 +262,113 @@ for (const testCase of CASES) {
     if (!ok) console.error(`\n${testCase.name} with ${compiler.name}:\n${run.stdout}${run.stderr}`);
   }
 }
+/** The parts of Vite's API the check uses (Vite is loaded from `.compat/`, without its types). */
+interface ViteApi {
+  createServer(config: Record<string, unknown>): Promise<{
+    listen(): Promise<unknown>;
+    close(): Promise<void>;
+    httpServer: { address(): unknown } | null;
+    config: { webSocketToken?: string };
+  }>;
+  build(config: Record<string, unknown>): Promise<unknown>;
+}
+
+const PLUGIN_SPEC = (operation: string): string =>
+  `openapi: 3.0.3\ninfo: { title: Pets, version: '1' }\npaths:\n  /pets:\n    get:\n      operationId: ${operation}\n      responses:\n        '204': { description: Done. }\n`;
+
+/** Polls `done` until it holds; fails after `ms`. */
+async function until(done: () => boolean, what: string, ms = 20_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (!done()) {
+    if (Date.now() > end) throw new Error(`Timed out waiting for ${what}`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/**
+ * `swaggerz/vite` in the oldest supported Vite: the dev server generates before it starts,
+ * regenerates on a change, sends a failed generation to the page over HMR and clears it once
+ * fixed; a build generates first.
+ */
+async function vitePlugin(): Promise<void> {
+  const entry = createRequire(path.join(WORK, 'package.json')).resolve('vite');
+  const vite = (await import(pathToFileURL(entry).href)) as ViteApi;
+  const root = path.join(WORK, 'cases', 'vite-plugin');
+  await rm(root, { recursive: true, force: true });
+  await mkdir(path.join(root, 'src'), { recursive: true });
+  const spec = path.join(root, 'openapi.yaml');
+  const index = path.join(root, 'src', 'generated', 'api', 'index.ts');
+  await writeFile(spec, PLUGIN_SPEC('listPets'));
+  await writeFile(
+    path.join(root, 'swaggerz.config.mjs'),
+    "export default { spec: { version: '3.0', input: './openapi.yaml' }, output: { directory: './src/generated/api' } };\n",
+  );
+  await writeFile(
+    path.join(root, 'src', 'main.ts'),
+    "import { listPets } from './generated/api/index.ts';\nexport const load = () => listPets();\n",
+  );
+  const base = { root, configFile: false, logLevel: 'silent', plugins: [swaggerz()] };
+  const server = await vite.createServer({
+    ...base,
+    server: { port: 15_800 + Math.floor(Math.random() * 100) },
+  });
+  try {
+    await server.listen();
+    if (!(await readFile(index, 'utf8')).includes('list-pets'))
+      throw new Error('The dev server started before the client was generated');
+    const address = server.httpServer?.address() as { port: number };
+    // Vite 6.0.0 predates the token, and matches the URL of the connection exactly.
+    const token = server.config.webSocketToken;
+    const socket = new WebSocket(
+      `ws://localhost:${address.port}/${token === undefined ? '' : `?token=${token}`}`,
+      'vite-hmr',
+    );
+    const messages: string[] = [];
+    socket.addEventListener('message', (event) => {
+      messages.push((JSON.parse(String(event.data)) as { type: string }).type);
+    });
+    try {
+      await until(() => messages.includes('connected'), 'the HMR connection');
+      // Written again until the watcher, which has just started, reports it.
+      for (let attempt = 0; !messages.includes('error'); attempt++) {
+        if (attempt === 20) throw new Error('No error over HMR for a broken specification');
+        await writeFile(spec, 'openapi: 3.0.3\ninfo: [broken\n');
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      await writeFile(spec, PLUGIN_SPEC('listAllPets'));
+      await until(() => messages.includes('update'), 'the overlay to clear');
+      if (!(await readFile(index, 'utf8')).includes('list-all-pets'))
+        throw new Error('The client was not regenerated');
+    } finally {
+      socket.close();
+    }
+  } finally {
+    await server.close();
+  }
+  // A build from scratch generates the client the app imports.
+  await rm(path.join(root, 'src', 'generated'), { recursive: true, force: true });
+  await writeFile(spec, PLUGIN_SPEC('listPets'));
+  await vite.build({
+    ...base,
+    build: {
+      lib: { entry: path.join(root, 'src', 'main.ts'), formats: ['es'], fileName: 'main' },
+      outDir: path.join(root, 'dist'),
+    },
+  });
+  if (!existsSync(index)) throw new Error('vite build did not generate the client');
+}
+
+try {
+  await vitePlugin();
+  rows.push(`| vite-plugin | Vite ${DEPENDENCIES['vite']} (runtime) | pass |`);
+} catch (error) {
+  failed = true;
+  rows.push(`| vite-plugin | Vite ${DEPENDENCIES['vite']} (runtime) | FAIL |`);
+  console.error(
+    `\nvite-plugin:\n${error instanceof Error ? (error.stack ?? error.message) : String(error)}`,
+  );
+}
+
 const versions = JSON.parse(
   await readFile(
     path.join(WORK, 'node_modules', '@tanstack', 'react-query', 'package.json'),

@@ -1,0 +1,20 @@
+---
+import Page from '../layouts/Page.astro';
+import { listTasks } from '../api.ts';
+
+// Runs at build time (and on each request during `astro dev`), through the generated client.
+const { items } = await listTasks({ limit: 50 });
+---
+
+<Page title="Tasks">
+  <h1>Tasks</h1>
+  <ul>
+    {
+      items.map((task) => (
+        <li>
+          <a href={`/tasks/${task.id}/`}>{task.title}</a> <span class="status">{task.status}</span>
+        </li>
+      ))
+    }
+  </ul>
+</Page>

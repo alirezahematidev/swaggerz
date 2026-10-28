@@ -28,7 +28,7 @@ Plugins                  src/plugins       generate / transformFile / afterGener
 Validation & writing     src/pipeline, src/output  path checks, manifest diff, atomic writes, cleanup
 ```
 
-`compile()` (`src/pipeline/compile.ts`) runs everything up to the in-memory file list without touching the disk. `runGeneration()` adds planning and writing. Each stage reports problems as diagnostics into one `DiagnosticBag`; an error anywhere prevents writing.
+`compile()` (`src/pipeline/compile.ts`) runs everything up to the in-memory file list without touching the disk. `runGeneration()` adds planning and writing. The framework integrations (`src/integrations`) call `runGeneration()` before a build, and keep a `ProjectService` written to disk after every reload of a `ProjectWatcher` while a dev server runs. Each stage reports problems as diagnostics into one `DiagnosticBag`; an error anywhere prevents writing.
 
 ## Modules
 
@@ -50,8 +50,9 @@ Validation & writing     src/pipeline, src/output  path checks, manifest diff, a
 | `cli`               | Commands, argument parsing, reporter, watch mode                                                        | `pipeline`, `config`              |
 | `dashboard`         | HTTP server and web client over `ProjectService`                                                        | `service`                         |
 | `mcp`               | MCP server over stdio: protocol, tools and resources over `ProjectService`                              | `service`, `codegen`, `lint`      |
+| `integrations`      | `swaggerz/vite`, `swaggerz/astro`, `swaggerz/next`: generation at build start, watching in dev servers  | `pipeline`, `service`             |
 
-There are no runtime import cycles between these modules. The dashboard and its assets are only loaded by the `dashboard` command, the MCP server only by `mcp`.
+There are no runtime import cycles between these modules. The dashboard and its assets are only loaded by the `dashboard` command, the MCP server only by `mcp`. The framework integrations are separate package entries (`swaggerz/vite`, `swaggerz/astro`, `swaggerz/next`) that import their framework's types only, so they load without it.
 
 ## The intermediate representation
 

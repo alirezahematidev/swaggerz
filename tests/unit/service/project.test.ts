@@ -68,6 +68,50 @@ describe('ProjectService generation', () => {
   });
 });
 
+describe('ProjectService writes for the integrations', () => {
+  it('writes without a preview, unless a plugin reported an error before the write', async () => {
+    const directory = await createProject('service-write', {
+      files: {
+        'swaggerz.config.mjs': [
+          `export default {`,
+          `  spec: { version: '3.0', input: ${JSON.stringify(fixture('petstore-3.0.yaml'))} },`,
+          `  output: { directory: './src/generated/api' },`,
+          `  hooks: {`,
+          `    beforeWrite(plan, ctx) {`,
+          `      if (globalThis.serviceWriteBlocked) ctx.report({ code: 'test/blocked', severity: 'error', message: 'Blocked.' });`,
+          `      else ctx.report({ code: 'test/noted', severity: 'warning', message: 'Noted.' });`,
+          `    },`,
+          `  },`,
+          `};`,
+        ].join('\n'),
+      },
+    });
+    Object.assign(globalThis, { serviceWriteBlocked: true });
+    const service = new ProjectService({ cwd: directory, env: {} });
+    await service.reload('start');
+    const blocked = await service.write();
+    expect(blocked.ok).toBe(false);
+    expect(blocked.write).toBeUndefined();
+    expect(blocked.diagnostics.filter((d) => d.code === 'test/blocked')).toHaveLength(1);
+    expect((await service.overview()).generation.status).toBe('never');
+
+    // The error stays with that compilation: writing it again is refused too.
+    expect((await service.write()).ok).toBe(false);
+
+    Object.assign(globalThis, { serviceWriteBlocked: false });
+    await service.reload('manual');
+    const written = await service.write();
+    expect(written.ok).toBe(true);
+    expect(written.write?.created.length).toBeGreaterThan(0);
+    // Each write reports what the plugins reported for its compilation, once.
+    expect(written.diagnostics.map((d) => d.code)).not.toContain('test/blocked');
+    expect(written.diagnostics.filter((d) => d.code === 'test/noted')).toHaveLength(1);
+    const again = await service.write();
+    expect(again.write?.created).toEqual([]);
+    expect(again.diagnostics.filter((d) => d.code === 'test/noted')).toHaveLength(1);
+  });
+});
+
 describe('ProjectService model details', () => {
   it('reuses summaries computed for the lists instead of recomputing every model', async () => {
     const service = await load('service-model-detail');

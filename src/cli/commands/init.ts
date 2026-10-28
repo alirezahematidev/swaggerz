@@ -73,7 +73,16 @@ export interface InitAnswers {
   readonly validation?: ValidationChoice;
   /** Mock Service Worker handlers and fixtures. */
   readonly mocks?: 'msw';
+  /** Imports without an extension, for bundlers that do not map `./client.js` to `client.ts`. */
+  readonly importExtension?: 'none';
 }
+
+/** A framework with an integration that generates during its dev server and builds. */
+export type Integration = 'vite' | 'astro' | 'next';
+
+/** Why `importExtension: 'none'` is set, as a comment in the config file. */
+const IMPORT_EXTENSION_NOTE =
+  'Next.js does not resolve ./client.js to client.ts: imports without an extension.';
 
 export type ConfigFormat = 'ts' | 'js' | 'json' | 'yaml';
 
@@ -102,7 +111,13 @@ export function configTemplate(answers: InitAnswers, format: ConfigFormat = 'ts'
       {
         $schema: SCHEMA_PATH,
         spec: { version: answers.version, input: answers.input },
-        output: { directory: answers.output, language: answers.language },
+        output: {
+          directory: answers.output,
+          language: answers.language,
+          ...(answers.importExtension === undefined
+            ? {}
+            : { importExtension: answers.importExtension }),
+        },
         client: { adapter: answers.adapter },
         ...(Object.keys(chosen).length === 0 ? {} : { features: chosen }),
       },
@@ -147,7 +162,7 @@ spec:
   input: ${JSON.stringify(answers.input)}
 output:
   directory: ${JSON.stringify(answers.output)}
-  language: ${answers.language}
+  language: ${answers.language}${answers.importExtension === undefined ? '' : `\n  # ${IMPORT_EXTENSION_NOTE}\n  importExtension: ${answers.importExtension}`}
 client:
   # fetch (no dependencies) or axios.
   adapter: ${answers.adapter}
@@ -181,7 +196,7 @@ export default defineConfig({
   },
   output: {
     directory: ${quote(answers.output)},
-    language: ${quote(answers.language)},
+    language: ${quote(answers.language)},${answers.importExtension === undefined ? '' : `\n    // ${IMPORT_EXTENSION_NOTE}\n    importExtension: ${quote(answers.importExtension)},`}
   },
   client: {
     // 'fetch' (no dependencies) or 'axios'.
@@ -235,6 +250,26 @@ function detectHooks(installed: ReadonlySet<string>): InitAnswers['hooks'] {
   return installed.has('swr') ? { swr: true } : undefined;
 }
 
+/** The framework integration for the project's dependencies: Next.js, Astro, then Vite. */
+function detectIntegration(installed: ReadonlySet<string>): Integration | undefined {
+  return (['next', 'astro', 'vite'] as const).find((name) => installed.has(name));
+}
+
+/** How to generate the client next, with the framework's integration when there is one. */
+function nextStep(integration: Integration | undefined, output: string): string {
+  const generate = `\`${TOOL_NAME} generate\``;
+  switch (integration) {
+    case 'vite':
+      return `Next: add \`swaggerz()\` from \`${PACKAGE_NAME}/vite\` to the plugins in your Vite config, so \`vite\` and \`vite build\` generate the client in ${output}, or run ${generate}.`;
+    case 'astro':
+      return `Next: add \`swaggerz()\` from \`${PACKAGE_NAME}/astro\` to the integrations in your Astro config, so \`astro dev\` and \`astro build\` generate the client in ${output}, or run ${generate}.`;
+    case 'next':
+      return `Next: wrap your Next.js config with \`withSwaggerz()\` from \`${PACKAGE_NAME}/next\`, so \`next dev\` and \`next build\` generate the client in ${output}, or run ${generate}.`;
+    default:
+      return `Next: run ${generate} to create the client in ${output}.`;
+  }
+}
+
 function choice<T extends string>(
   ctx: CommandContext,
   name: string,
@@ -252,10 +287,10 @@ function choice<T extends string>(
  * Hooks and mocks (from the options, or else detected from package.json), and validation. A
  * project that depends on `msw` gets mocks: they only add files, and change nothing at runtime.
  */
-async function chosenFeatures(
+function chosenFeatures(
   ctx: CommandContext,
-  cwd: string,
-): Promise<Pick<InitAnswers, 'hooks' | 'validation' | 'mocks'>> {
+  installed: ReadonlySet<string>,
+): Pick<InitAnswers, 'hooks' | 'validation' | 'mocks'> {
   let query = choice(ctx, 'query', ['react', 'vue', 'svelte', 'solid'] as const);
   if (flag(ctx, 'react-query')) {
     if (query !== undefined && query !== 'react')
@@ -267,7 +302,6 @@ async function chosenFeatures(
     throw new UsageError('Choose TanStack Query (--query) or SWR (--swr), not both.');
   const validation = choice(ctx, 'validation', ['zod', 'valibot', 'arktype'] as const);
   const detect = !flag(ctx, 'no-detect');
-  const installed = detect ? await dependencies(cwd) : new Set<string>();
   const hooks =
     query !== undefined
       ? { query }
@@ -333,7 +367,8 @@ export const initCommand: Command = {
       },
       'no-detect': {
         type: 'boolean',
-        description: "Do not pick the hooks and mocks from package.json's dependencies.",
+        description:
+          "Do not pick the hooks, mocks and framework settings from package.json's dependencies.",
       },
       format: {
         type: 'string',
@@ -363,6 +398,11 @@ export const initCommand: Command = {
       detectedSpec === undefined || /^https?:/i.test(detectedSpec)
         ? undefined
         : await detectVersion(path.resolve(cwd, detectedSpec));
+    const installed = flag(ctx, 'no-detect') ? new Set<string>() : await dependencies(cwd);
+    const integration = detectIntegration(installed);
+    const language =
+      choice(ctx, 'language', ['typescript', 'javascript'] as const) ??
+      (typescriptProject ? 'typescript' : 'javascript');
     const answers: InitAnswers = {
       input,
       version:
@@ -370,11 +410,13 @@ export const initCommand: Command = {
         detectedVersion ??
         '3.1',
       output: option(ctx, 'output') ?? DEFAULT_OUTPUT_DIRECTORY,
-      language:
-        choice(ctx, 'language', ['typescript', 'javascript'] as const) ??
-        (typescriptProject ? 'typescript' : 'javascript'),
+      language,
       adapter: choice(ctx, 'adapter', ['fetch', 'axios'] as const) ?? 'fetch',
-      ...(await chosenFeatures(ctx, cwd)),
+      ...chosenFeatures(ctx, installed),
+      // TypeScript output imports `./client.js`, which Next.js cannot resolve to `client.ts`.
+      ...(integration === 'next' && language === 'typescript'
+        ? { importExtension: 'none' as const }
+        : {}),
     };
     const format =
       choice(ctx, 'format', ['ts', 'js', 'json', 'yaml'] as const) ??
@@ -399,7 +441,7 @@ export const initCommand: Command = {
     ) {
       reporter.warn(`Could not detect the specification version; check spec.version.`);
     }
-    reporter.log(`Next: run \`${TOOL_NAME} generate\` to create the client in ${answers.output}.`);
+    reporter.log(nextStep(integration, answers.output));
     return EXIT.OK;
   },
 };

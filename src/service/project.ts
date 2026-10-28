@@ -12,7 +12,7 @@ import { generateOperation } from '../codegen/operations.ts';
 import { generateQueryModule, QUERY_LABELS } from '../codegen/query/index.ts';
 import { validatorFor } from '../codegen/validation/index.ts';
 import { loadConfig, type LoadedConfig } from '../config/load.ts';
-import { SwaggerzError } from '../diagnostics/bag.ts';
+import { hasErrors, SwaggerzError } from '../diagnostics/bag.ts';
 import type { Diagnostic } from '../diagnostics/types.ts';
 import { MANIFEST_FILENAME } from '../meta.ts';
 import { describeSchema, inspectData } from '../analysis/describe.ts';
@@ -29,7 +29,7 @@ import {
   readManifest,
   type PlannedWrite,
 } from '../output/writer.ts';
-import { compile, type CompileResult } from '../pipeline/compile.ts';
+import { compile, laterDiagnostics, type CompileResult } from '../pipeline/compile.ts';
 import { checkOutputDirectory } from '../pipeline/generate.ts';
 import { versionLabel } from '../spec/detect.ts';
 import { isRecord } from '../utils/object.ts';
@@ -654,7 +654,7 @@ export class ProjectService {
    * Plans writing the current compilation and identifies the exact plan: the id changes whenever
    * a file to write, the content it replaces or the manifest differs.
    */
-  async #plan(): Promise<{
+  async #plan(force = false): Promise<{
     readonly compiled: CompileResult;
     readonly planned: PlannedWrite;
     readonly id: string;
@@ -663,7 +663,7 @@ export class ProjectService {
     const { config } = this.loaded;
     const planned = await planWrite(compiled.files, config.output.directory, {
       clean: config.output.clean,
-      force: false,
+      force,
     });
     const digest = (text: string | undefined): string | null =>
       text === undefined ? null : hashContent(text);
@@ -766,17 +766,53 @@ export class ProjectService {
     const { compiled, planned, id } = await this.#plan();
     if (id !== previewId || this.#compiled !== compiled)
       return { ok: false, outdated: true, diagnostics: [] };
+    return this.#apply(compiled, planned);
+  }
+
+  /**
+   * Writes the current compilation without a preview, with the safety rules of `generate`: user
+   * files and hand-edited generated files block the write unless `force` is set. For tools that
+   * keep the output in step with the specification (the framework integrations), where nobody
+   * reviews the changes first.
+   */
+  async write(options: { readonly force?: boolean } = {}): Promise<GenerateResponse> {
+    const { config } = this.loaded;
+    const unsafe = await checkOutputDirectory(config);
+    if (!this.compiled.ok || this.#failure !== undefined || unsafe !== undefined) {
+      return this.#ran({
+        ok: false,
+        diagnostics: this.#failure?.diagnostics ?? this.#diagnostics(),
+      });
+    }
+    const { compiled, planned } = await this.#plan(options.force === true);
+    return this.#apply(compiled, planned);
+  }
+
+  /**
+   * Writes a plan: plugins' `beforeWrite` hooks, the atomic write, `afterWrite`. Errors that
+   * plugins report from `beforeWrite` stop the write, as in `runGeneration()`.
+   */
+  async #apply(compiled: CompileResult, planned: PlannedWrite): Promise<GenerateResponse> {
+    const { config } = this.loaded;
     const diagnostics = [...compiled.diagnostics, ...planned.notes, ...planned.conflicts];
     const project = compiled.project;
     if (planned.conflicts.length > 0 || project === undefined)
       return this.#ran({ ok: false, diagnostics });
+    // What plugins reported after compiling, in this write or an earlier one of the same
+    // compilation (repeated reports are kept once): an error stops writing it until a reload.
+    const later = (): Diagnostic[] => laterDiagnostics(compiled);
     const base = { project };
     try {
       await compiled.runner.beforeWrite(planned.plan, base);
     } catch (error) {
       if (!(error instanceof SwaggerzError)) throw error;
-      return this.#ran({ ok: false, diagnostics: [...diagnostics, ...error.diagnostics] });
+      return this.#ran({
+        ok: false,
+        diagnostics: [...diagnostics, ...later(), ...error.diagnostics],
+      });
     }
+    if (hasErrors(later()))
+      return this.#ran({ ok: false, diagnostics: [...diagnostics, ...later()] });
     let write: WriteResult;
     try {
       write = await applyWrite(planned);
@@ -786,6 +822,7 @@ export class ProjectService {
         ok: false,
         diagnostics: [
           ...diagnostics,
+          ...later(),
           {
             code: 'output/write-failed',
             severity: 'error',
@@ -799,9 +836,14 @@ export class ProjectService {
       await compiled.runner.afterWrite(write, base);
     } catch (error) {
       if (!(error instanceof SwaggerzError)) throw error;
-      return this.#ran({ ok: false, write, diagnostics: [...diagnostics, ...error.diagnostics] });
+      return this.#ran({
+        ok: false,
+        write,
+        diagnostics: [...diagnostics, ...later(), ...error.diagnostics],
+      });
     }
-    return this.#ran({ ok: true, write, diagnostics });
+    const after = [...diagnostics, ...later()];
+    return this.#ran({ ok: !hasErrors(after), write, diagnostics: after });
   }
 
   /** Records a generation run (written or not) for the generation status. */

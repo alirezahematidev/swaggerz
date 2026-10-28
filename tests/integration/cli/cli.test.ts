@@ -170,6 +170,37 @@ describe('init', () => {
     expect((await run(['init', '--force', '--query', 'svelte', '--swr'], project)).code).toBe(2);
     expect((await run(['init', '--force', '--validation', 'yup'], project)).code).toBe(2);
   });
+
+  it('points to the framework integration, and sets imports Next.js can resolve', async () => {
+    const project = await createProject('cli-init-frameworks', {
+      files: { 'tsconfig.json': '{}' },
+    });
+    await rm(path.join(project, 'swaggerz.config.mjs'));
+    const init = async (dependencies: Record<string, string>, ...args: string[]) => {
+      await writeFile(path.join(project, 'package.json'), JSON.stringify({ dependencies }));
+      const result = await run(['init', '--force', ...args], project);
+      expect(result.code).toBe(0);
+      return {
+        stdout: result.stdout,
+        config: await readFile(path.join(project, 'swaggerz.config.ts'), 'utf8'),
+      };
+    };
+    const next = await init({ next: '^16.0.0', react: '^19.0.0' });
+    expect(next.config).toContain("importExtension: 'none',");
+    expect(next.stdout).toContain('`withSwaggerz()` from `swaggerz/next`');
+    // JavaScript output imports files that exist: nothing to change.
+    expect((await init({ next: '^16.0.0' }, '--language', 'javascript')).config).not.toContain(
+      'importExtension',
+    );
+    const astro = await init({ astro: '^7.0.0', vite: '^8.0.0' });
+    expect(astro.stdout).toContain('`swaggerz()` from `swaggerz/astro`');
+    const vite = await init({ vite: '^8.0.0' });
+    expect(vite.config).not.toContain('importExtension');
+    expect(vite.stdout).toContain('`swaggerz()` from `swaggerz/vite`');
+    expect((await init({ next: '^16.0.0' }, '--no-detect')).stdout).toContain(
+      'Next: run `swaggerz generate`',
+    );
+  });
 });
 
 describe('commands on a project', () => {

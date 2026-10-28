@@ -10,7 +10,7 @@ When the generated client is committed, fail a pull request that changes the spe
 swaggerz generate --check   # writes nothing; exits 1 and lists the differences when the output is stale
 ```
 
-It reports missing files, generated files that changed or were edited by hand, files that are no longer generated, and a manifest whose file list is out of date. Commit `.swaggerz-manifest.json` with the generated files. The generator version recorded in the manifest is not compared, so upgrading swaggerz only fails the check when the generated code changes. Line endings are ignored, so a checkout with `core.autocrlf` passes.
+It reports missing files, generated files that changed or were edited by hand, files that are no longer generated, and a manifest whose file list is out of date. With the [Vite plugin or the Astro or Next.js integration](integrations.md), `build: 'check'` runs the same check when the app builds. Commit `.swaggerz-manifest.json` with the generated files. The generator version recorded in the manifest is not compared, so upgrading swaggerz only fails the check when the generated code changes. Line endings are ignored, so a checkout with `core.autocrlf` passes.
 
 > [!TIP]
 > Commit `.swaggerz-manifest.json` with the client. Without it, the check cannot tell generated files from yours.
@@ -34,7 +34,7 @@ jobs:
 
 ## Generating in CI
 
-When the client is not committed, run `swaggerz generate` before the build (a `prebuild` script, or a step before `tsc`). Pin the specification: a remote `spec.input` that changes between runs changes the client. Environment variables override the config without editing it, for example to build against a staging specification:
+When the client is not committed, run `swaggerz generate` before the build (a `prebuild` script, or a step before `tsc`); with the [Vite plugin or the Astro or Next.js integration](integrations.md), the build generates it first by itself. Pin the specification: a remote `spec.input` that changes between runs changes the client. Environment variables override the config without editing it, for example to build against a staging specification:
 
 ```sh
 SWAGGERZ_SPEC_INPUT=https://staging.example.com/openapi.json npx swaggerz generate

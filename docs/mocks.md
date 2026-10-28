@@ -281,6 +281,7 @@ The handlers are ordinary MSW handlers: anything that takes MSW handlers (Storyb
 | happy-dom, fetch and axios adapters                  | `setupServer()`, relative and cross-origin   | integration tests                |
 | Chromium, Firefox, WebKit: React, Vue, Svelte, Solid | `setupWorker()`, TanStack Query and SWR apps | `pnpm examples:browsers`         |
 | Node.js, Deno, Bun, browsers, workerd                | `mockFetch()`                                | `pnpm test:runtimes`             |
+| Astro and Next.js, pages rendered at build time      | `mockFetch()` as the client's `fetch`        | the examples, built in CI        |
 | MSW 2.11 and 3                                       | types, and handlers at runtime               | `pnpm compat`, integration tests |
 
 - **MSW 3** renamed the `onUnhandledRequest` option of `listen()` and `start()` to `onUnhandledFrame`; the generated code works with both versions.
