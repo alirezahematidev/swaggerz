@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.2](https://github.com/alirezahematidev/swaggerz/compare/v0.2.1...v0.2.2) (2026-10-28)
+
+### Features
+
+* Vite plugin, Astro and Next.js integrations (swaggerz/vite, swaggerz/astro, swaggerz/next) ([07c0bf5](https://github.com/alirezahematidev/swaggerz/commit/07c0bf5e21ebb00c448d67f28071640c02b2e7ee))
+* **website:** versioned docs, with a snapshot of each minor release at /vX.Y/ ([cd8a4fa](https://github.com/alirezahematidev/swaggerz/commit/cd8a4fad536facb334861ec1c860a062f29c1d69))
+
+### Bug fixes
+
+* vite knip ([89fcde2](https://github.com/alirezahematidev/swaggerz/commit/89fcde217c9ce011955e3ecd5396bc8a233d206e))
+
 ## [0.2.1](https://github.com/alirezahematidev/swaggerz/compare/v0.2.0...v0.2.1) (2026-10-27)
 
 * **deps-dev:** bump the development group across 1 directory with 7 updates ([46183a6](https://github.com/alirezahematidev/swaggerz/commit/46183a6ee1d8b83eaab061bd13f03b6af7ddff0d))
