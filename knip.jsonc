@@ -41,8 +41,12 @@
     },
     // The examples import their client from src/generated, which is gitignored, so knip neither
     // follows those imports nor sees the validation library the generated client imports.
+    // Their Vite configs import `swaggerz/vite` from swaggerz's dist/, which does not exist before
+    // `pnpm build`: knip must not load them (`vite.config: []`). It still parses them as entries
+    // and finds the apps' entries through index.html.
     "examples/*": {
       "entry": ["swaggerz.config.{ts,mjs}"],
+      "vite": { "config": [] },
     },
     "examples/custom-plugin": {
       "entry": ["swaggerz.config.ts", "src/index.ts"],
@@ -65,14 +69,17 @@
     },
     "examples/react-query": {
       "entry": ["swaggerz.config.ts"],
+      "vite": { "config": [] },
       "ignoreDependencies": ["zod"],
     },
     "examples/swr": {
       "entry": ["swaggerz.config.ts"],
+      "vite": { "config": [] },
       "ignoreDependencies": ["arktype"],
     },
     "examples/vue-query": {
       "entry": ["swaggerz.config.ts"],
+      "vite": { "config": [] },
       "ignoreDependencies": ["valibot"],
     },
   },

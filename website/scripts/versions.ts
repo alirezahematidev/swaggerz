@@ -27,6 +27,7 @@
  */
 import { cp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** One version of the docs: a minor release line and its newest release. */
 export interface DocsVersion {
@@ -255,7 +256,8 @@ async function main(args: readonly string[]): Promise<void> {
   );
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run directly (`file:///C:/…` on Windows, so the path is converted rather than prefixed).
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main(process.argv.slice(2)).catch((error: unknown) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
