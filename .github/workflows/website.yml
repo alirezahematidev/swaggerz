@@ -5,7 +5,10 @@ name: Website
 # /v<major>.<minor>/ that stays when newer releases come (website/scripts/versions.ts). Snapshots
 # live on the `website-archive` branch, which only this workflow writes. Run it by hand on the
 # latest tag to deploy again (for example after setting the custom domain), with an older tag as
-# `snapshot` to add that release's docs as a version.
+# `snapshot` to add that release's docs as a version. Run it by hand on `main` to deploy a change
+# to the site alone (a file in website/public/) without a release: the root is built from `main`,
+# the archived snapshots are deployed as they are and the archive is not written, so do it only
+# while the docs on `main` still match the latest release.
 on:
   push:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
@@ -13,7 +16,7 @@ on:
   workflow_dispatch:
     inputs:
       snapshot:
-        description: An older release tag (v0.2.1) to add as a version of the docs; leave empty to deploy only. Run on the latest tag.
+        description: An older release tag (v0.2.1) to add as a version of the docs; leave empty to deploy only. Run on the latest tag (not on main).
         required: false
         default: ''
 
@@ -82,22 +85,29 @@ jobs:
           path: website/dist
           retention-days: 14
 
-      # Release tags only: the tested build above is served from `/`; the published ones are built
-      # again for the Pages address, https://<owner>.github.io/<repo>/ or the custom domain once
-      # one is set in the repository's Pages settings (no change here).
+      # Release tags and manual runs on main only: the tested build above is served from `/`; the
+      # published ones are built again for the Pages address, https://<owner>.github.io/<repo>/ or
+      # the custom domain once one is set in the repository's Pages settings (no change here).
       - id: pages
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: >-
+          startsWith(github.ref, 'refs/tags/v') ||
+          (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       # The versions the site has (none before the first archived release), and the release the
       # snapshot input adds. A tag older than the newest archived release is refused: it would put
-      # old docs at the root.
+      # old docs at the root. A snapshot is built from a tag only, so main refuses the input.
       - id: versions
         if: steps.pages.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SNAPSHOT: ${{ inputs.snapshot }}
           BASE: ${{ steps.pages.outputs.base_path }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
+          if [ -n "$SNAPSHOT" ] && [ "$TAG" != true ]; then
+            echo "::error::The snapshot input needs a run on the latest release tag, not on main."
+            exit 1
+          fi
           release="$(node -p 'require("./package.json").version')"
           minor="$(node website/scripts/versions.ts minor "$release")"
           node website/scripts/versions.ts fetch "$RUNNER_TEMP/archived.json"
@@ -128,14 +138,14 @@ jobs:
           name: website-root
           path: website/dist
           retention-days: 1
-      # The same release as a snapshot below the root, to be archived.
-      - if: steps.pages.outcome == 'success'
+      # The same release as a snapshot below the root, to be archived (release tags only).
+      - if: steps.pages.outcome == 'success' && startsWith(github.ref, 'refs/tags/v')
         run: SITE_BASE="$SNAPSHOT_BASE" pnpm --filter swaggerz-website run build:site
         env:
           SITE_URL: ${{ steps.pages.outputs.origin }}
-      - if: steps.pages.outcome == 'success'
+      - if: steps.pages.outcome == 'success' && startsWith(github.ref, 'refs/tags/v')
         run: SITE_BASE="$SNAPSHOT_BASE" pnpm --filter swaggerz-website run links
-      - if: steps.pages.outcome == 'success'
+      - if: steps.pages.outcome == 'success' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: website-snapshot
@@ -191,13 +201,15 @@ jobs:
           retention-days: 1
 
   # Puts the release's snapshot (and an older one, by hand) on `website-archive`, then assembles
-  # the site: the root build and every archived snapshot. Runs no dependency code: only Node.js
-  # with this repository's dependency-free scripts, since it can write to the repository.
+  # the site: the root build and every archived snapshot. A run on main archives nothing and only
+  # assembles. Runs no dependency code: only Node.js with this repository's dependency-free
+  # scripts, since it can write to the repository.
   archive:
     name: Archive the release's docs
     needs: [website, snapshot]
+    # `release` is set when the website job built the site for deployment (a tag or main).
     if: >-
-      always() && startsWith(github.ref, 'refs/tags/v') && needs.website.result == 'success' &&
+      always() && needs.website.result == 'success' && needs.website.outputs.release != '' &&
       (needs.snapshot.result == 'success' || needs.snapshot.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -220,7 +232,8 @@ jobs:
         with:
           name: website-root
           path: ${{ runner.temp }}/root
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: website-snapshot
           path: ${{ runner.temp }}/snapshot
@@ -235,6 +248,7 @@ jobs:
           RELEASE: ${{ needs.website.outputs.release }}
           SNAPSHOT: ${{ inputs.snapshot }}
           BASE: ${{ needs.website.outputs.base }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           set -eu
           remote="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -252,12 +266,18 @@ jobs:
               exit 1
             fi
           fi
-          node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/snapshot" "$RELEASE"
-          if [ -n "$SNAPSHOT" ]; then
-            node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/older-snapshot" "$SNAPSHOT"
+          if [ "$TAG" = true ]; then
+            node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/snapshot" "$RELEASE"
+            if [ -n "$SNAPSHOT" ]; then
+              node website/scripts/versions.ts archive "$archive" "$RUNNER_TEMP/older-snapshot" "$SNAPSHOT"
+            fi
           fi
           node website/scripts/versions.ts assemble "$archive" "$RUNNER_TEMP/root" "$RUNNER_TEMP/site"
           SITE_DIST="$RUNNER_TEMP/site" SITE_BASE="$BASE/" node website/scripts/check-links.ts
+          # A run on main deploys the archived snapshots as they are and leaves the branch alone.
+          if [ "$TAG" != true ]; then
+            exit 0
+          fi
           # One commit with the current snapshots, so the branch does not grow with every release.
           git -C "$archive" checkout -q --orphan next
           git -C "$archive" add -A
@@ -272,7 +292,7 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: archive
-    # The github-pages environment must allow `v*` tags (Settings → Environments).
+    # The github-pages environment must allow `v*` tags and `main` (Settings → Environments).
     if: always() && needs.archive.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
